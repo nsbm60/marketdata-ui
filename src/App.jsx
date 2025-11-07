@@ -1,6 +1,6 @@
 // marketdata-ui/src/App.jsx
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { startFeed } from "./services/feed";
 
 import StreamView from "./StreamView";
@@ -8,98 +8,142 @@ import RawPanel from "./RawPanel";
 import WatchList from "./WatchList";
 
 export default function App() {
-  const [rows, setRows] = useState([]);
-  const [raw, setRaw] = useState([]);
-  const [tab, setTab] = useState("watch"); // "watch" | "stream"
+  const [rows, setRows] = useState([]);  // newest-first for StreamView
+  const [raw,  setRaw]  = useState([]);  // newest-first for RawPanel
+  const [tab,  setTab]  = useState("watch"); // "watch" | "stream"
 
-  // Top-anchor override (leave or move to global CSS)
+  // Master control for diagnostics feed (affects both StreamView and RawPanel)
+  const [diagActive, setDiagActive] = useState(false);
+
+  const stopRef = useRef(null);
+
+  // **Single, surgical CSS override to kill vertical/horizontal centering on common templates**
   useEffect(() => {
-    const id = "app-top-anchor";
+    const id = "app-top-anchor-fix-strong";
     if (!document.getElementById(id)) {
       const style = document.createElement("style");
       style.id = id;
       style.textContent = `
-        html, body, #root { height: 100%; }
-        #root, .app-root {
+        /* Kill flex/grid centering and template centering on body/#root */
+        html, body, #root, body > #root {
+          height: auto !important;
+          min-height: 0 !important;
           display: block !important;
           align-items: initial !important;
           justify-content: initial !important;
+          place-items: initial !important;
+          place-content: initial !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          text-align: initial !important;
+          max-width: none !important;
         }
-        body { margin: 0; background: #fff; color: #111; }
       `;
       document.head.appendChild(style);
     }
   }, []);
 
-  // Keep existing pipeline alive for Stream tab
+  // Start/stop diagnostics feed only when on the tab AND diagActive is true
   useEffect(() => {
-    const stop = startFeed(
-      (row) => setRows((prev) => [row, ...prev].slice(0, 200)),
-      (rawLine) => setRaw((prev) => [rawLine, ...prev].slice(0, 50))
-    );
-    return stop;
-  }, []);
+    const shouldRun = tab === "stream" && diagActive;
+
+    if (shouldRun) {
+      stopRef.current = startFeed(
+        (row)     => setRows((prev) => [row, ...prev].slice(0, 200)),
+        (rawLine) => setRaw((prev) => [rawLine, ...prev].slice(0, 500)),
+        { fps: 15, maxOut: 150, wsUrl: "ws://localhost:8088/ws" }
+      );
+    } else {
+      if (stopRef.current) {
+        try { stopRef.current(); } catch {}
+        stopRef.current = null;
+      }
+      setRows([]);
+      setRaw([]);
+    }
+
+    return () => {
+      if (stopRef.current) {
+        try { stopRef.current(); } catch {}
+        stopRef.current = null;
+      }
+    };
+  }, [tab, diagActive]);
 
   return (
-    <div style={{ padding: 16, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
+    <div
+      // local container that *starts at the top* and never centers
+      style={{
+        padding: 16,
+        fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+        margin: 0,
+      }}
+    >
       <h2 style={{ marginBottom: 12 }}>MarketData UI</h2>
 
-      {/* Labeled tabs */}
-      <div role="tablist" aria-label="Views" style={{ display: "flex", gap: 8, marginBottom: 12, borderBottom: "1px solid #ddd", paddingBottom: 4 }}>
-        <TabButton id="tab-watch"  active={tab === "watch"}  onClick={() => setTab("watch")}  ariaControls="panel-watch">
-          Watchlist
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <TabButton active={tab === "watch"} onClick={() => setTab("watch")}>
+          WatchList (Equities)
         </TabButton>
-        <TabButton id="tab-stream" active={tab === "stream"} onClick={() => setTab("stream")} ariaControls="panel-stream">
-          Raw stream
+        <TabButton active={tab === "stream"} onClick={() => setTab("stream")}>
+          Diagnostics: Stream & Raw
         </TabButton>
-        <div style={{ marginLeft: "auto", fontSize: 12, color: "#666" }}>
-          {tab === "watch" ? "Live quotes & trades" : "Latest frames + parsed table"}
-        </div>
       </div>
 
-      {/* KEEP-ALIVE PANELS: both mounted, we just hide/show */}
-      <section
-        id="panel-watch"
-        role="tabpanel"
-        aria-labelledby="tab-watch"
-        aria-hidden={tab !== "watch"}
-        style={{ display: tab === "watch" ? "block" : "none" }}
-      >
+      {tab === "watch" ? (
         <WatchList />
-      </section>
+      ) : (
+        <>
+          {/* Diagnostics toolbar controls the actual feed (master switch) */}
+          <div style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            marginBottom: 8,
+            padding: "8px 10px",
+            border: "1px solid #eee",
+            borderRadius: 8,
+            background: "#fafafa"
+          }}>
+            <strong>Diagnostics Feed:</strong>
+            <button
+              onClick={() => setDiagActive((v) => !v)}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: diagActive ? "2px solid #1e90ff" : "1px solid #ccc",
+                background: diagActive ? "#eef6ff" : "#fff",
+                cursor: "pointer"
+              }}
+            >
+              {diagActive ? "Active" : "Paused"}
+            </button>
+            <span style={{ marginLeft: "auto", fontSize: 12, color: diagActive ? "#137333" : "#b45309" }}>
+              {diagActive ? "receiving" : "stopped"}
+            </span>
+          </div>
 
-      <section
-        id="panel-stream"
-        role="tabpanel"
-        aria-labelledby="tab-stream"
-        aria-hidden={tab !== "stream"}
-        style={{ display: tab === "stream" ? "block" : "none" }}
-      >
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
-          <StreamView rows={rows} />
-          <RawPanel raw={raw} />
-        </div>
-      </section>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, alignItems: "start" }}>
+            <StreamView rows={rows} />
+            <RawPanel raw={raw} />
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function TabButton({ active, onClick, children, id, ariaControls }) {
+function TabButton({ active, onClick, children }) {
   return (
     <button
-      id={id}
-      role="tab"
-      aria-selected={active}
-      aria-controls={ariaControls}
       onClick={onClick}
       style={{
         padding: "8px 12px",
-        borderRadius: "8px 8px 0 0",
+        borderRadius: 8,
         border: active ? "2px solid #1e90ff" : "1px solid #ccc",
-        borderBottomColor: active ? "#fff" : "#ccc",
-        background: active ? "#eef6ff" : "#f7f7f7",
+        background: active ? "#eef6ff" : "#fff",
         cursor: "pointer",
-        color: "#111",
       }}
     >
       {children}
