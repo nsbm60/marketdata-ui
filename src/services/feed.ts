@@ -1,17 +1,36 @@
-// marketdata-ui/src/services/feed.js
+// marketdata-ui/src/services/feed.ts
+// TypeScript version of the streaming feed used by App.tsx.
+// Uses the canonical WS URL from src/ws/SocketConfig.ts.
 
-export const USE_MOCK = false;
+import { WS_URL } from "../ws/SocketConfig";
+
+export type NormalizedRow = {
+  symbol: string;
+  last: number | string | "";
+  bid: number | string | "";
+  ask: number | string | "";
+  iv?: number | string | "";
+  delta?: number | string | "";
+  gamma?: number | string | "";
+  theta?: number | string | "";
+  vega?: number | string | "";
+  updatedAt: string;
+};
 
 /** Safely JSON-parse a string; returns undefined on failure */
-function tryJson(str) {
-  try { return JSON.parse(str); } catch { return undefined; }
+function tryJson(str: string): any | undefined {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Pick the first present key; supports dotted paths (e.g. "data.bidPrice") */
-function pick(obj, ...paths) {
+function pick(obj: any, ...paths: string[]): any {
   for (const path of paths) {
     const parts = path.split(".");
-    let v = obj;
+    let v: any = obj;
     for (const p of parts) {
       if (v && Object.prototype.hasOwnProperty.call(v, p)) {
         v = v[p];
@@ -26,8 +45,8 @@ function pick(obj, ...paths) {
 }
 
 /** Map *any* option/equity feed message to a UI row */
-export function normalizeOption(any) {
-  let o = any;
+export function normalizeOption(any: unknown): NormalizedRow | null {
+  let o: any = any;
 
   // Strings may be JSON, NDJSON, or "topic {json}"
   if (typeof o === "string") {
@@ -50,42 +69,65 @@ export function normalizeOption(any) {
   // Unified mapping of symbol
   const symbol = pick(
     o,
-    "symbol", "sym", "ticker", "S",
-    "data.symbol", "data.data.symbol"
+    "symbol",
+    "sym",
+    "ticker",
+    "S",
+    "data.symbol",
+    "data.data.symbol"
   );
 
   // Prices — supports both flat and nested payloads
   const last = pick(
     o,
-    "p", "price", "last", "lastPrice",
-    "data.last", "data.price", "data.lastPrice",
-    "data.data.last", "data.data.price", "data.data.lastPrice"
+    "p",
+    "price",
+    "last",
+    "lastPrice",
+    "data.last",
+    "data.price",
+    "data.lastPrice",
+    "data.data.last",
+    "data.data.price",
+    "data.data.lastPrice"
   );
 
   const bid = pick(
     o,
-    "bid", "bidPrice", "b",
-    "data.bid", "data.bidPrice",
-    "data.data.bid", "data.data.bidPrice"
+    "bid",
+    "bidPrice",
+    "b",
+    "data.bid",
+    "data.bidPrice",
+    "data.data.bid",
+    "data.data.bidPrice"
   );
 
   const ask = pick(
     o,
-    "ask", "askPrice", "a",
-    "data.ask", "data.askPrice",
-    "data.data.ask", "data.data.askPrice"
+    "ask",
+    "askPrice",
+    "a",
+    "data.ask",
+    "data.askPrice",
+    "data.data.ask",
+    "data.data.askPrice"
   );
 
-  const iv    = pick(o, "iv", "impliedVol", "greeks.iv", "data.data.iv");
+  const iv = pick(o, "iv", "impliedVol", "greeks.iv", "data.data.iv");
   const delta = pick(o, "delta", "greeks.delta", "data.data.delta");
   const gamma = pick(o, "gamma", "greeks.gamma", "data.data.gamma");
   const theta = pick(o, "theta", "greeks.theta", "data.data.theta");
-  const vega  = pick(o, "vega", "greeks.vega", "data.data.vega");
+  const vega = pick(o, "vega", "greeks.vega", "data.data.vega");
 
-  let ts = pick(
+  let ts: any = pick(
     o,
-    "t", "timestamp", "updatedAt",
-    "data.timestamp", "data.updatedAt", "data.data.timestamp"
+    "t",
+    "timestamp",
+    "updatedAt",
+    "data.timestamp",
+    "data.updatedAt",
+    "data.data.timestamp"
   );
 
   if (typeof ts === "number") {
@@ -99,55 +141,36 @@ export function normalizeOption(any) {
     ts = new Date().toISOString();
   }
 
-  const hasPrice = [last, bid, ask].some(v => v !== undefined);
+  const hasPrice = [last, bid, ask].some((v) => v !== undefined);
   if (!symbol && !hasPrice) return null;
 
   return {
     symbol: String(symbol || ""),
-    last:   last ?? "",
-    bid:    bid  ?? "",
-    ask:    ask  ?? "",
-    iv:     iv   ?? "",
-    delta:  delta?? "",
-    gamma:  gamma?? "",
-    theta:  theta?? "",
-    vega:   vega ?? "",
+    last: last ?? "",
+    bid: bid ?? "",
+    ask: ask ?? "",
+    iv: iv ?? "",
+    delta: delta ?? "",
+    gamma: gamma ?? "",
+    theta: theta ?? "",
+    vega: vega ?? "",
     updatedAt: ts,
   };
 }
 
-/** Stream data from backend */
-export function startFeed(onRow, onRaw) {
-  if (USE_MOCK) {
-    const id = setInterval(() => {
-      const row = normalizeOption({
-        symbol: "NVDA",
-        last: 100, bid: 99.5, ask: 100.5,
-        iv: 0.33, delta: 0.5
-      });
-      if (row) onRow(row);
-    }, 500);
-    return () => clearInterval(id);
-  }
-
-  // ---- Configure your subscription here ----
-  const SUB_CHANNELS = ["equity.quotes"];      // backend acknowledged this channel
-  const SUB_SYMBOLS  = ["NVDA"];               // <- add more symbols as needed
-  // ------------------------------------------
-
-  const ws = new WebSocket("ws://localhost:8088/ws");
+/** Start the stream; returns a stop function */
+export function startFeed(
+  onRow: (row: NormalizedRow) => void,
+  onRaw?: (line: string) => void
+): () => void {
+  const ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
-    console.log("WS open");
-    // Subscribe with channels + symbols (your server sent sub.ack for this shape)
-    ws.send(JSON.stringify({
-      type: "subscribe",
-      channels: SUB_CHANNELS,
-      symbols: SUB_SYMBOLS
-    }));
+    // No auto-subscribe here; your UI drives subscribe messages elsewhere
+    // Keep this minimal so App.tsx doesn’t need to pass wsUrl/config.
   };
 
-  ws.onmessage = (msg) => {
+  ws.onmessage = (msg: MessageEvent) => {
     const raw = typeof msg.data === "string" ? msg.data : JSON.stringify(msg.data);
     if (onRaw) onRaw(raw);
 
