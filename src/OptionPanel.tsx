@@ -254,12 +254,27 @@ function fmtPrice(v: any) { return isNum(v) ? priceFmt.format(v) : "—"; }
 
 function fmtExpiry(s: string) {
   try {
-    const d = new Date(s);
-    if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
-    }
-  } catch {}
-  return s;
+    // Match YYYY-MM-DD explicitly
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
+    if (!m) return s;
+
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+
+    // Construct LOCAL date (not UTC midnight)
+    const dt = new Date(y, mo - 1, d);
+
+    // Format in local time — no more off-by-one-day shift
+    return dt.toLocaleDateString(undefined, {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    });
+  } catch {
+    return s;
+  }
 }
 
 // Parse OPRA/OSI-like option symbol

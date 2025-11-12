@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
 
-const CHANNELS = ["md.equity.quote", "md.equity.trade"];
+const CHANNELS = ["equity.quotes", "equity.trades"];
 
 const LS_APPLIED = "wl.applied";
 const LS_INPUT   = "wl.input";
@@ -14,10 +14,8 @@ const BATCH_CHUNK = 1000;
 type TickEnvelope = { topic: string; data: any };
 
 export default function EquityPanel({
-  selected,
   onSelect,
 }: {
-  selected?: string;
   onSelect?: (symbol: string) => void;
 }) {
   /* ---------------- input + symbols ---------------- */
@@ -27,6 +25,9 @@ export default function EquityPanel({
     return saved ? parseSymbols(saved) : [];
   });
   useEffect(() => { localStorage.setItem(LS_INPUT, input); }, [input]);
+
+  /* ---------------- selection ---------------- */
+  const [selectedSym, setSelectedSym] = useState<string | null>(null);
 
   /* ---------------- pause/resume ---------------- */
   const [paused, setPaused] = useState(false);
@@ -48,6 +49,7 @@ export default function EquityPanel({
     socketHub.connect();
     setWsStatus("connecting");
     const onAny = (m: any) => {
+      // treat first “ready”/any inbound as connected signal (cosmetic)
       if (wsStatus !== "open") setWsStatus("open");
     };
     socketHub.onMessage(onAny);
@@ -155,6 +157,7 @@ export default function EquityPanel({
   // consume ticks from hub
   useEffect(() => {
     const onTick = (te: TickEnvelope) => {
+      // Push the raw JSON string through our existing pipeline
       try {
         queueRef.current.push(JSON.stringify(te));
         schedule();
@@ -197,6 +200,11 @@ export default function EquityPanel({
 
     // delta subscribe
     applySubscriptionDelta(norm);
+
+    // selection hygiene: keep selected if it is still in the list
+    if (selectedSym && !norm.includes(selectedSym)) {
+      setSelectedSym(norm.length ? norm[0] : null);
+    }
   };
 
   const actAdd       = () => { const add = parseSymbols(input); applySymbols(Array.from(new Set([...symbols, ...add]))); setInput(""); };
@@ -209,11 +217,13 @@ export default function EquityPanel({
     applySymbols([]);
     cacheRef.current = new Map();
     setVersion((v) => (v + 1) & 0xffff);
+    setSelectedSym(null);
   };
   const togglePaused = () => {
     const next = !paused;
     setPaused(next);
     if (next) {
+      // hard unsubscribe everything
       const prev = Array.from(subsSetRef.current);
       if (prev.length) sendJson({ type: "unsubscribe", channels: CHANNELS, symbols: prev });
       subsSetRef.current = new Set();
@@ -234,6 +244,15 @@ export default function EquityPanel({
     const cache = cacheRef.current;
     return symbols.map((s) => (cache.get(s) as any) || { symbol: s });
   }, [symbols, version]);
+
+  const stats = useMemo(() => {
+    let withQuote = 0, withTrade = 0;
+    for (const r of list as any[]) {
+      if (isNum(r.bid) || isNum(r.ask)) withQuote++;
+      if (isNum(r.last)) withTrade++;
+    }
+    return { withQuote, withTrade, total: list.length };
+  }, [list]);
 
   /* ---------------- render ---------------- */
   return (
@@ -275,13 +294,29 @@ export default function EquityPanel({
         {symbols.length > 0 && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {symbols.map((sym) => (
-              <span key={sym} style={chip() as any}>
+              <span
+                key={sym}
+                style={{
+                  ...chip(),
+                  ...(selectedSym === sym ? { background: "#e0ecff", borderColor: "#93c5fd" } : {}),
+                  cursor: "pointer",
+                } as any}
+                onClick={() => { setSelectedSym(sym); onSelect?.(sym); }}
+                title="Click to load options"
+              >
                 {sym}
-                <button onClick={() => removeOne(sym)} style={chipX() as any} aria-label={`Remove ${sym}`}>×</button>
+                <button onClick={(e) => { e.stopPropagation(); removeOne(sym); }} style={chipX() as any} aria-label={`Remove ${sym}`}>×</button>
               </span>
             ))}
           </div>
         )}
+
+        <div style={{ fontSize: 11, color: "#333", display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <span><b>symbols:</b> {stats.total}</span>
+          <span><b>quotes:</b> {stats.withQuote}</span>
+          <span><b>trades:</b> {stats.withTrade}</span>
+          {paused && <span style={{ color: "#b45309" }}>Paused — unsubscribed</span>}
+        </div>
       </div>
 
       {/* Table */}
@@ -308,7 +343,7 @@ export default function EquityPanel({
             </tr>
           </thead>
           <tbody>
-            {list.length === 0 ? (
+            {symbols.length === 0 ? (
               <tr>
                 <td colSpan={7} style={{ padding: 6, color: "#666", textAlign: "center", borderTop: "1px solid #eee", fontSize: 12 }}>
                   No tickers selected.
@@ -322,35 +357,23 @@ export default function EquityPanel({
                 const spread = (hasBid && hasAsk) ? (r.ask - r.bid) : undefined;
                 const lastVal = isNum(r.last) ? r.last : mid;
                 const stale = isStale(r.updatedAt, STALE_MS);
-
-                const isSelected = (selected || "").toUpperCase() === r.symbol?.toUpperCase();
-                const rowStyle: any = {
-                  cursor: "pointer",
-                  ...(stale ? { opacity: 0.6 } : {}),
-                  ...(isSelected
-                    ? {
-                        background: "#eef6ff",
-                        outline: "2px solid #1e90ff",
-                        outlineOffset: -2,
-                      }
-                    : {}),
-                };
+                const isSelected = r.symbol === selectedSym;
 
                 return (
                   <tr
                     key={r.symbol}
-                    style={rowStyle}
-                    onClick={() => onSelect?.(r.symbol)}
-                    aria-selected={isSelected || undefined}
-                    title="Click to open options"
+                    aria-selected={isSelected}
+                    style={{ cursor: "pointer", ...(stale ? { opacity: 0.72 } : {}) }}
+                    onClick={() => { setSelectedSym(r.symbol); onSelect?.(r.symbol); }}
+                    title="Click to load options"
                   >
-                    <Td mono strong={isSelected}>{r.symbol}</Td>
-                    <Td num strong={isSelected}>{fmtPrice(lastVal)}</Td>
-                    <Td num>{fmtPrice(r.bid)}</Td>
-                    <Td num>{fmtPrice(r.ask)}</Td>
-                    <Td num>{fmtPrice(mid)}</Td>
-                    <Td num>{fmtPrice(spread)}</Td>
-                    <Td>{fmtTime(r.updatedAt)}</Td>
+                    <Td mono strong={isSelected} selected={isSelected} first>{r.symbol}</Td>
+                    <Td num  strong={isSelected} selected={isSelected}>{fmtPrice(lastVal)}</Td>
+                    <Td num  selected={isSelected}>{fmtPrice(r.bid)}</Td>
+                    <Td num  selected={isSelected}>{fmtPrice(r.ask)}</Td>
+                    <Td num  selected={isSelected}>{fmtPrice(mid)}</Td>
+                    <Td num  selected={isSelected}>{fmtPrice(spread)}</Td>
+                    <Td      selected={isSelected}>{fmtTime(r.updatedAt)}</Td>
                   </tr>
                 );
               })
@@ -382,6 +405,7 @@ function isStale(iso: any, ms: number) { if (!iso) return true; try { const t = 
 function shallowEqualQuote(a: any, b: any) { return a.bid === b.bid && a.ask === b.ask && a.updatedAt === b.updatedAt; }
 function shallowEqualTrade(a: any, b: any) { return a.last === b.last && a.updatedAt === b.updatedAt; }
 function fastExtract(topic: string, data: any) {
+  // topic: md.equity.quote.SYM | md.equity.trade.SYM
   const parts = topic.split(".");
   if (parts.length < 4) return null;
   const kind = parts[2] === "quote" ? "quote" : (parts[2] === "trade" ? "trade" : "");
@@ -562,7 +586,8 @@ function Th({ children, center }: { children: any; center?: boolean }) {
   );
 }
 function Td(
-  { children, mono, num, strong }: { children: any; mono?: boolean; num?: boolean; strong?: boolean }
+  { children, mono, num, strong, selected, first }:
+  { children: any; mono?: boolean; num?: boolean; strong?: boolean; selected?: boolean; first?: boolean }
 ) {
   return (
     <td
@@ -577,7 +602,8 @@ function Td(
         textOverflow: "ellipsis",
         color: "#111",
         fontWeight: strong ? 700 : 600,
-        background: "#fff",
+        background: selected ? "#dbeafe" : "#fff",
+        ...(selected && first ? { borderLeft: "3px solid #1e90ff"} : {}),
       }}
       title={typeof children === "string" ? children : undefined}
     >
