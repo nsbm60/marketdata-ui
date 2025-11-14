@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
 
-const CHANNELS = ["equity.quotes", "equity.trades"];
+const CHANNELS = ["md.equity.quote", "md.equity.trade"];
 
 const LS_APPLIED = "wl.applied";
 const LS_INPUT   = "wl.input";
