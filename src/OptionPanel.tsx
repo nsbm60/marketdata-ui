@@ -1,7 +1,7 @@
 // src/OptionPanel.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
-import type { ControlAck, TickEnvelope } from "./ws/ws-types";
+import type { TickEnvelope } from "./ws/ws-types";
 
 /** ---------- Types ---------- */
 type ExpiryMeta = {
@@ -70,7 +70,7 @@ export default function OptionPanel() {
       const info = fastExtract(t.topic, t.data);
       if (!info) return;
 
-      const prev = bookRef.current.get(info.symbol) || { symbol: info.symbol, kind: info.kind } as QuoteRow;
+      const prev = bookRef.current.get(info.symbol) || ({ symbol: info.symbol, kind: info.kind } as QuoteRow);
       const next: QuoteRow =
         info.kind === "quote"
           ? { ...prev, kind: "quote", bid: info.bid ?? prev.bid, ask: info.ask ?? prev.ask, ts: info.ts ?? prev.ts }
@@ -140,8 +140,14 @@ export default function OptionPanel() {
 
             return {
               strike,
-              cLast: cl, cBid: cb, cMid: cm, cAsk: ca,
-              pLast: pl, pBid: pb, pMid: pm, pAsk: pa,
+              cLast: cl,
+              cBid: cb,
+              cMid: cm,
+              cAsk: ca,
+              pLast: pl,
+              pBid: pb,
+              pMid: pm,
+              pAsk: pa,
             };
           });
         return { expiration: exp, rows };
@@ -176,24 +182,24 @@ export default function OptionPanel() {
         {/* Level 1 header: Calls | Strike | Puts (sticky) */}
         <div style={stickyHeader as any}>
           <div style={hdrRow1 as any}>
-            <div style={{ ...thBlock, textAlign: "left" } as any}>Calls</div>
+            <div style={{ ...thBlock, textAlign: "center" } as any}>Calls</div>
             <div style={{ ...thBlock, textAlign: "center" } as any}>Strike</div>
-            <div style={{ ...thBlock, textAlign: "right" } as any}>Puts</div>
+            <div style={{ ...thBlock, textAlign: "center" } as any}>Puts</div>
           </div>
           {/* Level 2 header: under Calls & Puts show Last | Bid | Mid | Ask */}
           <div style={hdrRow2 as any}>
             <div style={subgrid4 as any}>
-              <div style={{ ...subTh, textAlign: "left" } as any}>Last</div>
-              <div style={{ ...subTh, textAlign: "left" } as any}>Bid</div>
-              <div style={{ ...subTh, textAlign: "center" } as any}>Mid</div>
-              <div style={{ ...subTh, textAlign: "right" } as any}>Ask</div>
+              <div style={subTh as any}>Last</div>
+              <div style={subTh as any}>Bid</div>
+              <div style={subTh as any}>Mid</div>
+              <div style={subTh as any}>Ask</div>
             </div>
-            <div style={{ ...subTh, textAlign: "center" } as any}>{/* strike subheader empty */}</div>
+            <div style={subTh as any}>{/* strike subheader empty */}</div>
             <div style={subgrid4 as any}>
-              <div style={{ ...subTh, textAlign: "left" } as any}>Last</div>
-              <div style={{ ...subTh, textAlign: "left" } as any}>Bid</div>
-              <div style={{ ...subTh, textAlign: "center" } as any}>Mid</div>
-              <div style={{ ...subTh, textAlign: "right" } as any}>Ask</div>
+              <div style={subTh as any}>Last</div>
+              <div style={subTh as any}>Bid</div>
+              <div style={subTh as any}>Mid</div>
+              <div style={subTh as any}>Ask</div>
             </div>
           </div>
         </div>
@@ -211,26 +217,36 @@ export default function OptionPanel() {
                   <div style={{ fontWeight: 600 }}>{fmtExpiry(g.expiration)}</div>
                 </div>
 
-                {g.rows.map((r) => (
-                  <div key={g.expiration + ":" + r.strike} style={row9 as any}>
-                    {/* Calls: Last | Bid | Mid | Ask */}
-                    <div style={{ ...td, textAlign: "left" } as any}>{fmtPrice(r.cLast)}</div>
-                    <div style={{ ...td, textAlign: "left" } as any}>{fmtPrice(r.cBid)}</div>
-                    <div style={{ ...td, textAlign: "center" } as any}>{fmtPrice(r.cMid)}</div>
-                    <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.cAsk)}</div>
+                {g.rows.map((r, idx) => {
+                  // Find matching expiry meta to know how many strikes are below spot
+                  const meta = expiries.find((e) => e.expiration === g.expiration);
+                  const boundaryIndex = meta ? meta.strikes_below : -1;
+                  const showDivider = boundaryIndex > 0 && idx === boundaryIndex;
 
-                    {/* Strike */}
-                    <div style={{ ...td, textAlign: "center", fontVariantNumeric: "tabular-nums" } as any}>
-                      {isNum(r.strike) ? priceFmt.format(r.strike as number) : "—"}
-                    </div>
+                  return (
+                    <Fragment key={g.expiration + ":" + r.strike}>
+                      {showDivider && <div style={atmDivider as any} />}
+                      <div style={row9 as any}>
+                        {/* Calls: Last | Bid | Mid | Ask */}
+                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.cLast)}</div>
+                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.cBid)}</div>
+                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.cMid)}</div>
+                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.cAsk)}</div>
 
-                    {/* Puts: Last | Bid | Mid | Ask */}
-                    <div style={{ ...td, textAlign: "left" } as any}>{fmtPrice(r.pLast)}</div>
-                    <div style={{ ...td, textAlign: "left" } as any}>{fmtPrice(r.pBid)}</div>
-                    <div style={{ ...td, textAlign: "center" } as any}>{fmtPrice(r.pMid)}</div>
-                    <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.pAsk)}</div>
-                  </div>
-                ))}
+                        {/* Strike */}
+                        <div style={{ ...td, textAlign: "center" } as any}>
+                          {isNum(r.strike) ? priceFmt.format(r.strike as number) : "—"}
+                        </div>
+
+                        {/* Puts: Last | Bid | Mid | Ask */}
+                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.pLast)}</div>
+                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.pBid)}</div>
+                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.pMid)}</div>
+                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.pAsk)}</div>
+                      </div>
+                    </Fragment>
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -241,16 +257,26 @@ export default function OptionPanel() {
 }
 
 /** ---------- Helpers ---------- */
-function toNumOrNull(v: any): number | null { const n = Number(v); return Number.isFinite(n) ? n : null; }
-function num(v: any): number | undefined { const n = Number(v); return Number.isFinite(n) ? n : undefined; }
-function isNum(v: any) { return typeof v === "number" && Number.isFinite(v); }
+function toNumOrNull(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function num(v: any): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+function isNum(v: any) {
+  return typeof v === "number" && Number.isFinite(v);
+}
 function mid(b?: number, a?: number, last?: number) {
   if (isNum(b) && isNum(a)) return ((b as number) + (a as number)) / 2;
   if (isNum(last)) return last as number;
   return undefined;
 }
 const priceFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-function fmtPrice(v: any) { return isNum(v) ? priceFmt.format(v) : "—"; }
+function fmtPrice(v: any) {
+  return isNum(v) ? priceFmt.format(v) : "—";
+}
 
 function fmtExpiry(s: string) {
   try {
@@ -283,7 +309,10 @@ function parseOptionSymbol(sym: string): ParsedOption | null {
   // OSI: AAPL250117C00190000
   const m1 = /^([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/.exec(S);
   if (m1) {
-    const und = m1[1], yy = m1[2], mm = m1[3], dd = m1[4];
+    const und = m1[1],
+      yy = m1[2],
+      mm = m1[3],
+      dd = m1[4];
     const side: OptionSide = m1[5] === "C" ? "call" : "put";
     const strike = parseInt(m1[6], 10) / 1000;
     const yyyy = Number(yy) + 2000;
@@ -293,7 +322,10 @@ function parseOptionSymbol(sym: string): ParsedOption | null {
   // AAPL_011725C_190
   const m2 = /^([A-Z]+)[._-](\d{2})(\d{2})(\d{2})([CP])[._-](\d+(\.\d+)?)$/.exec(S);
   if (m2) {
-    const und = m2[1], yy = m2[2], mm = m2[3], dd = m2[4];
+    const und = m2[1],
+      yy = m2[2],
+      mm = m2[3],
+      dd = m2[4];
     const side: OptionSide = m2[5] === "C" ? "call" : "put";
     const strike = parseFloat(m2[6]);
     const yyyy = Number(yy) + 2000;
@@ -361,14 +393,14 @@ const shell = {
 };
 
 const panelHeader = {
-  padding: "8px 10px",
+  padding: "6px 8px",
   borderBottom: "1px solid #eee",
   background: "#fff",
   display: "grid",
-  gap: 6,
+  gap: 4,
 };
 
-const hdrRow = { display: "flex", alignItems: "center", gap: 12 };
+const hdrRow = { display: "flex", alignItems: "center", gap: 8 };
 
 const bodyScroll = {
   flex: 1,
@@ -377,7 +409,6 @@ const bodyScroll = {
   background: "#fff",
 };
 
-/* Sticky wrapper for two header levels */
 const stickyHeader = {
   position: "sticky" as const,
   top: 0,
@@ -386,92 +417,106 @@ const stickyHeader = {
   borderBottom: "1px solid #e5e7eb",
 };
 
-/* Level 1 header: Calls | Strike | Puts */
+/**
+ * Column layout:
+ * - 4 narrow columns for Calls (4 × 52px = 208)
+ * - 1 narrow Strike column (70px)
+ * - 4 narrow columns for Puts  (4 × 52px = 208)
+ * Total: 486px for the grid; it will just scroll horizontally if narrower than the container.
+ */
 const hdrRow1 = {
   display: "grid",
-  gridTemplateColumns: "4fr 110px 4fr",
-  columnGap: 8,
-  alignItems: "center",
-  padding: "6px 8px",
+  gridTemplateColumns: "208px 70px 208px",
+  columnGap: 0,
+  alignItems: "stretch",
+  padding: 0,
 };
 
 const thBlock = {
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 700,
   color: "#333",
   background: "#f6f6f6",
-  padding: "6px 8px",
+  padding: "2px 4px",
   border: "1px solid #e5e7eb",
-  borderRadius: 6,
+  borderRadius: 0,
   whiteSpace: "nowrap" as const,
+  textAlign: "center" as const,
 };
 
-/* Level 2 header: Last | Bid | Mid | Ask  (Calls side) | (Strike blank) | (Puts side) */
 const hdrRow2 = {
   display: "grid",
-  gridTemplateColumns: "4fr 110px 4fr",
-  columnGap: 8,
-  alignItems: "center",
-  padding: "6px 8px 8px 8px",
+  gridTemplateColumns: "208px 70px 208px",
+  columnGap: 0,
+  alignItems: "stretch",
+  padding: 0,
   borderBottom: "1px solid #f0f0f0",
 };
 
 const subgrid4 = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr 1fr 1fr",
-  columnGap: 8,
+  gridTemplateColumns: "repeat(4, 52px)",
+  columnGap: 0,
 };
 
 const subTh = {
-  fontSize: 11,
-  fontWeight: 700,
+  fontSize: 10,
+  fontWeight: 600,
   color: "#555",
   background: "#fafafa",
-  padding: "4px 6px",
-  border: "1px solid #eee",
-  borderRadius: 6,
+  padding: "1px 2px",
+  border: "1px solid #ddd",
+  borderRadius: 0,
   whiteSpace: "nowrap" as const,
+  textAlign: "center" as const,
 };
 
 const group = {
   border: "1px solid #eee",
-  borderRadius: 8,
+  borderRadius: 4,
   background: "#fff",
-  margin: "10px 8px",
+  margin: "6px 4px",
   overflow: "hidden",
 };
 
 const expiryHead = {
-  padding: "6px 8px",
+  padding: "4px 6px",
   borderBottom: "1px solid #eee",
   background: "#f8fafc",
-  fontSize: 12,
+  fontSize: 11,
   display: "flex",
   alignItems: "center",
-  gap: 8,
+  gap: 6,
 };
 
-/* 9-cell row: C.last | C.bid | C.mid | C.ask | strike | P.last | P.bid | P.mid | P.ask */
 const row9 = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr 1fr 1fr 110px 1fr 1fr 1fr 1fr",
-  columnGap: 8,
-  alignItems: "center",
-  padding: "6px 8px",
-  borderBottom: "1px solid #f8f8f8",
+  gridTemplateColumns: "repeat(4, 52px) 70px repeat(4, 52px)",
+  columnGap: 0,
+  alignItems: "stretch",
+  padding: 0,
 };
 
 const td = {
-  fontSize: 12,
-  padding: "4px 6px",
+  fontSize: 11,
+  padding: "1px 2px",
   whiteSpace: "nowrap" as const,
   overflow: "hidden",
   textOverflow: "ellipsis",
   fontVariantNumeric: "tabular-nums",
+  border: "1px solid #e5e7eb",
+  borderRadius: 0,
+  background: "#fff",
+};
+
+const atmDivider = {
+  borderTop: "1px solid #9ca3af", // slightly darker line for ATM boundary
+  margin: "0 0 0 0",
+  height: 0,
 };
 
 const empty = {
-  padding: "12px",
+  padding: "10px",
   fontSize: 12,
   color: "#666",
 };
