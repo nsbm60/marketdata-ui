@@ -13,15 +13,6 @@ type ExpiryMeta = {
   contracts_count: number;
 };
 
-type QuoteRow = {
-  symbol: string;
-  kind: "quote" | "trade";
-  last?: number;
-  bid?: number;
-  ask?: number;
-  ts?: string;
-};
-
 type OptionSide = "call" | "put";
 
 type ParsedOption = {
@@ -31,14 +22,45 @@ type ParsedOption = {
   expiration: string; // YYYY-MM-DD or "—"
 };
 
+type QuoteRow = {
+  symbol: string;
+  kind: "quote" | "trade" | "greeks";
+  last?: number;
+  bid?: number;
+  ask?: number;
+  ts?: string;
+
+  // Greeks
+  delta?: number;
+  gamma?: number;
+  theta?: number;
+  vega?: number;
+  rho?: number;
+  iv?: number;
+};
+
 /** ---------- Component ---------- */
 export default function OptionPanel() {
   const [underlying, setUnderlying] = useState<string>("");
   const [expiries, setExpiries] = useState<ExpiryMeta[]>([]);
   const [wsOpen, setWsOpen] = useState<boolean>(false);
 
-  // price book keyed by option symbol
+  // row selection (expiration + strike)
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  // price + greeks book keyed by option symbol
   const bookRef = useRef<Map<string, QuoteRow>>(new Map());
+
+  // throttle renders
+  const [version, setVersion] = useState(0);
+  const rafRef = useRef<number>(0 as any);
+  const schedule = () => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0 as any;
+      setVersion((v) => (v + 1) & 0xffff);
+    });
+  };
 
   useEffect(() => {
     const onMsg = (m: any) => {
@@ -71,10 +93,37 @@ export default function OptionPanel() {
       if (!info) return;
 
       const prev = bookRef.current.get(info.symbol) || ({ symbol: info.symbol, kind: info.kind } as QuoteRow);
-      const next: QuoteRow =
-        info.kind === "quote"
-          ? { ...prev, kind: "quote", bid: info.bid ?? prev.bid, ask: info.ask ?? prev.ask, ts: info.ts ?? prev.ts }
-          : { ...prev, kind: "trade", last: info.last ?? prev.last, ts: info.ts ?? prev.ts };
+      let next: QuoteRow;
+
+      if (info.kind === "quote") {
+        next = {
+          ...prev,
+          kind: "quote",
+          bid: info.bid ?? prev.bid,
+          ask: info.ask ?? prev.ask,
+          ts: info.ts ?? prev.ts,
+        };
+      } else if (info.kind === "trade") {
+        next = {
+          ...prev,
+          kind: "trade",
+          last: info.last ?? prev.last,
+          ts: info.ts ?? prev.ts,
+        };
+      } else {
+        // kind === "greeks"
+        next = {
+          ...prev,
+          kind: prev.kind || "greeks",
+          delta: info.delta ?? prev.delta,
+          gamma: info.gamma ?? prev.gamma,
+          theta: info.theta ?? prev.theta,
+          vega: info.vega ?? prev.vega,
+          rho: info.rho ?? prev.rho,
+          iv: info.iv ?? prev.iv,
+          ts: info.ts ?? prev.ts,
+        };
+      }
 
       bookRef.current.set(info.symbol, next);
       schedule();
@@ -89,18 +138,10 @@ export default function OptionPanel() {
     };
   }, []);
 
-  // throttle renders
-  const [version, setVersion] = useState(0);
-  const rafRef = useRef<number>(0 as any);
-  const schedule = () => {
-    if (rafRef.current) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = 0 as any;
-      setVersion((v) => (v + 1) & 0xffff);
-    });
-  };
-
-  // Build rows: [C.last, C.bid, C.mid, C.ask, strike, P.last, P.bid, P.mid, P.ask]
+  // Build rows per expiry:
+  // Calls:  Last Bid Mid Ask Δ Γ Θ Vega IV
+  // Strike
+  // Puts:   Last Bid Mid Ask Δ Γ Θ Vega IV
   const groups = useMemo(() => {
     if (!underlying) return [];
 
@@ -128,15 +169,31 @@ export default function OptionPanel() {
         const rows = Array.from(strikes.entries())
           .sort((a, b) => a[0] - b[0])
           .map(([strike, sideMap]) => {
+            // Calls prices
             const cl = num(sideMap.call?.last);
             const cb = num(sideMap.call?.bid);
             const ca = num(sideMap.call?.ask);
             const cm = mid(cb, ca, cl);
 
+            // Puts prices
             const pl = num(sideMap.put?.last);
             const pb = num(sideMap.put?.bid);
             const pa = num(sideMap.put?.ask);
             const pm = mid(pb, pa, pl);
+
+            // Call Greeks
+            const cDelta = num(sideMap.call?.delta);
+            const cGamma = num(sideMap.call?.gamma);
+            const cTheta = num(sideMap.call?.theta);
+            const cVega = num(sideMap.call?.vega);
+            const cIv = num(sideMap.call?.iv);
+
+            // Put Greeks
+            const pDelta = num(sideMap.put?.delta);
+            const pGamma = num(sideMap.put?.gamma);
+            const pTheta = num(sideMap.put?.theta);
+            const pVega = num(sideMap.put?.vega);
+            const pIv = num(sideMap.put?.iv);
 
             return {
               strike,
@@ -144,15 +201,25 @@ export default function OptionPanel() {
               cBid: cb,
               cMid: cm,
               cAsk: ca,
+              cDelta,
+              cGamma,
+              cTheta,
+              cVega,
+              cIv,
               pLast: pl,
               pBid: pb,
               pMid: pm,
               pAsk: pa,
+              pDelta,
+              pGamma,
+              pTheta,
+              pVega,
+              pIv,
             };
           });
         return { expiration: exp, rows };
       });
-  }, [underlying, version]);
+  }, [underlying, version, expiries]);
 
   /** ---------- Render ---------- */
   return (
@@ -186,20 +253,30 @@ export default function OptionPanel() {
             <div style={{ ...thBlock, textAlign: "center" } as any}>Strike</div>
             <div style={{ ...thBlock, textAlign: "center" } as any}>Puts</div>
           </div>
-          {/* Level 2 header: under Calls & Puts show Last | Bid | Mid | Ask */}
+          {/* Level 2 header: Calls & Puts show Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
           <div style={hdrRow2 as any}>
-            <div style={subgrid4 as any}>
+            <div style={subgrid9 as any}>
               <div style={subTh as any}>Last</div>
               <div style={subTh as any}>Bid</div>
               <div style={subTh as any}>Mid</div>
               <div style={subTh as any}>Ask</div>
+              <div style={subTh as any}>Δ</div>
+              <div style={subTh as any}>Γ</div>
+              <div style={subTh as any}>Θ</div>
+              <div style={subTh as any}>Vega</div>
+              <div style={subTh as any}>IV</div>
             </div>
             <div style={subTh as any}>{/* strike subheader empty */}</div>
-            <div style={subgrid4 as any}>
+            <div style={subgrid9 as any}>
               <div style={subTh as any}>Last</div>
               <div style={subTh as any}>Bid</div>
               <div style={subTh as any}>Mid</div>
               <div style={subTh as any}>Ask</div>
+              <div style={subTh as any}>Δ</div>
+              <div style={subTh as any}>Γ</div>
+              <div style={subTh as any}>Θ</div>
+              <div style={subTh as any}>Vega</div>
+              <div style={subTh as any}>IV</div>
             </div>
           </div>
         </div>
@@ -218,31 +295,59 @@ export default function OptionPanel() {
                 </div>
 
                 {g.rows.map((r, idx) => {
+                  const rowKey = `${g.expiration}:${r.strike}`;
+                  const isSelected = selectedKey === rowKey;
+
                   // Find matching expiry meta to know how many strikes are below spot
                   const meta = expiries.find((e) => e.expiration === g.expiration);
                   const boundaryIndex = meta ? meta.strikes_below : -1;
                   const showDivider = boundaryIndex > 0 && idx === boundaryIndex;
 
-                  return (
-                    <Fragment key={g.expiration + ":" + r.strike}>
-                      {showDivider && <div style={atmDivider as any} />}
-                      <div style={row9 as any}>
-                        {/* Calls: Last | Bid | Mid | Ask */}
-                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.cLast)}</div>
-                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.cBid)}</div>
-                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.cMid)}</div>
-                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.cAsk)}</div>
+                  // base style for all cells in this row
+                  const baseCell = {
+                    ...td,
+                    background: isSelected ? "#fef3c7" : "#fff",
+                  } as any;
 
-                        {/* Strike */}
-                        <div style={{ ...td, textAlign: "center" } as any}>
+                  return (
+                    <Fragment key={rowKey}>
+                      {showDivider && <div style={atmDivider as any} />}
+                      <div
+                        style={{ ...row19, cursor: "pointer" } as any}
+                        onClick={() => setSelectedKey(rowKey)}
+                      >
+                        {/* Calls: Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cLast)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cBid)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cMid)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cAsk)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cDelta)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cGamma)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cTheta)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cVega)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cIv)}</div>
+
+                        {/* Strike (bold) */}
+                        <div
+                          style={{
+                            ...baseCell,
+                            textAlign: "center",
+                            fontWeight: 700,
+                          }}
+                        >
                           {isNum(r.strike) ? priceFmt.format(r.strike as number) : "—"}
                         </div>
 
-                        {/* Puts: Last | Bid | Mid | Ask */}
-                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.pLast)}</div>
-                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.pBid)}</div>
-                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.pMid)}</div>
-                        <div style={{ ...td, textAlign: "right" } as any}>{fmtPrice(r.pAsk)}</div>
+                        {/* Puts: Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pLast)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pBid)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pMid)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pAsk)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pDelta)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pGamma)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pTheta)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pVega)}</div>
+                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pIv)}</div>
                       </div>
                     </Fragment>
                   );
@@ -273,9 +378,18 @@ function mid(b?: number, a?: number, last?: number) {
   if (isNum(last)) return last as number;
   return undefined;
 }
+
 const priceFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 function fmtPrice(v: any) {
   return isNum(v) ? priceFmt.format(v) : "—";
+}
+
+const greekFmt = new Intl.NumberFormat(undefined, {
+  minimumFractionDigits: 4,
+  maximumFractionDigits: 4,
+});
+function fmtGreek(v: any) {
+  return isNum(v) ? greekFmt.format(v) : "—";
 }
 
 function fmtExpiry(s: string) {
@@ -343,12 +457,23 @@ function parseOptionSymbol(sym: string): ParsedOption | null {
   return null;
 }
 
-// Normalize incoming option tick
+// Normalize incoming option tick, including greeks
 function fastExtract(topic: string, data: any) {
-  // topics: md.option.quote.SYM  |  md.option.trade.SYM
+  // topics: md.option.quote.SYM | md.option.trade.SYM | md.option.greeks.SYM
   const parts = topic.split(".");
   if (parts.length < 4) return null;
-  const kind = parts[2] === "quote" ? "quote" : parts[2] === "trade" ? "trade" : "";
+
+  const kind =
+    parts[2] === "quote"
+      ? "quote"
+      : parts[2] === "trade"
+      ? "trade"
+      : parts[2] === "greeks"
+      ? "greeks"
+      : "";
+
+  if (!kind) return null;
+
   const symbolFromTopic = parts.slice(3).join(".");
   const inner = data && typeof data.data === "object" ? data.data : data;
 
@@ -358,6 +483,16 @@ function fastExtract(topic: string, data: any) {
   let ts: any = inner?.timestamp ?? data?.timestamp;
   if (typeof ts === "number") ts = numberToISO(ts);
   if (typeof ts === "string" && /^\d+$/.test(ts)) ts = numberToISO(Number(ts));
+
+  if (kind === "greeks") {
+    const delta = num(inner?.delta);
+    const gamma = num(inner?.gamma);
+    const theta = num(inner?.theta);
+    const vega = num(inner?.vega);
+    const rho = num(inner?.rho);
+    const iv = num(inner?.iv);
+    return { kind, symbol, delta, gamma, theta, vega, rho, iv, ts };
+  }
 
   if (kind === "quote") {
     const bid = num(inner?.bidPrice ?? inner?.bp ?? inner?.bid);
@@ -369,6 +504,7 @@ function fastExtract(topic: string, data: any) {
     return { kind, symbol, last, ts };
   }
 
+  // Fallback (shouldn't normally be hit now)
   const bid = num(inner?.bidPrice ?? inner?.bp ?? inner?.bid);
   const ask = num(inner?.askPrice ?? inner?.ap ?? inner?.ask);
   const last = num(inner?.lastPrice ?? inner?.price ?? inner?.lp ?? inner?.p ?? inner?.close ?? inner?.last);
@@ -419,14 +555,14 @@ const stickyHeader = {
 
 /**
  * Column layout:
- * - 4 narrow columns for Calls (4 × 52px = 208)
- * - 1 narrow Strike column (70px)
- * - 4 narrow columns for Puts  (4 × 52px = 208)
- * Total: 486px for the grid; it will just scroll horizontally if narrower than the container.
+ * - 9 narrow columns for Calls (9 × 52px = 468)
+ * - 1 Strike column (70px)
+ * - 9 narrow columns for Puts  (9 × 52px = 468)
+ * Total: 1006px for the grid; it will scroll horizontally if needed.
  */
 const hdrRow1 = {
   display: "grid",
-  gridTemplateColumns: "208px 70px 208px",
+  gridTemplateColumns: "468px 70px 468px", // Calls | Strike | Puts
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
@@ -446,16 +582,16 @@ const thBlock = {
 
 const hdrRow2 = {
   display: "grid",
-  gridTemplateColumns: "208px 70px 208px",
+  gridTemplateColumns: "468px 70px 468px",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
   borderBottom: "1px solid #f0f0f0",
 };
 
-const subgrid4 = {
+const subgrid9 = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, 52px)",
+  gridTemplateColumns: "repeat(9, 52px)",
   columnGap: 0,
 };
 
@@ -475,7 +611,7 @@ const group = {
   border: "1px solid #eee",
   borderRadius: 4,
   background: "#fff",
-  margin: "6px 4px",
+  margin: "6px 0", // no horizontal margin to keep columns aligned with header
   overflow: "hidden",
 };
 
@@ -489,9 +625,9 @@ const expiryHead = {
   gap: 6,
 };
 
-const row9 = {
+const row19 = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, 52px) 70px repeat(4, 52px)",
+  gridTemplateColumns: "repeat(9, 52px) 70px repeat(9, 52px)",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
@@ -511,7 +647,7 @@ const td = {
 
 const atmDivider = {
   borderTop: "1px solid #9ca3af", // slightly darker line for ATM boundary
-  margin: "0 0 0 0",
+  margin: 0,
   height: 0,
 };
 
