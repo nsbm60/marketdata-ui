@@ -46,11 +46,21 @@ export default function RawPanel({ raw = [] }) {
   );
 }
 
+
 /* styles */
+
+import type { CSSProperties } from "react";
+
 const wrap = { border: "1px solid #ddd", borderRadius: 8, overflow: "hidden", display: "grid", gridTemplateRows: "auto auto 1fr", background: "#fff" };
 const toolbar = { padding: "8px 10px", borderBottom: "1px solid #eee", background: "#fafafa", display: "flex", alignItems: "center", gap: 8 };
-const controls = { display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px dashed #eee", flexWrap: "wrap" };
-const label = { fontSize: 12, color: "#333" };
+const controls: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "8px 10px",
+  borderBottom: "1px dashed #eee",
+  flexWrap: "wrap",
+};const label = { fontSize: 12, color: "#333" };
 const numInput = { width: 90, fontSize: 12, padding: "4px 6px", border: "1px solid #ddd", borderRadius: 6 };
 const preWrap = { overflow: "auto", maxHeight: "70vh", background: "#fff" };
 const pre = { margin: 0, padding: "8px 10px", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, lineHeight: 1.25, whiteSpace: "pre" };

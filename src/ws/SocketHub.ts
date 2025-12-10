@@ -30,7 +30,11 @@ class SocketHub {
 
   /** Ensure there is a connected socket (idempotent). */
   public connect(): void {
-    if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
+    if (
+      this.socket &&
+      (this.socket.readyState === WebSocket.OPEN ||
+        this.socket.readyState === WebSocket.CONNECTING)
+    ) {
       return;
     }
     if (this.connecting) return;
@@ -50,7 +54,7 @@ class SocketHub {
       }
     };
 
-    ws.onmessage = (ev) => this.handleInbound(ev.data);
+    ws.onmessage = (ev) => this.handleInbound(ev.data as string);
     ws.onerror = () => {
       // errors are also followed by close in most cases; let onclose handle retry
     };
@@ -61,12 +65,20 @@ class SocketHub {
   }
 
   /** Add/remove listeners for ALL inbound messages. */
-  public onMessage(fn: MessageHandler): void { this.messageHandlers.add(fn); }
-  public offMessage(fn: MessageHandler): void { this.messageHandlers.delete(fn); }
+  public onMessage(fn: MessageHandler): void {
+    this.messageHandlers.add(fn);
+  }
+  public offMessage(fn: MessageHandler): void {
+    this.messageHandlers.delete(fn);
+  }
 
   /** Add/remove listeners for streaming ticks (topic + data). */
-  public onTick(fn: TickHandler): void { this.tickHandlers.add(fn); }
-  public offTick(fn: TickHandler): void { this.tickHandlers.delete(fn); }
+  public onTick(fn: TickHandler): void {
+    this.tickHandlers.add(fn);
+  }
+  public offTick(fn: TickHandler): void {
+    this.tickHandlers.delete(fn);
+  }
 
   /** Fire-and-forget send of a JSON-able object. */
   public send(obj: Record<string, unknown>): void {
@@ -131,14 +143,29 @@ class SocketHub {
 
     // Broadcast to generic listeners
     this.messageHandlers.forEach((fn) => {
-      try { fn(msg); } catch { /* no-op */ }
+      try {
+        fn(msg);
+      } catch {
+        /* no-op */
+      }
     });
 
     // If it looks like a tick envelope, broadcast to tick listeners
     if ((msg as any).topic && (msg as any).data) {
       const tick = msg as TickEnvelope;
+
+      // *** DEBUG: log IB topics so we can see if they reach the browser ***
+      if (tick.topic.startsWith("ib.")) {
+        // This is safe to leave in while we debug; remove or comment later if noisy.
+        console.log("[SocketHub] IB tick:", tick.topic, tick.data);
+      }
+
       this.tickHandlers.forEach((fn) => {
-        try { fn(tick); } catch { /* no-op */ }
+        try {
+          fn(tick);
+        } catch {
+          /* no-op */
+        }
       });
     }
   }
