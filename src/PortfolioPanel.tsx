@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
 
+const CHANNELS = ["md.equity.quote", "md.equity.trade"];
+
 type IbPosition = {
   account: string;
   symbol: string;
@@ -53,12 +55,17 @@ export default function PortfolioPanel() {
   const [ticketAccount, setTicketAccount] = useState("");
   const [ticketSide, setTicketSide] = useState<"BUY" | "SELL">("BUY");
 
-  const [debugMsgs, setDebugMsgs] = useState<any[]>([]);
+  // Debug — immortal + filtered + frozen
+  const [allDebugMsgs, setAllDebugMsgs] = useState<any[]>([]);
+  const [frozenDebug, setFrozenDebug] = useState<any[]>([]);
   const [showControl, setShowControl] = useState(true);
   const [showMdAll, setShowMdAll] = useState(false);
   const [showIbAll, setShowIbAll] = useState(true);
 
   const debugRef = useRef<HTMLDivElement>(null);
+  const cacheRef = useRef<Map<string, any>>(new Map());
+  const subsSetRef = useRef<Set<string>>(new Set());
+  const [priceUpdateTrigger, setPriceUpdateTrigger] = useState(0);
 
   const openTradeTicket = (symbol: string, account: string, side: "BUY" | "SELL" = "BUY") => {
     setTicketSymbol(symbol);
@@ -66,6 +73,30 @@ export default function PortfolioPanel() {
     setTicketSide(side);
     setShowTradeTicket(true);
   };
+
+  // Subscribe to market data for position symbols
+  useEffect(() => {
+    if (!accountState) return;
+
+    const positionSymbols = accountState.positions.map(p => p.symbol.toUpperCase());
+    const prev = subsSetRef.current;
+    const next = new Set(positionSymbols);
+
+    const toAdd: string[] = [];
+    const toDel: string[] = [];
+
+    next.forEach((s) => { if (!prev.has(s)) toAdd.push(s); });
+    prev.forEach((s) => { if (!next.has(s)) toDel.push(s); });
+
+    if (toAdd.length) {
+      socketHub.send({ type: "subscribe", channels: CHANNELS, symbols: toAdd });
+    }
+    if (toDel.length) {
+      socketHub.send({ type: "unsubscribe", channels: CHANNELS, symbols: toDel });
+    }
+
+    subsSetRef.current = next;
+  }, [accountState?.positions]);
 
   useEffect(() => {
     const handler = (m: any) => {
@@ -78,18 +109,42 @@ export default function PortfolioPanel() {
         snapshot = m;
       }
 
-      // Debug
-      const shouldLog =
-        (snapshot?.type?.startsWith("control") && showControl) ||
-        (snapshot?.topic?.startsWith("md.") && showMdAll) ||
-        (snapshot?.topic?.startsWith("ib.") && showIbAll);
+      // IMMORTAL DEBUG — always store every message
+      setAllDebugMsgs(prev => {
+        const next = [...prev, snapshot];
+        if (next.length > DEBUG_MAX) next.splice(0, next.length - DEBUG_MAX);
+        return next;
+      });
 
-      if (shouldLog) {
-        setDebugMsgs((prev) => {
-          const next = [...prev, snapshot];
-          if (next.length > DEBUG_MAX) next.splice(0, next.length - DEBUG_MAX);
-          return next;
-        });
+      // Live market data — update price cache
+      if (snapshot?.topic && typeof snapshot.topic === "string") {
+        const topic = snapshot.topic;
+        
+        // Handle md.equity.quote.SYMBOL and md.equity.trade.SYMBOL format
+        if (topic.startsWith("md.equity.")) {
+          const parts = topic.split(".");
+          const topicSymbol = parts.length >= 4 ? parts.slice(3).join(".").toUpperCase() : "";
+          
+          const d = snapshot.data?.data || snapshot.data || {};
+          
+          // Extract price data
+          const bid = d.bidPrice ?? d.bp ?? d.bid;
+          const ask = d.askPrice ?? d.ap ?? d.ask;
+          const last = d.lastPrice ?? d.last ?? d.price ?? d.p ?? d.lp;
+          
+          if (topicSymbol && (bid !== undefined || ask !== undefined || last !== undefined)) {
+            const current = cacheRef.current.get(topicSymbol) || {};
+            cacheRef.current.set(topicSymbol, {
+              ...current,
+              ...(last !== undefined && { last: Number(last) }),
+              ...(bid !== undefined && { bid: Number(bid) }),
+              ...(ask !== undefined && { ask: Number(ask) }),
+            });
+            
+            // Force re-render to update market values
+            setPriceUpdateTrigger(prev => prev + 1);
+          }
+        }
       }
 
       // Initial snapshot
@@ -143,7 +198,6 @@ export default function PortfolioPanel() {
       if (snapshot?.topic === "ib.executions" || snapshot?.topic === "ib.execution") {
         const d = snapshot.data;
         if (!d) return;
-
         const exec = d.execution || d;
 
         const sideRaw = String(exec.side ?? "").toUpperCase();
@@ -216,19 +270,45 @@ export default function PortfolioPanel() {
 
     socketHub.onMessage(handler);
     socketHub.send({ type: "control", target: "ibAccount", op: "account_state" });
-    return () => socketHub.offMessage(handler);
-  }, [showControl, showMdAll, showIbAll]);
+    
+    // Cleanup: unsubscribe from all market data on unmount
+    return () => {
+      socketHub.offMessage(handler);
+      const symbols = Array.from(subsSetRef.current);
+      if (symbols.length) {
+        socketHub.send({ type: "unsubscribe", channels: CHANNELS, symbols });
+      }
+    };
+  }, []);
+
+  // IMMORTAL DEBUG — freezes when all filters off
+  const anyFilterOn = showControl || showMdAll || showIbAll;
+
+  const filteredDebug = anyFilterOn
+    ? allDebugMsgs.filter(
+        (m) =>
+          (m?.type?.startsWith("control") && showControl) ||
+          (m?.topic?.startsWith("md.") && showMdAll) ||
+          (m?.topic?.startsWith("ib.") && showIbAll)
+      )
+    : frozenDebug;
+
+  // Update frozen state whenever filters are on
+  useEffect(() => {
+    if (anyFilterOn) {
+      const filtered = allDebugMsgs.filter(
+        (m) =>
+          (m?.type?.startsWith("control") && showControl) ||
+          (m?.topic?.startsWith("md.") && showMdAll) ||
+          (m?.topic?.startsWith("ib.") && showIbAll)
+      );
+      setFrozenDebug(filtered);
+    }
+  }, [allDebugMsgs, showControl, showMdAll, showIbAll, anyFilterOn]);
 
   useEffect(() => {
     if (debugRef.current) debugRef.current.scrollTop = debugRef.current.scrollHeight;
-  }, [debugMsgs]);
-
-  const filteredDebug = debugMsgs.filter(
-    (m) =>
-      (m?.type?.startsWith("control") && showControl) ||
-      (m?.topic?.startsWith("md.") && showMdAll) ||
-      (m?.topic?.startsWith("ib.") && showIbAll)
-  );
+  }, [filteredDebug]);
 
   return (
     <div style={shell}>
@@ -246,6 +326,7 @@ export default function PortfolioPanel() {
           <>
             <div style={summary}>
               positions: {accountState.positions.length} · cash: {accountState.cash.length} · execs: {accountState.executions.length}
+              {subsSetRef.current.size > 0 && <> · subscribed: {subsSetRef.current.size}</>}
             </div>
 
             <div style={gridWrap}>
@@ -253,55 +334,72 @@ export default function PortfolioPanel() {
               <section style={section}>
                 <div style={title}>Positions</div>
                 <div style={table}>
-                  <div style={{ ...hdr, gridTemplateColumns: "100px 88px 40px 40px 72px 80px 140px" }}>
+                  <div style={{ ...hdr, gridTemplateColumns: "75px 60px 36px 36px 65px 80px 100px 80px 130px" }}>
                     <div>Account</div>
                     <div>Symbol</div>
                     <div>Type</div>
-                    <div>CCY</div>
+                    <div style={center}>CCY</div>
                     <div style={right}>Qty</div>
+                    <div style={right}>Last</div>
+                    <div style={right}>Mkt Value</div>
                     <div style={right}>Avg Cost</div>
                     <div style={right}>Trade</div>
                   </div>
 
-                  {accountState.positions.map((p, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        ...rowStyle,
-                        gridTemplateColumns: "100px 88px 40px 40px 72px 80px 140px",
-                      }}
-                    >
-                      <div style={cellEllipsis}>{p.account}</div>
-                      <div style={bold}>{p.symbol}</div>
-                      <div style={gray10}>{p.secType}</div>
-                      <div style={center}>{p.currency}</div>
-                      <div style={rightMono}>
-                        {p.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                      </div>
-                      <div style={rightMono}>{p.avgCost.toFixed(4)}</div>
+                  {accountState.positions.map((p, i) => {
+                    const lastPrice = cacheRef.current.get(p.symbol)?.last || 0;
+                    const mktValue = p.quantity * lastPrice;
+                    const mktValueDisplay = lastPrice > 0
+                      ? (mktValue < 0
+                          ? `(${Math.abs(mktValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
+                          : mktValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                      : "—";
 
-                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingRight: 12 }}>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openTradeTicket(p.symbol, p.account, "BUY");
-                          }}
-                          style={{ ...iconBtn, background: "#dcfce7", color: "#166534" }}
-                        >
-                          BUY
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openTradeTicket(p.symbol, p.account, "SELL");
-                          }}
-                          style={{ ...iconBtn, background: "#fce7f3", color: "#831843" }}
-                        >
-                          SELL
-                        </button>
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          ...rowStyle,
+                          gridTemplateColumns: "75px 60px 36px 36px 65px 80px 100px 80px 130px",
+                        }}
+                      >
+                        <div style={cellEllipsis}>{p.account}</div>
+                        <div style={bold}>{p.symbol}</div>
+                        <div style={gray10}>{p.secType}</div>
+                        <div style={centerBold}>{p.currency}</div>
+                        <div style={rightMono}>
+                          {p.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                        </div>
+                        <div style={rightMono}>
+                          {lastPrice > 0 ? lastPrice.toFixed(4) : "—"}
+                        </div>
+                        <div style={rightMono}>
+                          {mktValueDisplay}
+                        </div>
+                        <div style={rightMono}>{p.avgCost.toFixed(4)}</div>
+                        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingRight: 12 }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openTradeTicket(p.symbol, p.account, "BUY");
+                            }}
+                            style={{ ...iconBtn, background: "#dcfce7", color: "#166534" }}
+                          >
+                            BUY
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openTradeTicket(p.symbol, p.account, "SELL");
+                            }}
+                            style={{ ...iconBtn, background: "#fce7f3", color: "#831843" }}
+                          >
+                            SELL
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
 
@@ -384,14 +482,42 @@ export default function PortfolioPanel() {
           </div>
         )}
 
-        {/* Debug */}
+        {/* Debug — immortal + frozen */}
         <section style={{ ...section, marginTop: 20 }}>
-          <div style={title}>Debug ({filteredDebug.length}/{debugMsgs.length})</div>
+          <div style={title}>
+            Debug ({filteredDebug.length}/{allDebugMsgs.length})
+            {!anyFilterOn && <span style={{ color: "#f59e0b", marginLeft: 8 }}>⏸ FROZEN</span>}
+          </div>
           <div style={filters}>
             <label><input type="checkbox" checked={showControl} onChange={e => setShowControl(e.target.checked)} /> control</label>
             <label><input type="checkbox" checked={showMdAll} onChange={e => setShowMdAll(e.target.checked)} /> md.*</label>
             <label><input type="checkbox" checked={showIbAll} onChange={e => setShowIbAll(e.target.checked)} /> ib.*</label>
           </div>
+
+          {/* COPY LAST MESSAGE */}
+          <div style={{ padding: "8px 12px", background: "#111", borderTop: "1px solid #444", fontSize: 11, display: "flex", justifyContent: "space-between" }}>
+            <button
+              onClick={() => {
+                const last = allDebugMsgs[allDebugMsgs.length - 1];
+                if (last) {
+                  navigator.clipboard.writeText(JSON.stringify(last, null, 2));
+                  alert("Last message copied to clipboard!");
+                }
+              }}
+              style={{
+                padding: "6px 12px",
+                background: "#333",
+                color: "white",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              Copy Last Message
+            </button>
+            <span style={{ color: "#888" }}>Stored: {allDebugMsgs.length}</span>
+          </div>
+
           <div ref={debugRef} style={debugBox}>
             {filteredDebug.map((m, i) => (
               <pre key={i} style={{ margin: "2px 0", fontSize: 10 }}>
@@ -406,7 +532,7 @@ export default function PortfolioPanel() {
 }
 
 /* Styles */
-const shell = { display: "flex", flexDirection: "column" as const, height: "100%" };
+const shell = { display: "flex", flexDirection: "column" as const, height: "100%", color: "#111", background: "#fff" };
 const header = { padding: "10px 14px", borderBottom: "1px solid #e5e7eb", background: "#fff" };
 const body = { flex: 1, overflow: "auto", padding: "12px 14px", background: "#f9fafb" };
 const summary = { fontSize: 11, color: "#4b5563", marginBottom: 10 };
