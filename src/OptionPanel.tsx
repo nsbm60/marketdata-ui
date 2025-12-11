@@ -2,6 +2,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
 import type { TickEnvelope } from "./ws/ws-types";
+import OptionTradeTicket from "./components/OptionTradeTicket";
 
 /** ---------- Types ---------- */
 type ExpiryMeta = {
@@ -48,6 +49,16 @@ export default function OptionPanel() {
   // row selection (expiration + strike)
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
+  // Trade ticket state
+  const [showTradeTicket, setShowTradeTicket] = useState(false);
+  const [ticketUnderlying, setTicketUnderlying] = useState("");
+  const [ticketStrike, setTicketStrike] = useState(0);
+  const [ticketExpiry, setTicketExpiry] = useState("");
+  const [ticketRight, setTicketRight] = useState<"C" | "P">("C");
+  const [ticketSide, setTicketSide] = useState<"BUY" | "SELL">("BUY");
+  const [ticketAccount] = useState("DU333427"); // TODO: Make this dynamic
+  const [ticketMarketData, setTicketMarketData] = useState<any>({});
+
   // price + greeks book keyed by option symbol
   const bookRef = useRef<Map<string, QuoteRow>>(new Map());
 
@@ -60,6 +71,23 @@ export default function OptionPanel() {
       rafRef.current = 0 as any;
       setVersion((v) => (v + 1) & 0xffff);
     });
+  };
+
+  const openTradeTicket = (
+    underlying: string,
+    strike: number,
+    expiry: string,
+    right: "C" | "P",
+    side: "BUY" | "SELL",
+    marketData: any
+  ) => {
+    setTicketUnderlying(underlying);
+    setTicketStrike(strike);
+    setTicketExpiry(expiry);
+    setTicketRight(right);
+    setTicketSide(side);
+    setTicketMarketData(marketData);
+    setShowTradeTicket(true);
   };
 
   useEffect(() => {
@@ -139,9 +167,9 @@ export default function OptionPanel() {
   }, []);
 
   // Build rows per expiry:
-  // Calls:  Last Bid Mid Ask Δ Γ Θ Vega IV
+  // Calls:  Last Bid Mid Ask Δ Γ Θ Vega IV Trade
   // Strike
-  // Puts:   Last Bid Mid Ask Δ Γ Θ Vega IV
+  // Puts:   Last Bid Mid Ask Δ Γ Θ Vega IV Trade
   const groups = useMemo(() => {
     if (!underlying) return [];
 
@@ -253,9 +281,10 @@ export default function OptionPanel() {
             <div style={{ ...thBlock, textAlign: "center" } as any}>Strike</div>
             <div style={{ ...thBlock, textAlign: "center" } as any}>Puts</div>
           </div>
-          {/* Level 2 header: Calls & Puts show Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
+          {/* Level 2 header: Calls show Trade | data, Puts show data | Trade */}
           <div style={hdrRow2 as any}>
-            <div style={subgrid9 as any}>
+            <div style={subgrid10 as any}>
+              <div style={subTh as any}>Trade</div>
               <div style={subTh as any}>Last</div>
               <div style={subTh as any}>Bid</div>
               <div style={subTh as any}>Mid</div>
@@ -267,7 +296,7 @@ export default function OptionPanel() {
               <div style={subTh as any}>IV</div>
             </div>
             <div style={subTh as any}>{/* strike subheader empty */}</div>
-            <div style={subgrid9 as any}>
+            <div style={subgrid10 as any}>
               <div style={subTh as any}>Last</div>
               <div style={subTh as any}>Bid</div>
               <div style={subTh as any}>Mid</div>
@@ -277,6 +306,7 @@ export default function OptionPanel() {
               <div style={subTh as any}>Θ</div>
               <div style={subTh as any}>Vega</div>
               <div style={subTh as any}>IV</div>
+              <div style={subTh as any}>Trade</div>
             </div>
           </div>
         </div>
@@ -313,9 +343,51 @@ export default function OptionPanel() {
                     <Fragment key={rowKey}>
                       {showDivider && <div style={atmDivider as any} />}
                       <div
-                        style={{ ...row19, cursor: "pointer" } as any}
+                        style={{ ...row21, cursor: "pointer" } as any}
                         onClick={() => setSelectedKey(rowKey)}
                       >
+                        {/* Call Trade Buttons FIRST */}
+                        <div style={{ ...baseCell, display: "flex", justifyContent: "center", gap: 4, padding: "1px 2px" }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openTradeTicket(underlying, r.strike, g.expiration, "C", "BUY", {
+                                last: r.cLast,
+                                bid: r.cBid,
+                                ask: r.cAsk,
+                                mid: r.cMid,
+                                delta: r.cDelta,
+                                gamma: r.cGamma,
+                                theta: r.cTheta,
+                                vega: r.cVega,
+                                iv: r.cIv,
+                              });
+                            }}
+                            style={tradeBtn("BUY")}
+                          >
+                            B
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openTradeTicket(underlying, r.strike, g.expiration, "C", "SELL", {
+                                last: r.cLast,
+                                bid: r.cBid,
+                                ask: r.cAsk,
+                                mid: r.cMid,
+                                delta: r.cDelta,
+                                gamma: r.cGamma,
+                                theta: r.cTheta,
+                                vega: r.cVega,
+                                iv: r.cIv,
+                              });
+                            }}
+                            style={tradeBtn("SELL")}
+                          >
+                            S
+                          </button>
+                        </div>
+
                         {/* Calls: Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
                         <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cLast)}</div>
                         <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cBid)}</div>
@@ -348,6 +420,48 @@ export default function OptionPanel() {
                         <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pTheta)}</div>
                         <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pVega)}</div>
                         <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pIv)}</div>
+
+                        {/* Put Trade Buttons LAST */}
+                        <div style={{ ...baseCell, display: "flex", justifyContent: "center", gap: 4, padding: "1px 2px" }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openTradeTicket(underlying, r.strike, g.expiration, "P", "BUY", {
+                                last: r.pLast,
+                                bid: r.pBid,
+                                ask: r.pAsk,
+                                mid: r.pMid,
+                                delta: r.pDelta,
+                                gamma: r.pGamma,
+                                theta: r.pTheta,
+                                vega: r.pVega,
+                                iv: r.pIv,
+                              });
+                            }}
+                            style={tradeBtn("BUY")}
+                          >
+                            B
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openTradeTicket(underlying, r.strike, g.expiration, "P", "SELL", {
+                                last: r.pLast,
+                                bid: r.pBid,
+                                ask: r.pAsk,
+                                mid: r.pMid,
+                                delta: r.pDelta,
+                                gamma: r.pGamma,
+                                theta: r.pTheta,
+                                vega: r.pVega,
+                                iv: r.pIv,
+                              });
+                            }}
+                            style={tradeBtn("SELL")}
+                          >
+                            S
+                          </button>
+                        </div>
                       </div>
                     </Fragment>
                   );
@@ -357,6 +471,30 @@ export default function OptionPanel() {
           </div>
         )}
       </div>
+
+      {/* Trade Ticket */}
+      {showTradeTicket && (
+        <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 1000 }}>
+          <OptionTradeTicket
+            underlying={ticketUnderlying}
+            strike={ticketStrike}
+            expiry={ticketExpiry}
+            right={ticketRight}
+            account={ticketAccount}
+            defaultSide={ticketSide}
+            last={ticketMarketData.last}
+            bid={ticketMarketData.bid}
+            ask={ticketMarketData.ask}
+            mid={ticketMarketData.mid}
+            delta={ticketMarketData.delta}
+            gamma={ticketMarketData.gamma}
+            theta={ticketMarketData.theta}
+            vega={ticketMarketData.vega}
+            iv={ticketMarketData.iv}
+            onClose={() => setShowTradeTicket(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -554,15 +692,17 @@ const stickyHeader = {
 };
 
 /**
- * Column layout:
- * - 9 narrow columns for Calls (9 × 52px = 468)
+ * Column layout (updated with Trade columns on outside):
+ * - 1 Call trade column (52px)
+ * - 9 data columns for Calls (9 × 52px = 468px)
  * - 1 Strike column (70px)
- * - 9 narrow columns for Puts  (9 × 52px = 468)
- * Total: 1006px for the grid; it will scroll horizontally if needed.
+ * - 9 data columns for Puts (9 × 52px = 468px)
+ * - 1 Put trade column (52px)
+ * Total: 1110px for the grid; it will scroll horizontally if needed.
  */
 const hdrRow1 = {
   display: "grid",
-  gridTemplateColumns: "468px 70px 468px", // Calls | Strike | Puts
+  gridTemplateColumns: "520px 70px 520px", // Calls (trade+data) | Strike | Puts (data+trade)
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
@@ -582,16 +722,16 @@ const thBlock = {
 
 const hdrRow2 = {
   display: "grid",
-  gridTemplateColumns: "468px 70px 468px",
+  gridTemplateColumns: "520px 70px 520px",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
   borderBottom: "1px solid #f0f0f0",
 };
 
-const subgrid9 = {
+const subgrid10 = {
   display: "grid",
-  gridTemplateColumns: "repeat(9, 52px)",
+  gridTemplateColumns: "repeat(10, 52px)", // 9 data + 1 trade
   columnGap: 0,
 };
 
@@ -625,9 +765,9 @@ const expiryHead = {
   gap: 6,
 };
 
-const row19 = {
+const row21 = {
   display: "grid",
-  gridTemplateColumns: "repeat(9, 52px) 70px repeat(9, 52px)",
+  gridTemplateColumns: "52px repeat(9, 52px) 70px repeat(9, 52px) 52px", // call trade + 9 call data + strike + 9 put data + put trade
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
@@ -656,3 +796,17 @@ const empty = {
   fontSize: 12,
   color: "#666",
 };
+
+function tradeBtn(side: "BUY" | "SELL") {
+  return {
+    padding: "2px 6px",
+    fontSize: 9,
+    fontWeight: 600,
+    background: side === "BUY" ? "#dcfce7" : "#fce7f3",
+    color: side === "BUY" ? "#166534" : "#831843",
+    border: side === "BUY" ? "1px solid #86efac" : "1px solid #fda4af",
+    borderRadius: 3,
+    cursor: "pointer",
+    lineHeight: 1,
+  };
+}

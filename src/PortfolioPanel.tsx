@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
+import OptionTradeTicket from "./components/OptionTradeTicket";
 
 const CHANNELS = ["md.equity.quote", "md.equity.trade"];
 
@@ -13,6 +14,10 @@ type IbPosition = {
   quantity: number;
   avgCost: number;
   lastUpdated: string;
+  // Option fields (optional)
+  strike?: number;
+  expiry?: string;  // YYYYMMDD format
+  right?: string;   // "Call" or "Put"
 };
 
 type IbCash = {
@@ -33,6 +38,10 @@ type IbExecution = {
   execId: string;
   orderId: number;
   ts: string;
+  // Option fields (optional)
+  strike?: number;
+  expiry?: string;  // YYYYMMDD format
+  right?: string;   // "Call" or "Put"
 };
 
 type IbAccountState = {
@@ -54,6 +63,15 @@ export default function PortfolioPanel() {
   const [ticketSymbol, setTicketSymbol] = useState("");
   const [ticketAccount, setTicketAccount] = useState("");
   const [ticketSide, setTicketSide] = useState<"BUY" | "SELL">("BUY");
+  const [ticketSecType, setTicketSecType] = useState<"STK" | "OPT">("STK");
+  
+  // Option-specific ticket data
+  const [ticketOptionData, setTicketOptionData] = useState<{
+    underlying: string;
+    strike: number;
+    expiry: string;
+    right: "C" | "P";
+  } | null>(null);
 
   // Debug — immortal + filtered + frozen
   const [allDebugMsgs, setAllDebugMsgs] = useState<any[]>([]);
@@ -67,10 +85,38 @@ export default function PortfolioPanel() {
   const subsSetRef = useRef<Set<string>>(new Set());
   const [priceUpdateTrigger, setPriceUpdateTrigger] = useState(0);
 
-  const openTradeTicket = (symbol: string, account: string, side: "BUY" | "SELL" = "BUY") => {
+  const openTradeTicket = (
+    symbol: string, 
+    account: string, 
+    side: "BUY" | "SELL", 
+    secType: string
+  ) => {
     setTicketSymbol(symbol);
     setTicketAccount(account);
     setTicketSide(side);
+    
+    if (secType === "OPT") {
+      // Parse option symbol to extract details
+      const parsed = parseOptionSymbol(symbol);
+      if (parsed) {
+        setTicketSecType("OPT");
+        setTicketOptionData({
+          underlying: parsed.underlying,
+          strike: parsed.strike,
+          expiry: parsed.expiration,
+          right: parsed.right === "call" ? "C" : "P",
+        });
+      } else {
+        // Fallback if we can't parse
+        console.warn("Could not parse option symbol:", symbol);
+        setTicketSecType("STK");
+        setTicketOptionData(null);
+      }
+    } else {
+      setTicketSecType("STK");
+      setTicketOptionData(null);
+    }
+    
     setShowTradeTicket(true);
   };
 
@@ -183,6 +229,10 @@ if (shouldStore) {
           quantity: Number(p.quantity ?? 0),
           avgCost: Number(p.avgCost ?? 0),
           lastUpdated: String(p.lastUpdated ?? ""),
+          // Option fields (if present)
+          strike: p.strike !== undefined ? Number(p.strike) : undefined,
+          expiry: p.expiry !== undefined ? String(p.expiry) : undefined,
+          right: p.right !== undefined ? String(p.right) : undefined,
         }));
 
         const cash = (raw.cash_raw || []).map((c: any) => ({
@@ -203,6 +253,10 @@ if (shouldStore) {
           execId: String(e.execId ?? ""),
           orderId: Number(e.orderId ?? 0),
           ts: String(e.ts ?? ""),
+          // Option fields (if present)
+          strike: e.strike !== undefined ? Number(e.strike) : undefined,
+          expiry: e.expiry !== undefined ? String(e.expiry) : undefined,
+          right: e.right !== undefined ? String(e.right) : undefined,
         }));
 
         setAccountState({ positions, cash, executions });
@@ -360,7 +414,7 @@ useEffect(() => {
               <section style={section}>
                 <div style={title}>Positions</div>
                 <div style={table}>
-                  <div style={{ ...hdr, gridTemplateColumns: "75px 60px 36px 36px 65px 80px 100px 80px 130px" }}>
+                  <div style={{ ...hdr, gridTemplateColumns: "75px 140px 36px 36px 65px 80px 100px 80px 130px" }}>
                     <div>Account</div>
                     <div>Symbol</div>
                     <div>Type</div>
@@ -373,7 +427,19 @@ useEffect(() => {
                   </div>
 
                   {accountState.positions.map((p, i) => {
-                    const lastPrice = cacheRef.current.get(p.symbol)?.last || 0;
+                    // Build the proper symbol for cache lookup
+                    let cacheKey = p.symbol;
+                    if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+                      // Build OSI format: SYMBOL + YYMMDD + C/P + STRIKE (8 digits, strike * 1000)
+                      const yy = p.expiry.substring(2, 4);
+                      const mm = p.expiry.substring(4, 6);
+                      const dd = p.expiry.substring(6, 8);
+                      const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
+                      const strikeFormatted = String(Math.round(p.strike * 1000)).padStart(8, "0");
+                      cacheKey = `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
+                    }
+                    
+                    const lastPrice = cacheRef.current.get(cacheKey)?.last || 0;
                     const mktValue = p.quantity * lastPrice;
                     const mktValueDisplay = lastPrice > 0
                       ? (mktValue < 0
@@ -381,16 +447,37 @@ useEffect(() => {
                           : mktValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
                       : "—";
 
+                    // Format symbol display based on secType
+                    let symbolDisplay: React.ReactNode;
+                    if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+                      // Use the fields directly from the backend
+                      const rightLabel = p.right === "C" || p.right === "Call" ? "Call" : "Put";
+                      const formattedExpiry = formatExpiryFromYYYYMMDD(p.expiry);
+                      symbolDisplay = (
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 11 }}>
+                            {p.symbol} {p.strike.toFixed(0)} {rightLabel}
+                          </div>
+                          <div style={{ fontSize: 9, color: "#666" }}>
+                            {formattedExpiry}
+                          </div>
+                        </div>
+                      );
+                    } else {
+                      // Equity or incomplete option data
+                      symbolDisplay = <div style={{ fontWeight: 600 }}>{p.symbol}</div>;
+                    }
+
                     return (
                       <div
                         key={i}
                         style={{
                           ...rowStyle,
-                          gridTemplateColumns: "75px 60px 36px 36px 65px 80px 100px 80px 130px",
+                          gridTemplateColumns: "75px 140px 36px 36px 65px 80px 100px 80px 130px",
                         }}
                       >
                         <div style={cellEllipsis}>{p.account}</div>
-                        <div style={bold}>{p.symbol}</div>
+                        <div>{symbolDisplay}</div>
                         <div style={gray10}>{p.secType}</div>
                         <div style={centerBold}>{p.currency}</div>
                         <div style={rightMono}>
@@ -407,7 +494,7 @@ useEffect(() => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              openTradeTicket(p.symbol, p.account, "BUY");
+                              openTradeTicket(p.symbol, p.account, "BUY", p.secType);
                             }}
                             style={{ ...iconBtn, background: "#dcfce7", color: "#166534" }}
                           >
@@ -416,7 +503,7 @@ useEffect(() => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              openTradeTicket(p.symbol, p.account, "SELL");
+                              openTradeTicket(p.symbol, p.account, "SELL", p.secType);
                             }}
                             style={{ ...iconBtn, background: "#fce7f3", color: "#831843" }}
                           >
@@ -461,7 +548,7 @@ useEffect(() => {
                   <div style={emptyRow}>No executions yet</div>
                 ) : (
                   <div style={table}>
-                    <div style={{ ...hdr, gridTemplateColumns: "78px 98px 88px 48px 68px 100px 110px" }}>
+                    <div style={{ ...hdr, gridTemplateColumns: "78px 98px 140px 48px 68px 100px 110px" }}>
                       <div style={timeHeader}>Time</div>
                       <div>Account</div>
                       <div>Symbol</div>
@@ -470,23 +557,46 @@ useEffect(() => {
                       <div style={right}>Price</div>
                       <div style={right}>ID</div>
                     </div>
-                    {accountState.executions.map((e, i) => (
-                      <div key={e.execId || i} style={{ ...rowStyle, gridTemplateColumns: "78px 98px 88px 48px 68px 100px 110px" }}>
-                        <div style={timeCell}>
-                          {new Date(e.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    {accountState.executions.map((e, i) => {
+                      // Format symbol display based on secType
+                      let symbolDisplay: React.ReactNode;
+                      if (e.secType === "OPT" && e.strike !== undefined && e.expiry !== undefined && e.right !== undefined) {
+                        // Use the fields directly from the backend
+                        const rightLabel = e.right === "C" || e.right === "Call" ? "Call" : "Put";
+                        const formattedExpiry = formatExpiryFromYYYYMMDD(e.expiry);
+                        symbolDisplay = (
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 11 }}>
+                              {e.symbol} {e.strike.toFixed(0)} {rightLabel}
+                            </div>
+                            <div style={{ fontSize: 9, color: "#666" }}>
+                              {formattedExpiry}
+                            </div>
+                          </div>
+                        );
+                      } else {
+                        // Equity or incomplete option data
+                        symbolDisplay = <div style={{ fontWeight: 600 }}>{e.symbol}</div>;
+                      }
+
+                      return (
+                        <div key={e.execId || i} style={{ ...rowStyle, gridTemplateColumns: "78px 98px 140px 48px 68px 100px 110px" }}>
+                          <div style={timeCell}>
+                            {new Date(e.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                          </div>
+                          <div style={cellEllipsis}>{e.account}</div>
+                          <div>{symbolDisplay}</div>
+                          <div style={{ ...centerBold, color: e.side === "BUY" ? "#16a34a" : "#dc2626" }}>
+                            {e.side}
+                          </div>
+                          <div style={right}>{e.quantity.toLocaleString()}</div>
+                          <div style={rightMono}>{e.price.toFixed(4)}</div>
+                          <div style={{ ...right, ...gray9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                            {e.execId.slice(-12)}
+                          </div>
                         </div>
-                        <div style={cellEllipsis}>{e.account}</div>
-                        <div style={bold}>{e.symbol}</div>
-                        <div style={{ ...centerBold, color: e.side === "BUY" ? "#16a34a" : "#dc2626" }}>
-                          {e.side}
-                        </div>
-                        <div style={right}>{e.quantity.toLocaleString()}</div>
-                        <div style={rightMono}>{e.price.toFixed(4)}</div>
-                        <div style={{ ...right, ...gray9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                          {e.execId.slice(-12)}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </section>
@@ -499,12 +609,27 @@ useEffect(() => {
         {/* Floating Trade Ticket */}
         {showTradeTicket && (
           <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 1000 }}>
-            <TradeTicket
-              symbol={ticketSymbol}
-              account={ticketAccount}
-              defaultSide={ticketSide}
-              onClose={() => setShowTradeTicket(false)}
-            />
+            {ticketSecType === "STK" ? (
+              <TradeTicket
+                symbol={ticketSymbol}
+                account={ticketAccount}
+                defaultSide={ticketSide}
+                onClose={() => setShowTradeTicket(false)}
+              />
+            ) : ticketOptionData ? (
+              <OptionTradeTicket
+                underlying={ticketOptionData.underlying}
+                strike={ticketOptionData.strike}
+                expiry={ticketOptionData.expiry}
+                right={ticketOptionData.right}
+                account={ticketAccount}
+                defaultSide={ticketSide}
+                last={cacheRef.current.get(ticketSymbol)?.last}
+                bid={cacheRef.current.get(ticketSymbol)?.bid}
+                ask={cacheRef.current.get(ticketSymbol)?.ask}
+                onClose={() => setShowTradeTicket(false)}
+              />
+            ) : null}
           </div>
         )}
 
@@ -557,6 +682,102 @@ useEffect(() => {
   );
 }
 
+/* ---- Option Symbol Parser ---- */
+type ParsedOption = {
+  underlying: string;
+  right: "call" | "put";
+  strike: number;
+  expiration: string; // YYYY-MM-DD
+};
+
+function parseOptionSymbol(sym: string): ParsedOption | null {
+  const S = String(sym || "").toUpperCase().replace(/\s+/g, "");
+  
+  // OSI format: AAPL250117C00190000
+  const m1 = /^([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/.exec(S);
+  if (m1) {
+    const underlying = m1[1];
+    const yy = m1[2];
+    const mm = m1[3];
+    const dd = m1[4];
+    const right = m1[5] === "C" ? "call" : "put";
+    const strike = parseInt(m1[6], 10) / 1000;
+    const yyyy = Number(yy) + 2000;
+    const expiration = `${yyyy}-${mm}-${dd}`;
+    return { underlying, right, strike, expiration };
+  }
+  
+  // Underscore format: AAPL_011725C_190
+  const m2 = /^([A-Z]+)[._-](\d{2})(\d{2})(\d{2})([CP])[._-](\d+(\.\d+)?)$/.exec(S);
+  if (m2) {
+    const underlying = m2[1];
+    const yy = m2[2];
+    const mm = m2[3];
+    const dd = m2[4];
+    const right = m2[5] === "C" ? "call" : "put";
+    const strike = parseFloat(m2[6]);
+    const yyyy = Number(yy) + 2000;
+    const expiration = `${yyyy}-${mm}-${dd}`;
+    return { underlying, right, strike, expiration };
+  }
+  
+  // Fallback (no reliable expiry)
+  const m3 = /^([A-Z]+)\d{6,8}([CP])(\d+(\.\d+)?)$/.exec(S);
+  if (m3) {
+    const underlying = m3[1];
+    const right = m3[2] === "C" ? "call" : "put";
+    const strike = parseFloat(m3[3]);
+    return { underlying, right, strike, expiration: "1970-01-01" };
+  }
+  
+  return null;
+}
+
+function formatExpiryFromYYYYMMDD(expiry: string): string {
+  try {
+    // Parse YYYYMMDD format: "20251212" -> "Dec 12, 2025"
+    if (expiry.length !== 8) return expiry;
+    
+    const y = expiry.substring(0, 4);
+    const m = expiry.substring(4, 6);
+    const d = expiry.substring(6, 8);
+    
+    const dt = new Date(Number(y), Number(m) - 1, Number(d));
+    
+    return dt.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return expiry;
+  }
+}
+
+function formatExpiryShort(expiry: string): string {
+  try {
+    // Match YYYY-MM-DD explicitly
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expiry);
+    if (!m) return expiry;
+
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+
+    // Construct LOCAL date (not UTC midnight)
+    const dt = new Date(y, mo - 1, d);
+
+    // Format as "Dec 19, 2025"
+    return dt.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return expiry;
+  }
+}
+
 /* Styles */
 const shell = { display: "flex", flexDirection: "column" as const, height: "100%", color: "#111", background: "#fff" };
 const header = { padding: "10px 14px", borderBottom: "1px solid #e5e7eb", background: "#fff" };
@@ -567,7 +788,7 @@ const section = { background: "#fff", border: "1px solid #e5e7eb", borderRadius:
 const title = { fontSize: 12, fontWeight: 600, padding: "8px 10px", background: "#f1f5f9", borderBottom: "1px solid #e5e7eb" };
 const table = { display: "flex", flexDirection: "column" as const };
 const hdr = { display: "grid", fontWeight: 600, fontSize: 10.5, color: "#374151", padding: "0 10px", background: "#f8fafc", height: 26, alignItems: "center" };
-const rowStyle = { display: "grid", fontSize: 11, height: 22, alignItems: "center", padding: "0 10px", borderBottom: "1px solid #f3f4f6" };
+const rowStyle = { display: "grid", fontSize: 11, minHeight: 32, alignItems: "center", padding: "0 10px", borderBottom: "1px solid #f3f4f6" };
 
 const cellEllipsis = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, monospace", fontSize: 10 };
 const right = { textAlign: "right" as const };
