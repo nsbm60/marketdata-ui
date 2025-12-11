@@ -250,8 +250,9 @@ export default function EquityPanel({
           <input
             value={input}
             onChange={(e) => setInput((e.target as HTMLInputElement).value)}
+            onKeyDown={(e) => { if (e.key === "Enter") actAdd(); }}
             placeholder="Tickers (comma/space). Example: NVDA AAPL META"
-            title="Enter one or more tickers, then click Add or Replace"
+            title="Enter one or more tickers, then click Add or Replace (or press Enter)"
             style={inputStyle as any}
             spellCheck={false}
             autoCorrect="off"

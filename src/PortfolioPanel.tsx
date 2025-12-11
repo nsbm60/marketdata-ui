@@ -1,5 +1,5 @@
 // src/PortfolioPanel.tsx
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
 
@@ -74,11 +74,17 @@ export default function PortfolioPanel() {
     setShowTradeTicket(true);
   };
 
+  // Get stable symbol list for dependency tracking
+  const positionSymbolsKey = useMemo(() => {
+    if (!accountState?.positions) return "";
+    return accountState.positions.map(p => p.symbol.toUpperCase()).sort().join(",");
+  }, [accountState?.positions]);
+
   // Subscribe to market data for position symbols
   useEffect(() => {
-    if (!accountState) return;
+    if (!positionSymbolsKey) return;
 
-    const positionSymbols = accountState.positions.map(p => p.symbol.toUpperCase());
+    const positionSymbols = positionSymbolsKey.split(",").filter(Boolean);
     const prev = subsSetRef.current;
     const next = new Set(positionSymbols);
 
@@ -89,14 +95,16 @@ export default function PortfolioPanel() {
     prev.forEach((s) => { if (!next.has(s)) toDel.push(s); });
 
     if (toAdd.length) {
+      console.log("[PortfolioPanel] Subscribing to market data:", toAdd);
       socketHub.send({ type: "subscribe", channels: CHANNELS, symbols: toAdd });
     }
     if (toDel.length) {
+      console.log("[PortfolioPanel] Unsubscribing from market data:", toDel);
       socketHub.send({ type: "unsubscribe", channels: CHANNELS, symbols: toDel });
     }
 
     subsSetRef.current = next;
-  }, [accountState?.positions]);
+  }, [positionSymbolsKey]);
 
   useEffect(() => {
     const handler = (m: any) => {
@@ -110,11 +118,21 @@ export default function PortfolioPanel() {
       }
 
       // IMMORTAL DEBUG — always store every message
-      setAllDebugMsgs(prev => {
-        const next = [...prev, snapshot];
-        if (next.length > DEBUG_MAX) next.splice(0, next.length - DEBUG_MAX);
-        return next;
-      });
+// Filter before storing based on current checkbox state
+let shouldStore = false;
+
+if (snapshot?.type?.startsWith("control")) shouldStore = showControl;
+else if (snapshot?.topic?.startsWith("md.")) shouldStore = showMdAll;
+else if (snapshot?.topic?.startsWith("ib.")) shouldStore = showIbAll;
+
+// Only store messages that match current filters
+if (shouldStore) {
+  setAllDebugMsgs(prev => {
+    const next = [...prev, snapshot];
+    if (next.length > DEBUG_MAX) next.splice(0, next.length - DEBUG_MAX);
+    return next;
+  });
+}
 
       // Live market data — update price cache
       if (snapshot?.topic && typeof snapshot.topic === "string") {
@@ -271,12 +289,14 @@ export default function PortfolioPanel() {
     socketHub.onMessage(handler);
     socketHub.send({ type: "control", target: "ibAccount", op: "account_state" });
     
-    // Cleanup: unsubscribe from all market data on unmount
+    // Cleanup: unsubscribe from all market data and remove handler
     return () => {
       socketHub.offMessage(handler);
       const symbols = Array.from(subsSetRef.current);
-      if (symbols.length) {
+      if (symbols.length > 0) {
+        console.log("[PortfolioPanel] Cleanup: Unsubscribing from all symbols:", symbols);
         socketHub.send({ type: "unsubscribe", channels: CHANNELS, symbols });
+        subsSetRef.current.clear();
       }
     };
   }, []);
@@ -306,9 +326,15 @@ export default function PortfolioPanel() {
     }
   }, [allDebugMsgs, showControl, showMdAll, showIbAll, anyFilterOn]);
 
-  useEffect(() => {
-    if (debugRef.current) debugRef.current.scrollTop = debugRef.current.scrollHeight;
-  }, [filteredDebug]);
+useEffect(() => {
+  if (debugRef.current) {
+    const { scrollTop, scrollHeight, clientHeight } = debugRef.current;
+    const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10;
+    if (isAtBottom) {
+      debugRef.current.scrollTop = scrollHeight;
+    }
+  }
+}, [filteredDebug]);
 
   return (
     <div style={shell}>

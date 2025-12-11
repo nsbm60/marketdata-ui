@@ -12,7 +12,8 @@ type Props = {
 export default function TradeTicket({ symbol, account, defaultSide = "BUY", onClose }: Props) {
   const [side, setSide] = useState<"BUY" | "SELL">(defaultSide);
   const [quantity, setQuantity] = useState("");
-  const [orderType, setOrderType] = useState<"MKT" | "LMT" | "STP" | "STPLMT">("LMT");  const [limitPrice, setLimitPrice] = useState("");
+  const [orderType, setOrderType] = useState<"MKT" | "LMT" | "STP" | "STPLMT">("LMT");
+  const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
 
   const [last, setLast] = useState("—");
@@ -46,20 +47,36 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", onCl
   const sendOrder = () => {
     if (!quantity || Number(quantity) <= 0) return;
 
+    // Build data object with only the fields we need
+    const data: any = {
+      account,
+      symbol,
+      secType: "STK",
+      side,
+      quantity: Number(quantity),
+      orderType,
+    };
+
+    // Only add price fields if they're required and valid for this order type
+    if ((orderType === "LMT" || orderType === "STPLMT") && limitPrice) {
+      const lmt = Number(limitPrice);
+      if (!isNaN(lmt) && lmt > 0) {
+        data.lmtPrice = lmt;
+      }
+    }
+
+    if ((orderType === "STP" || orderType === "STPLMT") && stopPrice) {
+      const aux = Number(stopPrice);
+      if (!isNaN(aux) && aux > 0) {
+        data.auxPrice = aux;
+      }
+    }
+
     socketHub.send({
       type: "control",
-      target: "ibOrder",
+      target: "ibAccount",
       op: "place_order",
-      data: {
-        account,
-        symbol,
-        secType: "STK",
-        side,
-        quantity: Number(quantity),
-        orderType,
-        lmtPrice: ["LMT", "STPLMT"].includes(orderType) ? Number(limitPrice) || null : null,
-        auxPrice: ["STP", "STPLMT"].includes(orderType) ? Number(stopPrice) || null : null,
-      },
+      data,
     });
 
     onClose();
