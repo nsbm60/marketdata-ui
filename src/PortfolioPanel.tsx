@@ -152,40 +152,44 @@ export default function PortfolioPanel() {
     subsSetRef.current = next;
   }, [positionSymbolsKey]);
 
-  // Subscribe to option market data via get_chain for option positions
+  // Subscribe to option market data for option positions
   useEffect(() => {
     if (!accountState?.positions) return;
 
-    // Extract unique (underlying, expiry) pairs from option positions
-    const optionPairs = new Map<string, Set<string>>(); // underlying -> Set of expiries
+    // Build OSI symbols for option positions
+    const osiSymbols: string[] = [];
     
     accountState.positions.forEach(p => {
-      if (p.secType === "OPT" && p.expiry) {
-        if (!optionPairs.has(p.symbol)) {
-          optionPairs.set(p.symbol, new Set());
-        }
-        // Convert YYYYMMDD to YYYY-MM-DD
-        const formattedExpiry = p.expiry.length === 8
-          ? `${p.expiry.substring(0, 4)}-${p.expiry.substring(4, 6)}-${p.expiry.substring(6, 8)}`
-          : p.expiry;
-        optionPairs.get(p.symbol)!.add(formattedExpiry);
+      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+        // Build OSI format: SYMBOL + YYMMDD + C/P + STRIKE (8 digits, strike * 1000)
+        const yy = p.expiry.substring(2, 4);
+        const mm = p.expiry.substring(4, 6);
+        const dd = p.expiry.substring(6, 8);
+        const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
+        const strikeFormatted = String(Math.round(p.strike * 1000)).padStart(8, "0");
+        const osiSymbol = `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
+        osiSymbols.push(osiSymbol);
       }
     });
 
-    // Call get_chain for each (underlying, expiry) pair
-    optionPairs.forEach((expiries, underlying) => {
-      expiries.forEach(expiry => {
-        console.log(`[PortfolioPanel] Subscribing to options: ${underlying} ${expiry}`);
-        socketHub.send({
-          type: "control",
-          target: "marketData",
-          op: "get_chain",
-          underlying: underlying,
-          expiry: expiry,
-          limit: 200,
-        });
+    if (osiSymbols.length > 0) {
+      // Subscribe via control message (backend Alpaca subscription + snapshot poller)
+      console.log(`[PortfolioPanel] Backend: Subscribing to ${osiSymbols.length} portfolio option contracts`);
+      socketHub.send({
+        type: "control",
+        target: "marketData",
+        op: "subscribe_portfolio_contracts",
+        contracts: osiSymbols,
       });
-    });
+
+      // Also subscribe via WebSocket channels (frontend message routing)
+      console.log(`[PortfolioPanel] Frontend: Subscribing to option channels for ${osiSymbols.length} symbols`);
+      socketHub.send({
+        type: "subscribe",
+        channels: ["md.option.quote", "md.option.trade"],
+        symbols: osiSymbols,
+      });
+    }
   }, [accountState?.positions]);
 
   useEffect(() => {
@@ -200,21 +204,11 @@ export default function PortfolioPanel() {
       }
 
       // IMMORTAL DEBUG — always store every message
-// Filter before storing based on current checkbox state
-let shouldStore = false;
-
-if (snapshot?.type?.startsWith("control")) shouldStore = showControl;
-else if (snapshot?.topic?.startsWith("md.")) shouldStore = showMdAll;
-else if (snapshot?.topic?.startsWith("ib.")) shouldStore = showIbAll;
-
-// Only store messages that match current filters
-if (shouldStore) {
-  setAllDebugMsgs(prev => {
-    const next = [...prev, snapshot];
-    if (next.length > DEBUG_MAX) next.splice(0, next.length - DEBUG_MAX);
-    return next;
-  });
-}
+      setAllDebugMsgs(prev => {
+        const next = [...prev, snapshot];
+        if (next.length > DEBUG_MAX) next.splice(0, next.length - DEBUG_MAX);
+        return next;
+      });
 
       // Live market data — update price cache
       if (snapshot?.topic && typeof snapshot.topic === "string") {
@@ -403,11 +397,13 @@ if (shouldStore) {
     };
 
     socketHub.onMessage(handler);
+    socketHub.onTick(handler);  // Option messages come through onTick
     socketHub.send({ type: "control", target: "ibAccount", op: "account_state" });
     
     // Cleanup: unsubscribe from all market data and remove handler
     return () => {
       socketHub.offMessage(handler);
+      socketHub.offTick(handler);
       const symbols = Array.from(subsSetRef.current);
       if (symbols.length > 0) {
         console.log("[PortfolioPanel] Cleanup: Unsubscribing from all symbols:", symbols);
