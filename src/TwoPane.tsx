@@ -15,14 +15,20 @@ export default function TwoPane() {
     const und = String(symbol || "").toUpperCase();
     setSelected(und);
 
-    // Ask the control plane to find & subscribe the option contracts for this underlying
+    // Ask the control plane to find available expiries for this underlying
+    // OptionPanel will receive the response and auto-load the first expiry
     socketHub.send({
       type: "control",
-      op: "find_and_subscribe",
+      target: "marketData",
+      op: "find_expiries",
+      id: `find_expiries_${Date.now()}`,
       underlying: und,
-      trades: true,
-      quotes: true,
+      expiry_days_max: 100, // Start with 100 days
     });
+  };
+
+  const handleClear = () => {
+    setSelected("");
   };
 
   return (
@@ -55,10 +61,10 @@ export default function TwoPane() {
           }}
         >
           <div style={leftPane as any}>
-            <EquityPanel onSelect={handleSelect} />
+            <EquityPanel onSelect={handleSelect} onClear={handleClear} />
           </div>
           <div style={rightPane as any}>
-            <OptionPanel />
+            <OptionPanel ticker={selected} />
           </div>
         </div>
 

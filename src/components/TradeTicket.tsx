@@ -15,6 +15,7 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", onCl
   const [orderType, setOrderType] = useState<"MKT" | "LMT" | "STP" | "STPLMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
+  const [session, setSession] = useState<"REGULAR" | "PREMARKET" | "AFTERHOURS">("REGULAR");
 
   const [last, setLast] = useState("—");
   const [bid, setBid] = useState("—");
@@ -55,6 +56,7 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", onCl
       side,
       quantity: Number(quantity),
       orderType,
+      session, // Add session selection
     };
 
     // Only add price fields if they're required and valid for this order type
@@ -145,6 +147,12 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", onCl
           <option value="LMT">Limit</option>
           <option value="STP">Stop</option>
           <option value="STPLMT">Stop Limit</option>
+        </select>
+
+        <select value={session} onChange={e => setSession(e.target.value as any)} style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: "1px solid #ccc" }}>
+          <option value="REGULAR">Regular Hours (9:30 AM - 4:00 PM ET)</option>
+          <option value="PREMARKET">Pre-Market (4:00 AM - 9:30 AM ET)</option>
+          <option value="AFTERHOURS">After-Hours (4:00 PM - 8:00 PM ET)</option>
         </select>
 
         {(orderType === "LMT" || orderType === "STPLMT") && (

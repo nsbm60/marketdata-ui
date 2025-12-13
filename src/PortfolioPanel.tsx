@@ -152,6 +152,42 @@ export default function PortfolioPanel() {
     subsSetRef.current = next;
   }, [positionSymbolsKey]);
 
+  // Subscribe to option market data via get_chain for option positions
+  useEffect(() => {
+    if (!accountState?.positions) return;
+
+    // Extract unique (underlying, expiry) pairs from option positions
+    const optionPairs = new Map<string, Set<string>>(); // underlying -> Set of expiries
+    
+    accountState.positions.forEach(p => {
+      if (p.secType === "OPT" && p.expiry) {
+        if (!optionPairs.has(p.symbol)) {
+          optionPairs.set(p.symbol, new Set());
+        }
+        // Convert YYYYMMDD to YYYY-MM-DD
+        const formattedExpiry = p.expiry.length === 8
+          ? `${p.expiry.substring(0, 4)}-${p.expiry.substring(4, 6)}-${p.expiry.substring(6, 8)}`
+          : p.expiry;
+        optionPairs.get(p.symbol)!.add(formattedExpiry);
+      }
+    });
+
+    // Call get_chain for each (underlying, expiry) pair
+    optionPairs.forEach((expiries, underlying) => {
+      expiries.forEach(expiry => {
+        console.log(`[PortfolioPanel] Subscribing to options: ${underlying} ${expiry}`);
+        socketHub.send({
+          type: "control",
+          target: "marketData",
+          op: "get_chain",
+          underlying: underlying,
+          expiry: expiry,
+          limit: 200,
+        });
+      });
+    });
+  }, [accountState?.positions]);
+
   useEffect(() => {
     const handler = (m: any) => {
       if (!m) return;
@@ -186,6 +222,32 @@ if (shouldStore) {
         
         // Handle md.equity.quote.SYMBOL and md.equity.trade.SYMBOL format
         if (topic.startsWith("md.equity.")) {
+          const parts = topic.split(".");
+          const topicSymbol = parts.length >= 4 ? parts.slice(3).join(".").toUpperCase() : "";
+          
+          const d = snapshot.data?.data || snapshot.data || {};
+          
+          // Extract price data
+          const bid = d.bidPrice ?? d.bp ?? d.bid;
+          const ask = d.askPrice ?? d.ap ?? d.ask;
+          const last = d.lastPrice ?? d.last ?? d.price ?? d.p ?? d.lp;
+          
+          if (topicSymbol && (bid !== undefined || ask !== undefined || last !== undefined)) {
+            const current = cacheRef.current.get(topicSymbol) || {};
+            cacheRef.current.set(topicSymbol, {
+              ...current,
+              ...(last !== undefined && { last: Number(last) }),
+              ...(bid !== undefined && { bid: Number(bid) }),
+              ...(ask !== undefined && { ask: Number(ask) }),
+            });
+            
+            // Force re-render to update market values
+            setPriceUpdateTrigger(prev => prev + 1);
+          }
+        }
+        
+        // Handle md.option.quote.SYMBOL and md.option.trade.SYMBOL format
+        if (topic.startsWith("md.option.")) {
           const parts = topic.split(".");
           const topicSymbol = parts.length >= 4 ? parts.slice(3).join(".").toUpperCase() : "";
           
@@ -426,7 +488,16 @@ useEffect(() => {
                     <div style={right}>Trade</div>
                   </div>
 
-                  {accountState.positions.map((p, i) => {
+                  {accountState.positions
+                    .slice()
+                    .sort((a, b) => {
+                      // Sort by symbol, then by secType (STK before OPT), then by strike
+                      if (a.symbol !== b.symbol) return a.symbol.localeCompare(b.symbol);
+                      if (a.secType !== b.secType) return a.secType === "STK" ? -1 : 1;
+                      if (a.strike !== b.strike) return (a.strike || 0) - (b.strike || 0);
+                      return 0;
+                    })
+                    .map((p, i) => {
                     // Build the proper symbol for cache lookup
                     let cacheKey = p.symbol;
                     if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
@@ -440,12 +511,19 @@ useEffect(() => {
                     }
                     
                     const lastPrice = cacheRef.current.get(cacheKey)?.last || 0;
-                    const mktValue = p.quantity * lastPrice;
+                    
+                    // For options, multiply by contract size (100)
+                    const contractMultiplier = p.secType === "OPT" ? 100 : 1;
+                    const mktValue = p.quantity * lastPrice * contractMultiplier;
+                    
                     const mktValueDisplay = lastPrice > 0
                       ? (mktValue < 0
                           ? `(${Math.abs(mktValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
                           : mktValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
                       : "—";
+
+                    // For options, display avg cost per share (divide by 100)
+                    const displayAvgCost = p.secType === "OPT" ? p.avgCost / 100 : p.avgCost;
 
                     // Format symbol display based on secType
                     let symbolDisplay: React.ReactNode;
@@ -489,7 +567,7 @@ useEffect(() => {
                         <div style={rightMono}>
                           {mktValueDisplay}
                         </div>
-                        <div style={rightMono}>{p.avgCost.toFixed(4)}</div>
+                        <div style={rightMono}>{displayAvgCost.toFixed(4)}</div>
                         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingRight: 12 }}>
                           <button
                             onClick={(e) => {

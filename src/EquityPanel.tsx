@@ -14,8 +14,10 @@ type TickEnvelope = { topic: string; data: any };
 
 export default function EquityPanel({
   onSelect,
+  onClear,
 }: {
   onSelect?: (symbol: string) => void;
+  onClear?: () => void;
 }) {
   /* ---------------- input + symbols ---------------- */
   const [input, setInput] = useState(() => localStorage.getItem(LS_INPUT) ?? "");
@@ -191,7 +193,7 @@ export default function EquityPanel({
   };
   const actAdd = () => { const add = parseSymbols(input); applySymbols(Array.from(new Set([...symbols, ...add]))); setInput(""); };
   const actReplace = () => { applySymbols(parseSymbols(input)); setInput(""); };
-  const actClear = () => { applySymbols([]); setInput(""); };
+  const actClear = () => { applySymbols([]); setInput(""); onClear?.(); };
   const actPurge = () => {
     localStorage.removeItem(LS_APPLIED);
     localStorage.removeItem(LS_INPUT);

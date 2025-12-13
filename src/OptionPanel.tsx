@@ -5,22 +5,13 @@ import type { TickEnvelope } from "./ws/ws-types";
 import OptionTradeTicket from "./components/OptionTradeTicket";
 
 /** ---------- Types ---------- */
-type ExpiryMeta = {
-  expiration: string;
-  strikes_below: number;
-  strikes_above: number;
-  min_strike: number | null;
-  max_strike: number | null;
-  contracts_count: number;
-};
-
 type OptionSide = "call" | "put";
 
 type ParsedOption = {
   underlying: string;
   side: OptionSide;
   strike: number;
-  expiration: string; // YYYY-MM-DD or "—"
+  expiration: string; // YYYY-MM-DD
 };
 
 type QuoteRow = {
@@ -41,16 +32,34 @@ type QuoteRow = {
 };
 
 /** ---------- Component ---------- */
-export default function OptionPanel() {
+export default function OptionPanel({ ticker }: { ticker?: string }) {
   const [underlying, setUnderlying] = useState<string>("");
-  const [expiries, setExpiries] = useState<ExpiryMeta[]>([]);
+  const [expiries, setExpiries] = useState<string[]>([]); // Just date strings now
+  const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
+  const [expiryDaysMax, setExpiryDaysMax] = useState<number>(100); // Default 100 days
+  const [limit, setLimit] = useState<number>(200); // Contracts per expiry
   const [wsOpen, setWsOpen] = useState<boolean>(false);
+  const [loadingExpiries, setLoadingExpiries] = useState<boolean>(false);
+  const [loadingChain, setLoadingChain] = useState<boolean>(false);
+  const [atmStrikesBelow, setAtmStrikesBelow] = useState<number>(0); // For ATM divider
 
   // row selection (expiration + strike)
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   // Trade ticket state
   const [showTradeTicket, setShowTradeTicket] = useState(false);
+
+  // Clear option panel when ticker is cleared
+  useEffect(() => {
+    if (!ticker) {
+      setUnderlying("");
+      setExpiries([]);
+      setSelectedExpiry(null);
+      setAtmStrikesBelow(0);
+      setSelectedKey(null);
+      bookRef.current = new Map();
+    }
+  }, [ticker]);
   const [ticketUnderlying, setTicketUnderlying] = useState("");
   const [ticketStrike, setTicketStrike] = useState(0);
   const [ticketExpiry, setTicketExpiry] = useState("");
@@ -90,27 +99,88 @@ export default function OptionPanel() {
     setShowTradeTicket(true);
   };
 
+  // Load expiries when underlying changes or user clicks "Show more"
+  const loadExpiries = (und: string, days: number) => {
+    if (!und) return;
+    
+    setLoadingExpiries(true);
+    socketHub.send({
+      type: "control",
+      target: "marketData",
+      op: "find_expiries",
+      id: `find_expiries_${Date.now()}`,
+      underlying: und,
+      expiry_days_max: days,
+    });
+  };
+
+  // Load chain for specific expiry
+  const loadChain = (und: string, expiry: string, lim: number) => {
+    if (!und || !expiry) return;
+    
+    setLoadingChain(true);
+    socketHub.send({
+      type: "control",
+      target: "marketData",
+      op: "get_chain",
+      id: `get_chain_${Date.now()}`,
+      underlying: und,
+      expiry: expiry,
+      limit: lim,
+    });
+  };
+
   useEffect(() => {
     const onMsg = (m: any) => {
-      if (m?.type === "control.ack" && m?.op === "find_and_subscribe") {
+      // Handle find_expiries response
+      if (m?.type === "control.ack" && m?.op === "find_expiries") {
+        setLoadingExpiries(false);
         if (m.ok) {
-          const data = m.data || {};
-          if (data.underlying) setUnderlying(String(data.underlying));
-          const arr = Array.isArray(data.expiries) ? data.expiries : [];
-          setExpiries(
-            arr
-              .map((o: any) => ({
-                expiration: String(o.expiration || ""),
-                strikes_below: toNumOrNull(o.strikes_below) ?? 0,
-                strikes_above: toNumOrNull(o.strikes_above) ?? 0,
-                min_strike: toNumOrNull(o.min_strike),
-                max_strike: toNumOrNull(o.max_strike),
-                contracts_count: toNumOrNull(o.contracts_count) ?? 0,
-              }))
-              .filter((e: ExpiryMeta) => e.expiration)
-          );
+          const data = m.data?.data || m.data || {};
+          const und = data.underlying ? String(data.underlying) : "";
+          if (und) setUnderlying(und);
+          
+          const expiryList = Array.isArray(data.expiries) ? data.expiries : [];
+          setExpiries(expiryList.map(String).filter(Boolean));
+          
+          // Auto-select and load first expiry
+          if (expiryList.length > 0) {
+            const firstExpiry = String(expiryList[0]);
+            setSelectedExpiry(firstExpiry);
+            
+            // Call loadChain for first expiry
+            if (und && firstExpiry) {
+              console.log(`[OptionPanel] Auto-loading first expiry: ${firstExpiry}`);
+              setLoadingChain(true);
+              socketHub.send({
+                type: "control",
+                target: "marketData",
+                op: "get_chain",
+                id: `get_chain_${Date.now()}`,
+                underlying: und,
+                expiry: firstExpiry,
+                limit: limit,
+              });
+            }
+          }
         }
-      } else if (m?.type === "ready") {
+      }
+      
+      // Handle get_chain response
+      if (m?.type === "control.ack" && m?.op === "get_chain") {
+        setLoadingChain(false);
+        if (m.ok) {
+          const data = m.data?.data || m.data || {};
+          if (data.underlying) setUnderlying(String(data.underlying));
+          if (data.expiry) setSelectedExpiry(String(data.expiry));
+          if (data.strikes_below !== undefined) {
+            setAtmStrikesBelow(Number(data.strikes_below) || 0);
+          }
+          // Contracts are subscribed on backend, data will flow through ticks
+        }
+      }
+
+      if (m?.type === "ready") {
         setWsOpen(true);
       }
     };
@@ -119,6 +189,12 @@ export default function OptionPanel() {
       if (typeof t?.topic !== "string" || !t.topic.startsWith("md.option.")) return;
       const info = fastExtract(t.topic, t.data);
       if (!info) return;
+
+      // FILTER: Only accept ticks for the currently selected underlying
+      const parsed = parseOptionSymbol(info.symbol);
+      if (!parsed || !underlying || parsed.underlying !== underlying) {
+        return; // Ignore options for other underlyings
+      }
 
       const prev = bookRef.current.get(info.symbol) || ({ symbol: info.symbol, kind: info.kind } as QuoteRow);
       let next: QuoteRow;
@@ -164,90 +240,78 @@ export default function OptionPanel() {
       socketHub.offTick(onTick);
       socketHub.offMessage(onMsg);
     };
-  }, []);
+  }, [selectedExpiry, limit]);
 
-  // Build rows per expiry:
-  // Calls:  Last Bid Mid Ask Δ Γ Θ Vega IV Trade
-  // Strike
-  // Puts:   Last Bid Mid Ask Δ Γ Θ Vega IV Trade
-  const groups = useMemo(() => {
-    if (!underlying) return [];
+  // Build rows for SELECTED expiry only
+  const rows = useMemo(() => {
+    if (!underlying || !selectedExpiry) return [];
 
-    const byExpiry = new Map<string, Map<number, { call?: QuoteRow; put?: QuoteRow }>>();
+    const strikeMap = new Map<number, { call?: QuoteRow; put?: QuoteRow }>();
 
     for (const row of bookRef.current.values()) {
       const p = parseOptionSymbol(row.symbol);
       if (!p) continue;
       if (p.underlying !== underlying) continue;
+      if (p.expiration !== selectedExpiry) continue;
 
-      let strikes = byExpiry.get(p.expiration);
-      if (!strikes) {
-        strikes = new Map();
-        byExpiry.set(p.expiration, strikes);
-      }
-      const at = strikes.get(p.strike) || {};
+      const at = strikeMap.get(p.strike) || {};
       if (p.side === "call") at.call = row;
       else at.put = row;
-      strikes.set(p.strike, at);
+      strikeMap.set(p.strike, at);
     }
 
-    return Array.from(byExpiry.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([exp, strikes]) => {
-        const rows = Array.from(strikes.entries())
-          .sort((a, b) => a[0] - b[0])
-          .map(([strike, sideMap]) => {
-            // Calls prices
-            const cl = num(sideMap.call?.last);
-            const cb = num(sideMap.call?.bid);
-            const ca = num(sideMap.call?.ask);
-            const cm = mid(cb, ca, cl);
+    return Array.from(strikeMap.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([strike, sideMap]) => {
+        // Calls prices
+        const cl = num(sideMap.call?.last);
+        const cb = num(sideMap.call?.bid);
+        const ca = num(sideMap.call?.ask);
+        const cm = mid(cb, ca, cl);
 
-            // Puts prices
-            const pl = num(sideMap.put?.last);
-            const pb = num(sideMap.put?.bid);
-            const pa = num(sideMap.put?.ask);
-            const pm = mid(pb, pa, pl);
+        // Puts prices
+        const pl = num(sideMap.put?.last);
+        const pb = num(sideMap.put?.bid);
+        const pa = num(sideMap.put?.ask);
+        const pm = mid(pb, pa, pl);
 
-            // Call Greeks
-            const cDelta = num(sideMap.call?.delta);
-            const cGamma = num(sideMap.call?.gamma);
-            const cTheta = num(sideMap.call?.theta);
-            const cVega = num(sideMap.call?.vega);
-            const cIv = num(sideMap.call?.iv);
+        // Call Greeks
+        const cDelta = num(sideMap.call?.delta);
+        const cGamma = num(sideMap.call?.gamma);
+        const cTheta = num(sideMap.call?.theta);
+        const cVega = num(sideMap.call?.vega);
+        const cIv = num(sideMap.call?.iv);
 
-            // Put Greeks
-            const pDelta = num(sideMap.put?.delta);
-            const pGamma = num(sideMap.put?.gamma);
-            const pTheta = num(sideMap.put?.theta);
-            const pVega = num(sideMap.put?.vega);
-            const pIv = num(sideMap.put?.iv);
+        // Put Greeks
+        const pDelta = num(sideMap.put?.delta);
+        const pGamma = num(sideMap.put?.gamma);
+        const pTheta = num(sideMap.put?.theta);
+        const pVega = num(sideMap.put?.vega);
+        const pIv = num(sideMap.put?.iv);
 
-            return {
-              strike,
-              cLast: cl,
-              cBid: cb,
-              cMid: cm,
-              cAsk: ca,
-              cDelta,
-              cGamma,
-              cTheta,
-              cVega,
-              cIv,
-              pLast: pl,
-              pBid: pb,
-              pMid: pm,
-              pAsk: pa,
-              pDelta,
-              pGamma,
-              pTheta,
-              pVega,
-              pIv,
-            };
-          });
-        return { expiration: exp, rows };
+        return {
+          strike,
+          cLast: cl,
+          cBid: cb,
+          cMid: cm,
+          cAsk: ca,
+          cDelta,
+          cGamma,
+          cTheta,
+          cVega,
+          cIv,
+          pLast: pl,
+          pBid: pb,
+          pMid: pm,
+          pAsk: pa,
+          pDelta,
+          pGamma,
+          pTheta,
+          pVega,
+          pIv,
+        };
       });
-  }, [underlying, version, expiries]);
+  }, [underlying, selectedExpiry, version]);
 
   /** ---------- Render ---------- */
   return (
@@ -260,215 +324,270 @@ export default function OptionPanel() {
             WS: {wsOpen ? "open" : "…"}
           </span>
         </div>
-        <div style={{ fontSize: 12, color: "#333" }}>
+        
+        {/* Controls row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12 }}>
           {underlying ? (
             <>
-              Underlying:&nbsp;<b>{underlying}</b>
-              {expiries.length ? <span style={{ marginLeft: 12 }}>Expiries:&nbsp;<b>{expiries.length}</b></span> : null}
+              <div>
+                <b>{underlying}</b>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <label style={{ fontSize: 11, color: "#666" }}>Limit:</label>
+                <select
+                  value={limit}
+                  onChange={(e) => {
+                    const newLimit = Number(e.target.value);
+                    setLimit(newLimit);
+                    if (selectedExpiry) {
+                      loadChain(underlying, selectedExpiry, newLimit);
+                    }
+                  }}
+                  style={{ fontSize: 11, padding: "2px 4px" }}
+                >
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={500}>500</option>
+                </select>
+              </div>
+              {expiries.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button
+                    onClick={() => {
+                      const newDays = expiryDaysMax === 100 ? 365 : expiryDaysMax === 365 ? 730 : 100;
+                      setExpiryDaysMax(newDays);
+                      loadExpiries(underlying, newDays);
+                    }}
+                    style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}
+                  >
+                    {expiryDaysMax === 100 ? "Show 1 year" : expiryDaysMax === 365 ? "Show 2 years" : "Show 100 days"}
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <span style={{ color: "#666" }}>Select a symbol on the left to load options…</span>
           )}
         </div>
+
+        {/* Expiry tabs */}
+        {expiries.length > 0 && (
+          <div style={expiryTabs as any}>
+            {expiries.map((exp) => (
+              <button
+                key={exp}
+                onClick={() => {
+                  setSelectedExpiry(exp);
+                  loadChain(underlying, exp, limit);
+                }}
+                style={{
+                  ...(selectedExpiry === exp ? expiryTabActive : expiryTab),
+                  ...(loadingChain && selectedExpiry === exp ? { opacity: 0.6 } : {}),
+                } as any}
+              >
+                {fmtExpiryShort(exp)}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Scroll area with two-level sticky header */}
       <div style={bodyScroll as any}>
-        {/* Level 1 header: Calls | Strike | Puts (sticky) */}
-        <div style={stickyHeader as any}>
-          <div style={hdrRow1 as any}>
-            <div style={{ ...thBlock, textAlign: "center" } as any}>Calls</div>
-            <div style={{ ...thBlock, textAlign: "center" } as any}>Strike</div>
-            <div style={{ ...thBlock, textAlign: "center" } as any}>Puts</div>
-          </div>
-          {/* Level 2 header: Calls show Trade | data, Puts show data | Trade */}
-          <div style={hdrRow2 as any}>
-            <div style={subgrid10 as any}>
-              <div style={subTh as any}>Trade</div>
-              <div style={subTh as any}>Last</div>
-              <div style={subTh as any}>Bid</div>
-              <div style={subTh as any}>Mid</div>
-              <div style={subTh as any}>Ask</div>
-              <div style={subTh as any}>Δ</div>
-              <div style={subTh as any}>Γ</div>
-              <div style={subTh as any}>Θ</div>
-              <div style={subTh as any}>Vega</div>
-              <div style={subTh as any}>IV</div>
-            </div>
-            <div style={subTh as any}>{/* strike subheader empty */}</div>
-            <div style={subgrid10 as any}>
-              <div style={subTh as any}>Last</div>
-              <div style={subTh as any}>Bid</div>
-              <div style={subTh as any}>Mid</div>
-              <div style={subTh as any}>Ask</div>
-              <div style={subTh as any}>Δ</div>
-              <div style={subTh as any}>Γ</div>
-              <div style={subTh as any}>Θ</div>
-              <div style={subTh as any}>Vega</div>
-              <div style={subTh as any}>IV</div>
-              <div style={subTh as any}>Trade</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Content */}
-        {!underlying ? (
+        {loadingExpiries ? (
+          <div style={empty as any}>Loading expiries...</div>
+        ) : loadingChain ? (
+          <div style={empty as any}>Loading chain...</div>
+        ) : !underlying ? (
           <div style={empty as any}>No underlying selected.</div>
-        ) : groups.length === 0 ? (
-          <div style={empty as any}>Waiting for option streams…</div>
+        ) : !selectedExpiry ? (
+          <div style={empty as any}>Select an expiry date.</div>
+        ) : rows.length === 0 ? (
+          <div style={empty as any}>Waiting for option data...</div>
         ) : (
-          <div>
-            {groups.map((g) => (
-              <div key={g.expiration} style={group as any}>
-                <div style={expiryHead as any}>
-                  <div style={{ fontWeight: 600 }}>{fmtExpiry(g.expiration)}</div>
-                </div>
-
-                {g.rows.map((r, idx) => {
-                  const rowKey = `${g.expiration}:${r.strike}`;
-                  const isSelected = selectedKey === rowKey;
-
-                  // Find matching expiry meta to know how many strikes are below spot
-                  const meta = expiries.find((e) => e.expiration === g.expiration);
-                  const boundaryIndex = meta ? meta.strikes_below : -1;
-                  const showDivider = boundaryIndex > 0 && idx === boundaryIndex;
-
-                  // base style for all cells in this row
-                  const baseCell = {
-                    ...td,
-                    background: isSelected ? "#fef3c7" : "#fff",
-                  } as any;
-
-                  return (
-                    <Fragment key={rowKey}>
-                      {showDivider && <div style={atmDivider as any} />}
-                      <div
-                        style={{ ...row21, cursor: "pointer" } as any}
-                        onClick={() => setSelectedKey(rowKey)}
-                      >
-                        {/* Call Trade Buttons FIRST */}
-                        <div style={{ ...baseCell, display: "flex", justifyContent: "center", gap: 4, padding: "1px 2px" }}>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openTradeTicket(underlying, r.strike, g.expiration, "C", "BUY", {
-                                last: r.cLast,
-                                bid: r.cBid,
-                                ask: r.cAsk,
-                                mid: r.cMid,
-                                delta: r.cDelta,
-                                gamma: r.cGamma,
-                                theta: r.cTheta,
-                                vega: r.cVega,
-                                iv: r.cIv,
-                              });
-                            }}
-                            style={tradeBtn("BUY")}
-                          >
-                            B
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openTradeTicket(underlying, r.strike, g.expiration, "C", "SELL", {
-                                last: r.cLast,
-                                bid: r.cBid,
-                                ask: r.cAsk,
-                                mid: r.cMid,
-                                delta: r.cDelta,
-                                gamma: r.cGamma,
-                                theta: r.cTheta,
-                                vega: r.cVega,
-                                iv: r.cIv,
-                              });
-                            }}
-                            style={tradeBtn("SELL")}
-                          >
-                            S
-                          </button>
-                        </div>
-
-                        {/* Calls: Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cLast)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cBid)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cMid)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cAsk)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cDelta)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cGamma)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cTheta)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cVega)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cIv)}</div>
-
-                        {/* Strike (bold) */}
-                        <div
-                          style={{
-                            ...baseCell,
-                            textAlign: "center",
-                            fontWeight: 700,
-                          }}
-                        >
-                          {isNum(r.strike) ? priceFmt.format(r.strike as number) : "—"}
-                        </div>
-
-                        {/* Puts: Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pLast)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pBid)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pMid)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pAsk)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pDelta)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pGamma)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pTheta)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pVega)}</div>
-                        <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pIv)}</div>
-
-                        {/* Put Trade Buttons LAST */}
-                        <div style={{ ...baseCell, display: "flex", justifyContent: "center", gap: 4, padding: "1px 2px" }}>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openTradeTicket(underlying, r.strike, g.expiration, "P", "BUY", {
-                                last: r.pLast,
-                                bid: r.pBid,
-                                ask: r.pAsk,
-                                mid: r.pMid,
-                                delta: r.pDelta,
-                                gamma: r.pGamma,
-                                theta: r.pTheta,
-                                vega: r.pVega,
-                                iv: r.pIv,
-                              });
-                            }}
-                            style={tradeBtn("BUY")}
-                          >
-                            B
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openTradeTicket(underlying, r.strike, g.expiration, "P", "SELL", {
-                                last: r.pLast,
-                                bid: r.pBid,
-                                ask: r.pAsk,
-                                mid: r.pMid,
-                                delta: r.pDelta,
-                                gamma: r.pGamma,
-                                theta: r.pTheta,
-                                vega: r.pVega,
-                                iv: r.pIv,
-                              });
-                            }}
-                            style={tradeBtn("SELL")}
-                          >
-                            S
-                          </button>
-                        </div>
-                      </div>
-                    </Fragment>
-                  );
-                })}
+          <>
+            {/* Level 1 header: Calls | Strike | Puts (sticky) */}
+            <div style={stickyHeader as any}>
+              <div style={hdrRow1 as any}>
+                <div style={{ ...thBlock, textAlign: "center" } as any}>Calls</div>
+                <div style={{ ...thBlock, textAlign: "center" } as any}>Strike</div>
+                <div style={{ ...thBlock, textAlign: "center" } as any}>Puts</div>
               </div>
-            ))}
-          </div>
+              {/* Level 2 header: Calls show Trade | data, Puts show data | Trade */}
+              <div style={hdrRow2 as any}>
+                <div style={subgrid10 as any}>
+                  <div style={subTh as any}>Trade</div>
+                  <div style={subTh as any}>Last</div>
+                  <div style={subTh as any}>Bid</div>
+                  <div style={subTh as any}>Mid</div>
+                  <div style={subTh as any}>Ask</div>
+                  <div style={subTh as any}>Δ</div>
+                  <div style={subTh as any}>Γ</div>
+                  <div style={subTh as any}>Θ</div>
+                  <div style={subTh as any}>Vega</div>
+                  <div style={subTh as any}>IV</div>
+                </div>
+                <div style={subTh as any}>{/* strike subheader empty */}</div>
+                <div style={subgrid10 as any}>
+                  <div style={subTh as any}>Last</div>
+                  <div style={subTh as any}>Bid</div>
+                  <div style={subTh as any}>Mid</div>
+                  <div style={subTh as any}>Ask</div>
+                  <div style={subTh as any}>Δ</div>
+                  <div style={subTh as any}>Γ</div>
+                  <div style={subTh as any}>Θ</div>
+                  <div style={subTh as any}>Vega</div>
+                  <div style={subTh as any}>IV</div>
+                  <div style={subTh as any}>Trade</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Content - single expiry */}
+            <div style={{ margin: "6px 0" }}>
+              {rows.map((r, idx) => {
+                const rowKey = `${selectedExpiry}:${r.strike}`;
+                const isSelected = selectedKey === rowKey;
+
+                // Show ATM divider
+                const showDivider = atmStrikesBelow > 0 && idx === atmStrikesBelow;
+
+                // base style for all cells in this row
+                const baseCell = {
+                  ...td,
+                  background: isSelected ? "#fef3c7" : "#fff",
+                } as any;
+
+                return (
+                  <Fragment key={rowKey}>
+                    {showDivider && <div style={atmDivider as any} />}
+                    <div
+                      style={{ ...row21, cursor: "pointer" } as any}
+                      onClick={() => setSelectedKey(rowKey)}
+                    >
+                      {/* Call Trade Buttons FIRST */}
+                      <div style={{ ...baseCell, display: "flex", justifyContent: "center", gap: 4, padding: "1px 2px" }}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openTradeTicket(underlying, r.strike, selectedExpiry, "C", "BUY", {
+                              last: r.cLast,
+                              bid: r.cBid,
+                              ask: r.cAsk,
+                              mid: r.cMid,
+                              delta: r.cDelta,
+                              gamma: r.cGamma,
+                              theta: r.cTheta,
+                              vega: r.cVega,
+                              iv: r.cIv,
+                            });
+                          }}
+                          style={tradeBtn("BUY")}
+                        >
+                          B
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openTradeTicket(underlying, r.strike, selectedExpiry, "C", "SELL", {
+                              last: r.cLast,
+                              bid: r.cBid,
+                              ask: r.cAsk,
+                              mid: r.cMid,
+                              delta: r.cDelta,
+                              gamma: r.cGamma,
+                              theta: r.cTheta,
+                              vega: r.cVega,
+                              iv: r.cIv,
+                            });
+                          }}
+                          style={tradeBtn("SELL")}
+                        >
+                          S
+                        </button>
+                      </div>
+
+                      {/* Calls: Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cLast)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cBid)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cMid)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cAsk)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cDelta)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cGamma)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cTheta)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cVega)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cIv)}</div>
+
+                      {/* Strike (bold) */}
+                      <div
+                        style={{
+                          ...baseCell,
+                          textAlign: "center",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {isNum(r.strike) ? priceFmt.format(r.strike as number) : "—"}
+                      </div>
+
+                      {/* Puts: Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pLast)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pBid)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pMid)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pAsk)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pDelta)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pGamma)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pTheta)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pVega)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pIv)}</div>
+
+                      {/* Put Trade Buttons LAST */}
+                      <div style={{ ...baseCell, display: "flex", justifyContent: "center", gap: 4, padding: "1px 2px" }}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openTradeTicket(underlying, r.strike, selectedExpiry, "P", "BUY", {
+                              last: r.pLast,
+                              bid: r.pBid,
+                              ask: r.pAsk,
+                              mid: r.pMid,
+                              delta: r.pDelta,
+                              gamma: r.pGamma,
+                              theta: r.pTheta,
+                              vega: r.pVega,
+                              iv: r.pIv,
+                            });
+                          }}
+                          style={tradeBtn("BUY")}
+                        >
+                          B
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openTradeTicket(underlying, r.strike, selectedExpiry, "P", "SELL", {
+                              last: r.pLast,
+                              bid: r.pBid,
+                              ask: r.pAsk,
+                              mid: r.pMid,
+                              delta: r.pDelta,
+                              gamma: r.pGamma,
+                              theta: r.pTheta,
+                              vega: r.pVega,
+                              iv: r.pIv,
+                            });
+                          }}
+                          style={tradeBtn("SELL")}
+                        >
+                          S
+                        </button>
+                      </div>
+                    </div>
+                  </Fragment>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
 
@@ -500,10 +619,6 @@ export default function OptionPanel() {
 }
 
 /** ---------- Helpers ---------- */
-function toNumOrNull(v: any): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
 function num(v: any): number | undefined {
   const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
@@ -530,25 +645,20 @@ function fmtGreek(v: any) {
   return isNum(v) ? greekFmt.format(v) : "—";
 }
 
-function fmtExpiry(s: string) {
+function fmtExpiryShort(s: string) {
   try {
-    // Match YYYY-MM-DD explicitly
+    // Format as "Dec 13"
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
     if (!m) return s;
 
     const y = Number(m[1]);
     const mo = Number(m[2]);
     const d = Number(m[3]);
-
-    // Construct LOCAL date (not UTC midnight)
     const dt = new Date(y, mo - 1, d);
 
-    // Format in local time — no more off-by-one-day shift
     return dt.toLocaleDateString(undefined, {
-      weekday: "short",
-      year: "numeric",
       month: "short",
-      day: "2-digit",
+      day: "numeric",
     });
   } catch {
     return s;
@@ -590,7 +700,7 @@ function parseOptionSymbol(sym: string): ParsedOption | null {
     const und = m3[1];
     const side: OptionSide = m3[2] === "C" ? "call" : "put";
     const strike = parseFloat(m3[3]);
-    return { underlying: und, side, strike, expiration: "—" };
+    return { underlying: und, side, strike, expiration: "1970-01-01" };
   }
   return null;
 }
@@ -676,6 +786,32 @@ const panelHeader = {
 
 const hdrRow = { display: "flex", alignItems: "center", gap: 8 };
 
+const expiryTabs = {
+  display: "flex",
+  gap: 4,
+  overflowX: "auto" as const,
+  padding: "4px 0",
+};
+
+const expiryTab = {
+  padding: "4px 12px",
+  fontSize: 11,
+  background: "#f3f4f6",
+  border: "1px solid #d1d5db",
+  borderRadius: 4,
+  cursor: "pointer",
+  whiteSpace: "nowrap" as const,
+  color: "#111",
+};
+
+const expiryTabActive = {
+  ...expiryTab,
+  background: "#dbeafe",
+  border: "1px solid #3b82f6",
+  fontWeight: 600,
+  color: "#111",
+};
+
 const bodyScroll = {
   flex: 1,
   overflow: "auto",
@@ -691,18 +827,9 @@ const stickyHeader = {
   borderBottom: "1px solid #e5e7eb",
 };
 
-/**
- * Column layout (updated with Trade columns on outside):
- * - 1 Call trade column (52px)
- * - 9 data columns for Calls (9 × 52px = 468px)
- * - 1 Strike column (70px)
- * - 9 data columns for Puts (9 × 52px = 468px)
- * - 1 Put trade column (52px)
- * Total: 1110px for the grid; it will scroll horizontally if needed.
- */
 const hdrRow1 = {
   display: "grid",
-  gridTemplateColumns: "520px 70px 520px", // Calls (trade+data) | Strike | Puts (data+trade)
+  gridTemplateColumns: "520px 70px 520px",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
@@ -731,7 +858,7 @@ const hdrRow2 = {
 
 const subgrid10 = {
   display: "grid",
-  gridTemplateColumns: "repeat(10, 52px)", // 9 data + 1 trade
+  gridTemplateColumns: "repeat(10, 52px)",
   columnGap: 0,
 };
 
@@ -747,27 +874,9 @@ const subTh = {
   textAlign: "center" as const,
 };
 
-const group = {
-  border: "1px solid #eee",
-  borderRadius: 4,
-  background: "#fff",
-  margin: "6px 0", // no horizontal margin to keep columns aligned with header
-  overflow: "hidden",
-};
-
-const expiryHead = {
-  padding: "4px 6px",
-  borderBottom: "1px solid #eee",
-  background: "#f8fafc",
-  fontSize: 11,
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-};
-
 const row21 = {
   display: "grid",
-  gridTemplateColumns: "52px repeat(9, 52px) 70px repeat(9, 52px) 52px", // call trade + 9 call data + strike + 9 put data + put trade
+  gridTemplateColumns: "52px repeat(9, 52px) 70px repeat(9, 52px) 52px",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
@@ -786,7 +895,7 @@ const td = {
 };
 
 const atmDivider = {
-  borderTop: "1px solid #9ca3af", // slightly darker line for ATM boundary
+  borderTop: "2px solid #9ca3af",
   margin: 0,
   height: 0,
 };
@@ -795,6 +904,7 @@ const empty = {
   padding: "10px",
   fontSize: 12,
   color: "#666",
+  textAlign: "center" as const,
 };
 
 function tradeBtn(side: "BUY" | "SELL") {
