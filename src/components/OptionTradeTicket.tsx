@@ -308,7 +308,8 @@ export default function OptionTradeTicket({
               padding: 12, 
               border: "1px solid #ccc", 
               background: "white", 
-              borderRadius: 8 
+              borderRadius: 8,
+              color: "#111"
             }}
           >
             Cancel

@@ -49,15 +49,22 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
   // Trade ticket state
   const [showTradeTicket, setShowTradeTicket] = useState(false);
 
-  // Clear option panel when ticker is cleared
+  // Load expiries when ticker changes
   useEffect(() => {
     if (!ticker) {
+      // Clear when ticker is removed
       setUnderlying("");
       setExpiries([]);
       setSelectedExpiry(null);
       setAtmStrikesBelow(0);
       setSelectedKey(null);
       bookRef.current = new Map();
+    } else {
+      // Clear book and load expiries for new ticker
+      bookRef.current = new Map();
+      setUnderlying(ticker.toUpperCase());
+      loadExpiries(ticker.toUpperCase(), expiryDaysMax);
+      setVersion(v => (v + 1) & 0xffff); // Force re-render
     }
   }, [ticker]);
   const [ticketUnderlying, setTicketUnderlying] = useState("");
@@ -138,6 +145,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
         if (m.ok) {
           const data = m.data?.data || m.data || {};
           const und = data.underlying ? String(data.underlying) : "";
+          
           if (und) setUnderlying(und);
           
           const expiryList = Array.isArray(data.expiries) ? data.expiries : [];
@@ -171,6 +179,15 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
         setLoadingChain(false);
         if (m.ok) {
           const data = m.data?.data || m.data || {};
+          
+          // Only process if we have a ticker AND this response matches it
+          // OR if we don't have a ticker yet (initial load)
+          const responseUnderlying = data.underlying ? String(data.underlying) : "";
+          if (ticker && responseUnderlying && responseUnderlying !== ticker.toUpperCase()) {
+            console.log(`[OptionPanel] Ignoring get_chain response for ${responseUnderlying} (current ticker: ${ticker})`);
+            return; // Ignore responses for other tickers
+          }
+          
           if (data.underlying) setUnderlying(String(data.underlying));
           if (data.expiry) setSelectedExpiry(String(data.expiry));
           if (data.strikes_below !== undefined) {
@@ -190,10 +207,12 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
       const info = fastExtract(t.topic, t.data);
       if (!info) return;
 
-      // FILTER: Only accept ticks for the currently selected underlying
-      const parsed = parseOptionSymbol(info.symbol);
-      if (!parsed || !underlying || parsed.underlying !== underlying) {
-        return; // Ignore options for other underlyings
+      // FILTER: If we have a ticker selected, only accept matching ticks
+      if (ticker) {
+        const parsed = parseOptionSymbol(info.symbol);
+        if (!parsed || parsed.underlying !== ticker.toUpperCase()) {
+          return; // Ignore options for other tickers
+        }
       }
 
       const prev = bookRef.current.get(info.symbol) || ({ symbol: info.symbol, kind: info.kind } as QuoteRow);
@@ -240,18 +259,18 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
       socketHub.offTick(onTick);
       socketHub.offMessage(onMsg);
     };
-  }, [selectedExpiry, limit]);
+  }, [ticker, selectedExpiry, limit]);
 
   // Build rows for SELECTED expiry only
   const rows = useMemo(() => {
-    if (!underlying || !selectedExpiry) return [];
+    if (!ticker || !selectedExpiry) return [];
 
     const strikeMap = new Map<number, { call?: QuoteRow; put?: QuoteRow }>();
 
     for (const row of bookRef.current.values()) {
       const p = parseOptionSymbol(row.symbol);
       if (!p) continue;
-      if (p.underlying !== underlying) continue;
+      if (p.underlying !== ticker.toUpperCase()) continue;
       if (p.expiration !== selectedExpiry) continue;
 
       const at = strikeMap.get(p.strike) || {};
@@ -311,7 +330,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
           pIv,
         };
       });
-  }, [underlying, selectedExpiry, version]);
+  }, [ticker, selectedExpiry, version]);
 
   /** ---------- Render ---------- */
   return (
@@ -343,7 +362,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                       loadChain(underlying, selectedExpiry, newLimit);
                     }
                   }}
-                  style={{ fontSize: 11, padding: "2px 4px" }}
+                  style={{ fontSize: 11, padding: "2px 4px", color: "#111", background: "white" }}
                 >
                   <option value={50}>50</option>
                   <option value={100}>100</option>

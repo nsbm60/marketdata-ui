@@ -6,10 +6,13 @@ type Props = {
   symbol: string;
   account: string;
   defaultSide?: "BUY" | "SELL";
+  last?: number;
+  bid?: number;
+  ask?: number;
   onClose: () => void;
 };
 
-export default function TradeTicket({ symbol, account, defaultSide = "BUY", onClose }: Props) {
+export default function TradeTicket({ symbol, account, defaultSide = "BUY", last: initialLast, bid: initialBid, ask: initialAsk, onClose }: Props) {
   const [side, setSide] = useState<"BUY" | "SELL">(defaultSide);
   const [quantity, setQuantity] = useState("");
   const [orderType, setOrderType] = useState<"MKT" | "LMT" | "STP" | "STPLMT">("LMT");
@@ -17,16 +20,30 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", onCl
   const [stopPrice, setStopPrice] = useState("");
   const [session, setSession] = useState<"REGULAR" | "PREMARKET" | "AFTERHOURS">("REGULAR");
 
-  const [last, setLast] = useState("—");
-  const [bid, setBid] = useState("—");
-  const [ask, setAsk] = useState("—");
+  const [last, setLast] = useState(initialLast !== undefined ? initialLast.toFixed(4) : "—");
+  const [bid, setBid] = useState(initialBid !== undefined ? initialBid.toFixed(4) : "—");
+  const [ask, setAsk] = useState(initialAsk !== undefined ? initialAsk.toFixed(4) : "—");
 
   useEffect(() => {
+    // Subscribe to market data when ticket opens
+    socketHub.send({
+      type: "subscribe",
+      channels: ["md.equity.quote", "md.equity.trade"],
+      symbols: [symbol],
+    });
+
     const handler = (m: any) => {
-      // Accept ANY topic that contains the symbol — quote, trade, whatever
+      // Only accept equity topics for this symbol
       const topic = m?.topic;
       if (!topic || typeof topic !== "string") return;
-      if (!topic.toUpperCase().includes(symbol.toUpperCase())) return;
+      
+      // Must be an equity topic: md.equity.quote.SYMBOL or md.equity.trade.SYMBOL
+      const parts = topic.split(".");
+      if (parts.length < 4) return;
+      if (parts[0] !== "md" || parts[1] !== "equity") return;
+      
+      const topicSymbol = parts.slice(3).join(".").toUpperCase();
+      if (topicSymbol !== symbol.toUpperCase()) return;
 
       const d = m.data?.data || m.data || {};
 
@@ -42,7 +59,17 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", onCl
     };
 
     socketHub.onMessage(handler);
-    return () => socketHub.offMessage(handler);
+    socketHub.onTick(handler);  // Also listen to onTick in case equity data comes through there
+    return () => {
+      socketHub.offMessage(handler);
+      socketHub.offTick(handler);
+      // Unsubscribe when closing
+      socketHub.send({
+        type: "unsubscribe",
+        channels: ["md.equity.quote", "md.equity.trade"],
+        symbols: [symbol],
+      });
+    };
   }, [symbol]);
 
   const sendOrder = () => {
@@ -167,7 +194,7 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", onCl
           <button onClick={sendOrder} style={{ flex: 1, padding: 12, background: side === "BUY" ? "#16a34a" : "#dc2626", color: "white", border: "none", borderRadius: 8, fontWeight: 600 }}>
             Submit {side}
           </button>
-          <button onClick={onClose} style={{ padding: 12, border: "1px solid #ccc", background: "white", borderRadius: 8 }}>
+          <button onClick={onClose} style={{ padding: 12, border: "1px solid #ccc", background: "white", borderRadius: 8, color: "#111" }}>
             Cancel
           </button>
         </div>

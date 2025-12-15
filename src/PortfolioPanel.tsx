@@ -64,6 +64,7 @@ export default function PortfolioPanel() {
   const [ticketAccount, setTicketAccount] = useState("");
   const [ticketSide, setTicketSide] = useState<"BUY" | "SELL">("BUY");
   const [ticketSecType, setTicketSecType] = useState<"STK" | "OPT">("STK");
+  const [ticketMarketData, setTicketMarketData] = useState<{ last?: number; bid?: number; ask?: number }>({});
   
   // Option-specific ticket data
   const [ticketOptionData, setTicketOptionData] = useState<{
@@ -89,29 +90,30 @@ export default function PortfolioPanel() {
     symbol: string, 
     account: string, 
     side: "BUY" | "SELL", 
-    secType: string
+    secType: string,
+    optionDetails?: { strike: number; expiry: string; right: string },
+    marketData?: { last?: number; bid?: number; ask?: number }
   ) => {
     setTicketSymbol(symbol);
     setTicketAccount(account);
     setTicketSide(side);
+    setTicketMarketData(marketData || {});
     
-    if (secType === "OPT") {
-      // Parse option symbol to extract details
-      const parsed = parseOptionSymbol(symbol);
-      if (parsed) {
-        setTicketSecType("OPT");
-        setTicketOptionData({
-          underlying: parsed.underlying,
-          strike: parsed.strike,
-          expiry: parsed.expiration,
-          right: parsed.right === "call" ? "C" : "P",
-        });
-      } else {
-        // Fallback if we can't parse
-        console.warn("Could not parse option symbol:", symbol);
-        setTicketSecType("STK");
-        setTicketOptionData(null);
-      }
+    if (secType === "OPT" && optionDetails) {
+      // Use provided option details
+      setTicketSecType("OPT");
+      const rightChar = optionDetails.right === "Call" || optionDetails.right === "C" ? "C" : "P";
+      // Convert YYYYMMDD to YYYY-MM-DD
+      const expiry = optionDetails.expiry.length === 8
+        ? `${optionDetails.expiry.substring(0, 4)}-${optionDetails.expiry.substring(4, 6)}-${optionDetails.expiry.substring(6, 8)}`
+        : optionDetails.expiry;
+      
+      setTicketOptionData({
+        underlying: symbol,
+        strike: optionDetails.strike,
+        expiry: expiry,
+        right: rightChar as "C" | "P",
+      });
     } else {
       setTicketSecType("STK");
       setTicketOptionData(null);
@@ -568,7 +570,23 @@ useEffect(() => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              openTradeTicket(p.symbol, p.account, "BUY", p.secType);
+                              const optionDetails = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
+                                ? { strike: p.strike, expiry: p.expiry, right: p.right }
+                                : undefined;
+                              
+                              // Calculate cache key for this position
+                              let lookupKey = p.symbol.toUpperCase().trim();
+                              if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+                                const yy = p.expiry.substring(2, 4);
+                                const mm = p.expiry.substring(4, 6);
+                                const dd = p.expiry.substring(6, 8);
+                                const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
+                                const strikeFormatted = String(Math.round(p.strike * 1000)).padStart(8, "0");
+                                lookupKey = `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
+                              }
+                              
+                              const marketData = cacheRef.current.get(lookupKey);
+                              openTradeTicket(p.symbol, p.account, "BUY", p.secType, optionDetails, marketData);
                             }}
                             style={{ ...iconBtn, background: "#dcfce7", color: "#166534" }}
                           >
@@ -577,7 +595,23 @@ useEffect(() => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              openTradeTicket(p.symbol, p.account, "SELL", p.secType);
+                              const optionDetails = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
+                                ? { strike: p.strike, expiry: p.expiry, right: p.right }
+                                : undefined;
+                              
+                              // Calculate cache key for this position
+                              let lookupKey = p.symbol.toUpperCase().trim();
+                              if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+                                const yy = p.expiry.substring(2, 4);
+                                const mm = p.expiry.substring(4, 6);
+                                const dd = p.expiry.substring(6, 8);
+                                const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
+                                const strikeFormatted = String(Math.round(p.strike * 1000)).padStart(8, "0");
+                                lookupKey = `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
+                              }
+                              
+                              const marketData = cacheRef.current.get(lookupKey);
+                              openTradeTicket(p.symbol, p.account, "SELL", p.secType, optionDetails, marketData);
                             }}
                             style={{ ...iconBtn, background: "#fce7f3", color: "#831843" }}
                           >
@@ -688,6 +722,9 @@ useEffect(() => {
                 symbol={ticketSymbol}
                 account={ticketAccount}
                 defaultSide={ticketSide}
+                last={ticketMarketData.last}
+                bid={ticketMarketData.bid}
+                ask={ticketMarketData.ask}
                 onClose={() => setShowTradeTicket(false)}
               />
             ) : ticketOptionData ? (
@@ -698,9 +735,9 @@ useEffect(() => {
                 right={ticketOptionData.right}
                 account={ticketAccount}
                 defaultSide={ticketSide}
-                last={cacheRef.current.get(ticketSymbol)?.last}
-                bid={cacheRef.current.get(ticketSymbol)?.bid}
-                ask={cacheRef.current.get(ticketSymbol)?.ask}
+                last={ticketMarketData.last}
+                bid={ticketMarketData.bid}
+                ask={ticketMarketData.ask}
                 onClose={() => setShowTradeTicket(false)}
               />
             ) : null}
@@ -721,25 +758,43 @@ useEffect(() => {
 
           {/* COPY LAST MESSAGE */}
           <div style={{ padding: "8px 12px", background: "#111", borderTop: "1px solid #444", fontSize: 11, display: "flex", justifyContent: "space-between" }}>
-            <button
-              onClick={() => {
-                const last = allDebugMsgs[allDebugMsgs.length - 1];
-                if (last) {
-                  navigator.clipboard.writeText(JSON.stringify(last, null, 2));
-                  alert("Last message copied to clipboard!");
-                }
-              }}
-              style={{
-                padding: "6px 12px",
-                background: "#333",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-              }}
-            >
-              Copy Last Message
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => {
+                  const last = allDebugMsgs[allDebugMsgs.length - 1];
+                  if (last) {
+                    navigator.clipboard.writeText(JSON.stringify(last, null, 2));
+                    alert("Last message copied to clipboard!");
+                  }
+                }}
+                style={{
+                  padding: "6px 12px",
+                  background: "#333",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                Copy Last Message
+              </button>
+              <button
+                onClick={() => {
+                  setAllDebugMsgs([]);
+                  setFrozenDebug([]);
+                }}
+                style={{
+                  padding: "6px 12px",
+                  background: "#dc2626",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                Clear
+              </button>
+            </div>
             <span style={{ color: "#888" }}>Stored: {allDebugMsgs.length}</span>
           </div>
 
