@@ -14,6 +14,9 @@ import {
   Channel,
 } from "../services/MarketDataBus";
 
+// Re-export types for convenience
+export type { PriceData, Channel };
+
 // ─────────────────────────────────────────────────────────────
 // useMarketPrice - Single symbol subscription
 // ─────────────────────────────────────────────────────────────
@@ -308,4 +311,68 @@ export function useThrottledMarketPrices(
   }, [symbolsKey, channel, throttleMs, flushPending]);
 
   return prices;
+}
+
+// ─────────────────────────────────────────────────────────────
+// useChannelPrices - Listen to all prices on a channel
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Listen to all price updates on a channel.
+ * Useful when backend manages subscriptions (e.g., options via get_chain).
+ * Returns a version number that increments on updates - use with getPricesForChannel().
+ *
+ * @param channel - Channel to listen to
+ * @param throttleMs - Minimum ms between re-renders (default: 100)
+ * @returns Version number that increments on updates
+ */
+export function useChannelUpdates(
+  channel: Channel,
+  throttleMs: number = 100
+): number {
+  const [version, setVersion] = useState(0);
+  const lastUpdateRef = useRef<number>(0);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingRef = useRef(false);
+
+  const flush = useCallback(() => {
+    if (pendingRef.current) {
+      setVersion((v) => (v + 1) & 0xffff);
+      pendingRef.current = false;
+      lastUpdateRef.current = Date.now();
+    }
+    timeoutRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = marketDataBus.onChannelUpdate(channel, () => {
+      pendingRef.current = true;
+
+      const now = Date.now();
+      const elapsed = now - lastUpdateRef.current;
+
+      if (elapsed >= throttleMs) {
+        flush();
+      } else if (!timeoutRef.current) {
+        timeoutRef.current = setTimeout(flush, throttleMs - elapsed);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, [channel, throttleMs, flush]);
+
+  return version;
+}
+
+/**
+ * Get all prices for a channel (call after useChannelUpdates).
+ * This is a utility function, not a hook.
+ */
+export function getChannelPrices(channel: Channel): Map<string, PriceData> {
+  return marketDataBus.getPricesForChannel(channel);
 }

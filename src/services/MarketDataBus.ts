@@ -61,6 +61,9 @@ class MarketDataBus {
   // Subscriptions by key (channel:symbol)
   private subscriptions = new Map<string, Subscription>();
 
+  // Channel-level listeners (notified on any update for a channel)
+  private channelListeners = new Map<Channel, Set<PriceCallback>>();
+
   // Wire protocol listener registered?
   private initialized = false;
 
@@ -141,6 +144,48 @@ class MarketDataBus {
   }
 
   /**
+   * Listen to all updates for a channel (no subscription management).
+   * Useful when backend manages subscriptions (e.g., options via get_chain).
+   *
+   * @param channel - Channel to listen to
+   * @param callback - Called on every price update for this channel
+   * @returns Unsubscribe function
+   */
+  onChannelUpdate(channel: Channel, callback: PriceCallback): () => void {
+    this.ensureInitialized();
+
+    let listeners = this.channelListeners.get(channel);
+    if (!listeners) {
+      listeners = new Set();
+      this.channelListeners.set(channel, listeners);
+    }
+    listeners.add(callback);
+
+    return () => {
+      const set = this.channelListeners.get(channel);
+      if (set) {
+        set.delete(callback);
+      }
+    };
+  }
+
+  /**
+   * Get all prices for a channel.
+   * Useful for getting all option prices for the current chain.
+   */
+  getPricesForChannel(channel: Channel): Map<string, PriceData> {
+    const prefix = `${channel}:`;
+    const result = new Map<string, PriceData>();
+    this.prices.forEach((price, key) => {
+      if (key.startsWith(prefix)) {
+        const symbol = key.slice(prefix.length);
+        result.set(symbol, price);
+      }
+    });
+    return result;
+  }
+
+  /**
    * Enable/disable debug logging.
    */
   setDebug(enabled: boolean): void {
@@ -207,9 +252,12 @@ class MarketDataBus {
     const price = this.normalizePrice(parsed.symbol, parsed.channel, data);
     const existing = this.prices.get(key);
     const updated = { ...existing, ...price };
+
+    // Always store the price (even without subscription)
+    // This allows components to query prices that the backend subscribed to
     this.prices.set(key, updated);
 
-    // Notify subscribers
+    // Notify subscribers (if any)
     const sub = this.subscriptions.get(key);
     if (sub && sub.callbacks.size > 0) {
       sub.callbacks.forEach((cb) => {
@@ -217,6 +265,18 @@ class MarketDataBus {
           cb(updated);
         } catch (err) {
           console.error("[MarketDataBus] Callback error:", err);
+        }
+      });
+    }
+
+    // Also notify channel-level listeners
+    const channelListeners = this.channelListeners.get(parsed.channel);
+    if (channelListeners && channelListeners.size > 0) {
+      channelListeners.forEach((cb) => {
+        try {
+          cb(updated);
+        } catch (err) {
+          console.error("[MarketDataBus] Channel listener error:", err);
         }
       });
     }
@@ -291,6 +351,37 @@ class MarketDataBus {
     const ts = data.timestamp ?? data.t;
     if (ts !== undefined && ts !== null) {
       price.timestamp = typeof ts === "number" ? ts : new Date(ts).getTime();
+    }
+
+    // Extract Greeks (for options)
+    if (channel === "option") {
+      const optPrice = price as OptionPriceData;
+
+      const delta = data.delta ?? data.d;
+      if (delta !== undefined && delta !== null) {
+        optPrice.delta = Number(delta);
+      }
+
+      const gamma = data.gamma ?? data.g;
+      if (gamma !== undefined && gamma !== null) {
+        optPrice.gamma = Number(gamma);
+      }
+
+      const theta = data.theta ?? data.th;
+      if (theta !== undefined && theta !== null) {
+        optPrice.theta = Number(theta);
+      }
+
+      const vega = data.vega ?? data.v;
+      if (vega !== undefined && vega !== null && channel === "option") {
+        // Note: 'v' is volume for equities, vega for options - check channel
+        optPrice.vega = Number(vega);
+      }
+
+      const iv = data.iv ?? data.impliedVolatility ?? data.impliedVol;
+      if (iv !== undefined && iv !== null) {
+        optPrice.iv = Number(iv);
+      }
     }
 
     return price;

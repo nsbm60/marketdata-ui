@@ -1,8 +1,8 @@
 // src/OptionPanel.tsx
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
-import type { TickEnvelope } from "./ws/ws-types";
 import OptionTradeTicket from "./components/OptionTradeTicket";
+import { useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 
 /** ---------- Types ---------- */
 type OptionSide = "call" | "put";
@@ -14,80 +14,47 @@ type ParsedOption = {
   expiration: string; // YYYY-MM-DD
 };
 
-type QuoteRow = {
-  symbol: string;
-  kind: "quote" | "trade" | "greeks";
-  last?: number;
-  bid?: number;
-  ask?: number;
-  ts?: string;
-
-  // Greeks
-  delta?: number;
-  gamma?: number;
-  theta?: number;
-  vega?: number;
-  rho?: number;
-  iv?: number;
-};
-
 /** ---------- Component ---------- */
 export default function OptionPanel({ ticker }: { ticker?: string }) {
   const [underlying, setUnderlying] = useState<string>("");
-  const [expiries, setExpiries] = useState<string[]>([]); // Just date strings now
+  const [expiries, setExpiries] = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
-  const [expiryDaysMax, setExpiryDaysMax] = useState<number>(100); // Default 100 days
-  const [limit, setLimit] = useState<number>(200); // Contracts per expiry
+  const [expiryDaysMax, setExpiryDaysMax] = useState<number>(100);
+  const [limit, setLimit] = useState<number>(200);
   const [wsOpen, setWsOpen] = useState<boolean>(false);
   const [loadingExpiries, setLoadingExpiries] = useState<boolean>(false);
   const [loadingChain, setLoadingChain] = useState<boolean>(false);
-  const [atmStrikesBelow, setAtmStrikesBelow] = useState<number>(0); // For ATM divider
+  const [atmStrikesBelow, setAtmStrikesBelow] = useState<number>(0);
 
-  // row selection (expiration + strike)
+  // Row selection (expiration + strike)
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   // Trade ticket state
   const [showTradeTicket, setShowTradeTicket] = useState(false);
-
-  // Load expiries when ticker changes
-  useEffect(() => {
-    if (!ticker) {
-      // Clear when ticker is removed
-      setUnderlying("");
-      setExpiries([]);
-      setSelectedExpiry(null);
-      setAtmStrikesBelow(0);
-      setSelectedKey(null);
-      bookRef.current = new Map();
-    } else {
-      // Clear book and load expiries for new ticker
-      bookRef.current = new Map();
-      setUnderlying(ticker.toUpperCase());
-      loadExpiries(ticker.toUpperCase(), expiryDaysMax);
-      setVersion(v => (v + 1) & 0xffff); // Force re-render
-    }
-  }, [ticker]);
   const [ticketUnderlying, setTicketUnderlying] = useState("");
   const [ticketStrike, setTicketStrike] = useState(0);
   const [ticketExpiry, setTicketExpiry] = useState("");
   const [ticketRight, setTicketRight] = useState<"C" | "P">("C");
   const [ticketSide, setTicketSide] = useState<"BUY" | "SELL">("BUY");
-  const [ticketAccount] = useState("DU333427"); // TODO: Make this dynamic
+  const [ticketAccount] = useState("DU333427");
   const [ticketMarketData, setTicketMarketData] = useState<any>({});
 
-  // price + greeks book keyed by option symbol
-  const bookRef = useRef<Map<string, QuoteRow>>(new Map());
+  // Listen to option channel updates (triggers re-render on any option price change)
+  const optionVersion = useChannelUpdates("option", 100);
 
-  // throttle renders
-  const [version, setVersion] = useState(0);
-  const rafRef = useRef<number>(0 as any);
-  const schedule = () => {
-    if (rafRef.current) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = 0 as any;
-      setVersion((v) => (v + 1) & 0xffff);
-    });
-  };
+  // Load expiries when ticker changes
+  useEffect(() => {
+    if (!ticker) {
+      setUnderlying("");
+      setExpiries([]);
+      setSelectedExpiry(null);
+      setAtmStrikesBelow(0);
+      setSelectedKey(null);
+    } else {
+      setUnderlying(ticker.toUpperCase());
+      loadExpiries(ticker.toUpperCase(), expiryDaysMax);
+    }
+  }, [ticker]);
 
   const openTradeTicket = (
     underlying: string,
@@ -106,10 +73,8 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
     setShowTradeTicket(true);
   };
 
-  // Load expiries when underlying changes or user clicks "Show more"
   const loadExpiries = (und: string, days: number) => {
     if (!und) return;
-    
     setLoadingExpiries(true);
     socketHub.send({
       type: "control",
@@ -121,10 +86,8 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
     });
   };
 
-  // Load chain for specific expiry
   const loadChain = (und: string, expiry: string, lim: number) => {
     if (!und || !expiry) return;
-    
     setLoadingChain(true);
     socketHub.send({
       type: "control",
@@ -137,6 +100,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
     });
   };
 
+  // Handle control messages (find_expiries, get_chain responses)
   useEffect(() => {
     const onMsg = (m: any) => {
       // Handle find_expiries response
@@ -145,20 +109,18 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
         if (m.ok) {
           const data = m.data?.data || m.data || {};
           const und = data.underlying ? String(data.underlying) : "";
-          
+
           if (und) setUnderlying(und);
-          
+
           const expiryList = Array.isArray(data.expiries) ? data.expiries : [];
           setExpiries(expiryList.map(String).filter(Boolean));
-          
+
           // Auto-select and load first expiry
           if (expiryList.length > 0) {
             const firstExpiry = String(expiryList[0]);
             setSelectedExpiry(firstExpiry);
-            
-            // Call loadChain for first expiry
+
             if (und && firstExpiry) {
-              console.log(`[OptionPanel] Auto-loading first expiry: ${firstExpiry}`);
               setLoadingChain(true);
               socketHub.send({
                 type: "control",
@@ -173,27 +135,23 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
           }
         }
       }
-      
+
       // Handle get_chain response
       if (m?.type === "control.ack" && m?.op === "get_chain") {
         setLoadingChain(false);
         if (m.ok) {
           const data = m.data?.data || m.data || {};
-          
-          // Only process if we have a ticker AND this response matches it
-          // OR if we don't have a ticker yet (initial load)
+
           const responseUnderlying = data.underlying ? String(data.underlying) : "";
           if (ticker && responseUnderlying && responseUnderlying !== ticker.toUpperCase()) {
-            console.log(`[OptionPanel] Ignoring get_chain response for ${responseUnderlying} (current ticker: ${ticker})`);
             return; // Ignore responses for other tickers
           }
-          
+
           if (data.underlying) setUnderlying(String(data.underlying));
           if (data.expiry) setSelectedExpiry(String(data.expiry));
           if (data.strikes_below !== undefined) {
             setAtmStrikesBelow(Number(data.strikes_below) || 0);
           }
-          // Contracts are subscribed on backend, data will flow through ticks
         }
       }
 
@@ -202,80 +160,29 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
       }
     };
 
-    const onTick = (t: TickEnvelope) => {
-      if (typeof t?.topic !== "string" || !t.topic.startsWith("md.option.")) return;
-      const info = fastExtract(t.topic, t.data);
-      if (!info) return;
-
-      // FILTER: If we have a ticker selected, only accept matching ticks
-      if (ticker) {
-        const parsed = parseOptionSymbol(info.symbol);
-        if (!parsed || parsed.underlying !== ticker.toUpperCase()) {
-          return; // Ignore options for other tickers
-        }
-      }
-
-      const prev = bookRef.current.get(info.symbol) || ({ symbol: info.symbol, kind: info.kind } as QuoteRow);
-      let next: QuoteRow;
-
-      if (info.kind === "quote") {
-        next = {
-          ...prev,
-          kind: "quote",
-          bid: info.bid ?? prev.bid,
-          ask: info.ask ?? prev.ask,
-          ts: info.ts ?? prev.ts,
-        };
-      } else if (info.kind === "trade") {
-        next = {
-          ...prev,
-          kind: "trade",
-          last: info.last ?? prev.last,
-          ts: info.ts ?? prev.ts,
-        };
-      } else {
-        // kind === "greeks"
-        next = {
-          ...prev,
-          kind: prev.kind || "greeks",
-          delta: info.delta ?? prev.delta,
-          gamma: info.gamma ?? prev.gamma,
-          theta: info.theta ?? prev.theta,
-          vega: info.vega ?? prev.vega,
-          rho: info.rho ?? prev.rho,
-          iv: info.iv ?? prev.iv,
-          ts: info.ts ?? prev.ts,
-        };
-      }
-
-      bookRef.current.set(info.symbol, next);
-      schedule();
-    };
-
     socketHub.onMessage(onMsg);
-    socketHub.onTick(onTick);
     socketHub.connect();
-    return () => {
-      socketHub.offTick(onTick);
-      socketHub.offMessage(onMsg);
-    };
-  }, [ticker, selectedExpiry, limit]);
+    return () => socketHub.offMessage(onMsg);
+  }, [ticker, limit]);
 
-  // Build rows for SELECTED expiry only
+  // Build rows for SELECTED expiry only using MarketDataBus
   const rows = useMemo(() => {
     if (!ticker || !selectedExpiry) return [];
 
-    const strikeMap = new Map<number, { call?: QuoteRow; put?: QuoteRow }>();
+    // Get all option prices from the bus
+    const optionPrices = getChannelPrices("option");
 
-    for (const row of bookRef.current.values()) {
-      const p = parseOptionSymbol(row.symbol);
+    const strikeMap = new Map<number, { call?: PriceData; put?: PriceData }>();
+
+    for (const [symbol, price] of optionPrices) {
+      const p = parseOptionSymbol(symbol);
       if (!p) continue;
       if (p.underlying !== ticker.toUpperCase()) continue;
       if (p.expiration !== selectedExpiry) continue;
 
       const at = strikeMap.get(p.strike) || {};
-      if (p.side === "call") at.call = row;
-      else at.put = row;
+      if (p.side === "call") at.call = price;
+      else at.put = price;
       strikeMap.set(p.strike, at);
     }
 
@@ -294,19 +201,21 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
         const pa = num(sideMap.put?.ask);
         const pm = mid(pb, pa, pl);
 
-        // Call Greeks
-        const cDelta = num(sideMap.call?.delta);
-        const cGamma = num(sideMap.call?.gamma);
-        const cTheta = num(sideMap.call?.theta);
-        const cVega = num(sideMap.call?.vega);
-        const cIv = num(sideMap.call?.iv);
+        // Call Greeks (from extended price data)
+        const callData = sideMap.call as any;
+        const cDelta = num(callData?.delta);
+        const cGamma = num(callData?.gamma);
+        const cTheta = num(callData?.theta);
+        const cVega = num(callData?.vega);
+        const cIv = num(callData?.iv);
 
         // Put Greeks
-        const pDelta = num(sideMap.put?.delta);
-        const pGamma = num(sideMap.put?.gamma);
-        const pTheta = num(sideMap.put?.theta);
-        const pVega = num(sideMap.put?.vega);
-        const pIv = num(sideMap.put?.iv);
+        const putData = sideMap.put as any;
+        const pDelta = num(putData?.delta);
+        const pGamma = num(putData?.gamma);
+        const pTheta = num(putData?.theta);
+        const pVega = num(putData?.vega);
+        const pIv = num(putData?.iv);
 
         return {
           strike,
@@ -330,7 +239,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
           pIv,
         };
       });
-  }, [ticker, selectedExpiry, version]);
+  }, [ticker, selectedExpiry, optionVersion]);
 
   /** ---------- Render ---------- */
   return (
@@ -343,7 +252,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
             WS: {wsOpen ? "open" : "…"}
           </span>
         </div>
-        
+
         {/* Controls row */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12 }}>
           {underlying ? (
@@ -433,7 +342,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                 <div style={{ ...thBlock, textAlign: "center" } as any}>Strike</div>
                 <div style={{ ...thBlock, textAlign: "center" } as any}>Puts</div>
               </div>
-              {/* Level 2 header: Calls show Trade | data, Puts show data | Trade */}
+              {/* Level 2 header */}
               <div style={hdrRow2 as any}>
                 <div style={subgrid10 as any}>
                   <div style={subTh as any}>Trade</div>
@@ -468,11 +377,8 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
               {rows.map((r, idx) => {
                 const rowKey = `${selectedExpiry}:${r.strike}`;
                 const isSelected = selectedKey === rowKey;
-
-                // Show ATM divider
                 const showDivider = atmStrikesBelow > 0 && idx === atmStrikesBelow;
 
-                // base style for all cells in this row
                 const baseCell = {
                   ...td,
                   background: isSelected ? "#fef3c7" : "#fff",
@@ -485,21 +391,14 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                       style={{ ...row21, cursor: "pointer" } as any}
                       onClick={() => setSelectedKey(rowKey)}
                     >
-                      {/* Call Trade Buttons FIRST */}
+                      {/* Call Trade Buttons */}
                       <div style={{ ...baseCell, display: "flex", justifyContent: "center", gap: 4, padding: "1px 2px" }}>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             openTradeTicket(underlying, r.strike, selectedExpiry, "C", "BUY", {
-                              last: r.cLast,
-                              bid: r.cBid,
-                              ask: r.cAsk,
-                              mid: r.cMid,
-                              delta: r.cDelta,
-                              gamma: r.cGamma,
-                              theta: r.cTheta,
-                              vega: r.cVega,
-                              iv: r.cIv,
+                              last: r.cLast, bid: r.cBid, ask: r.cAsk, mid: r.cMid,
+                              delta: r.cDelta, gamma: r.cGamma, theta: r.cTheta, vega: r.cVega, iv: r.cIv,
                             });
                           }}
                           style={tradeBtn("BUY")}
@@ -510,15 +409,8 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                           onClick={(e) => {
                             e.stopPropagation();
                             openTradeTicket(underlying, r.strike, selectedExpiry, "C", "SELL", {
-                              last: r.cLast,
-                              bid: r.cBid,
-                              ask: r.cAsk,
-                              mid: r.cMid,
-                              delta: r.cDelta,
-                              gamma: r.cGamma,
-                              theta: r.cTheta,
-                              vega: r.cVega,
-                              iv: r.cIv,
+                              last: r.cLast, bid: r.cBid, ask: r.cAsk, mid: r.cMid,
+                              delta: r.cDelta, gamma: r.cGamma, theta: r.cTheta, vega: r.cVega, iv: r.cIv,
                             });
                           }}
                           style={tradeBtn("SELL")}
@@ -527,7 +419,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                         </button>
                       </div>
 
-                      {/* Calls: Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
+                      {/* Calls: Last | Bid | Mid | Ask | Greeks */}
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cLast)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cBid)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cMid)}</div>
@@ -538,18 +430,12 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cVega)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cIv)}</div>
 
-                      {/* Strike (bold) */}
-                      <div
-                        style={{
-                          ...baseCell,
-                          textAlign: "center",
-                          fontWeight: 700,
-                        }}
-                      >
+                      {/* Strike */}
+                      <div style={{ ...baseCell, textAlign: "center", fontWeight: 700 }}>
                         {isNum(r.strike) ? priceFmt.format(r.strike as number) : "—"}
                       </div>
 
-                      {/* Puts: Last | Bid | Mid | Ask | Δ | Γ | Θ | Vega | IV */}
+                      {/* Puts: Last | Bid | Mid | Ask | Greeks */}
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pLast)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pBid)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pMid)}</div>
@@ -560,21 +446,14 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pVega)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pIv)}</div>
 
-                      {/* Put Trade Buttons LAST */}
+                      {/* Put Trade Buttons */}
                       <div style={{ ...baseCell, display: "flex", justifyContent: "center", gap: 4, padding: "1px 2px" }}>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             openTradeTicket(underlying, r.strike, selectedExpiry, "P", "BUY", {
-                              last: r.pLast,
-                              bid: r.pBid,
-                              ask: r.pAsk,
-                              mid: r.pMid,
-                              delta: r.pDelta,
-                              gamma: r.pGamma,
-                              theta: r.pTheta,
-                              vega: r.pVega,
-                              iv: r.pIv,
+                              last: r.pLast, bid: r.pBid, ask: r.pAsk, mid: r.pMid,
+                              delta: r.pDelta, gamma: r.pGamma, theta: r.pTheta, vega: r.pVega, iv: r.pIv,
                             });
                           }}
                           style={tradeBtn("BUY")}
@@ -585,15 +464,8 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                           onClick={(e) => {
                             e.stopPropagation();
                             openTradeTicket(underlying, r.strike, selectedExpiry, "P", "SELL", {
-                              last: r.pLast,
-                              bid: r.pBid,
-                              ask: r.pAsk,
-                              mid: r.pMid,
-                              delta: r.pDelta,
-                              gamma: r.pGamma,
-                              theta: r.pTheta,
-                              vega: r.pVega,
-                              iv: r.pIv,
+                              last: r.pLast, bid: r.pBid, ask: r.pAsk, mid: r.pMid,
+                              delta: r.pDelta, gamma: r.pGamma, theta: r.pTheta, vega: r.pVega, iv: r.pIv,
                             });
                           }}
                           style={tradeBtn("SELL")}
@@ -656,44 +528,32 @@ function fmtPrice(v: any) {
   return isNum(v) ? priceFmt.format(v) : "—";
 }
 
-const greekFmt = new Intl.NumberFormat(undefined, {
-  minimumFractionDigits: 4,
-  maximumFractionDigits: 4,
-});
+const greekFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 });
 function fmtGreek(v: any) {
   return isNum(v) ? greekFmt.format(v) : "—";
 }
 
 function fmtExpiryShort(s: string) {
   try {
-    // Format as "Dec 13"
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
     if (!m) return s;
-
     const y = Number(m[1]);
     const mo = Number(m[2]);
     const d = Number(m[3]);
     const dt = new Date(y, mo - 1, d);
-
-    return dt.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
+    return dt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   } catch {
     return s;
   }
 }
 
-// Parse OPRA/OSI-like option symbol
+// Parse OPRA/OSI option symbol
 function parseOptionSymbol(sym: string): ParsedOption | null {
   const S = String(sym || "").toUpperCase().replace(/\s+/g, "");
   // OSI: AAPL250117C00190000
   const m1 = /^([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/.exec(S);
   if (m1) {
-    const und = m1[1],
-      yy = m1[2],
-      mm = m1[3],
-      dd = m1[4];
+    const und = m1[1], yy = m1[2], mm = m1[3], dd = m1[4];
     const side: OptionSide = m1[5] === "C" ? "call" : "put";
     const strike = parseInt(m1[6], 10) / 1000;
     const yyyy = Number(yy) + 2000;
@@ -703,17 +563,14 @@ function parseOptionSymbol(sym: string): ParsedOption | null {
   // AAPL_011725C_190
   const m2 = /^([A-Z]+)[._-](\d{2})(\d{2})(\d{2})([CP])[._-](\d+(\.\d+)?)$/.exec(S);
   if (m2) {
-    const und = m2[1],
-      yy = m2[2],
-      mm = m2[3],
-      dd = m2[4];
+    const und = m2[1], yy = m2[2], mm = m2[3], dd = m2[4];
     const side: OptionSide = m2[5] === "C" ? "call" : "put";
     const strike = parseFloat(m2[6]);
     const yyyy = Number(yy) + 2000;
     const exp = `${yyyy}-${mm}-${dd}`;
     return { underlying: und, side, strike, expiration: exp };
   }
-  // Fallback (no reliable expiry)
+  // Fallback
   const m3 = /^([A-Z]+)\d{6,8}([CP])(\d+(\.\d+)?)$/.exec(S);
   if (m3) {
     const und = m3[1];
@@ -722,67 +579,6 @@ function parseOptionSymbol(sym: string): ParsedOption | null {
     return { underlying: und, side, strike, expiration: "1970-01-01" };
   }
   return null;
-}
-
-// Normalize incoming option tick, including greeks
-function fastExtract(topic: string, data: any) {
-  // topics: md.option.quote.SYM | md.option.trade.SYM | md.option.greeks.SYM
-  const parts = topic.split(".");
-  if (parts.length < 4) return null;
-
-  const kind =
-    parts[2] === "quote"
-      ? "quote"
-      : parts[2] === "trade"
-      ? "trade"
-      : parts[2] === "greeks"
-      ? "greeks"
-      : "";
-
-  if (!kind) return null;
-
-  const symbolFromTopic = parts.slice(3).join(".");
-  const inner = data && typeof data.data === "object" ? data.data : data;
-
-  const symbol = (data?.symbol || inner?.symbol || symbolFromTopic || "").toString().toUpperCase();
-  if (!symbol) return null;
-
-  let ts: any = inner?.timestamp ?? data?.timestamp;
-  if (typeof ts === "number") ts = numberToISO(ts);
-  if (typeof ts === "string" && /^\d+$/.test(ts)) ts = numberToISO(Number(ts));
-
-  if (kind === "greeks") {
-    const delta = num(inner?.delta);
-    const gamma = num(inner?.gamma);
-    const theta = num(inner?.theta);
-    const vega = num(inner?.vega);
-    const rho = num(inner?.rho);
-    const iv = num(inner?.iv);
-    return { kind, symbol, delta, gamma, theta, vega, rho, iv, ts };
-  }
-
-  if (kind === "quote") {
-    const bid = num(inner?.bidPrice ?? inner?.bp ?? inner?.bid);
-    const ask = num(inner?.askPrice ?? inner?.ap ?? inner?.ask);
-    return { kind, symbol, bid, ask, ts };
-  }
-  if (kind === "trade") {
-    const last = num(inner?.lastPrice ?? inner?.price ?? inner?.lp ?? inner?.p ?? inner?.close ?? inner?.last);
-    return { kind, symbol, last, ts };
-  }
-
-  // Fallback (shouldn't normally be hit now)
-  const bid = num(inner?.bidPrice ?? inner?.bp ?? inner?.bid);
-  const ask = num(inner?.askPrice ?? inner?.ap ?? inner?.ask);
-  const last = num(inner?.lastPrice ?? inner?.price ?? inner?.lp ?? inner?.p ?? inner?.close ?? inner?.last);
-  if (bid != null || ask != null) return { kind: "quote", symbol, bid, ask, ts };
-  if (last != null) return { kind: "trade", symbol, last, ts };
-  return null;
-}
-
-function numberToISO(n: number) {
-  const ms = n < 2e10 ? n * 1000 : n;
-  return new Date(ms).toISOString();
 }
 
 /** ---------- Styles ---------- */
