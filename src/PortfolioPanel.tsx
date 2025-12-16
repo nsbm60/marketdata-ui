@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
 import OptionTradeTicket from "./components/OptionTradeTicket";
+import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange } from "./services/closePrices";
 
 const CHANNELS = ["md.equity.quote", "md.equity.trade"];
 
@@ -132,6 +133,20 @@ export default function PortfolioPanel() {
   const cacheRef = useRef<Map<string, any>>(new Map());
   const subsSetRef = useRef<Set<string>>(new Set());
   const [priceUpdateTrigger, setPriceUpdateTrigger] = useState(0);
+
+  // Close prices for % change display
+  const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
+
+  // Fetch close prices for equity positions
+  useEffect(() => {
+    if (!accountState?.positions) return;
+    const equitySymbols = accountState.positions
+      .filter(p => p.secType === "STK")
+      .map(p => p.symbol);
+    if (equitySymbols.length > 0) {
+      fetchClosePrices(equitySymbols).then(setClosePrices);
+    }
+  }, [accountState?.positions]);
 
   const openTradeTicket = (
     symbol: string, 
@@ -754,13 +769,14 @@ useEffect(() => {
               <section style={section}>
                 <div style={title}>Positions</div>
                 <div style={table}>
-                  <div style={{ ...hdr, gridTemplateColumns: "75px 140px 36px 36px 65px 80px 100px 80px 130px" }}>
+                  <div style={{ ...hdr, gridTemplateColumns: "75px 140px 36px 36px 65px 80px 75px 100px 80px 130px" }}>
                     <div>Account</div>
                     <div>Symbol</div>
                     <div>Type</div>
                     <div style={center}>CCY</div>
                     <div style={right}>Qty</div>
                     <div style={right}>Last</div>
+                    <div style={right}>Change</div>
                     <div style={right}>Mkt Value</div>
                     <div style={right}>Avg Cost</div>
                     <div style={right}>Trade</div>
@@ -803,6 +819,15 @@ useEffect(() => {
                     // For options, display avg cost per share (divide by 100)
                     const displayAvgCost = p.secType === "OPT" ? p.avgCost / 100 : p.avgCost;
 
+                    // Calculate % change for equities
+                    const closeData = p.secType === "STK" ? closePrices.get(p.symbol) : undefined;
+                    const pctChange = (closeData && lastPrice > 0)
+                      ? calcPctChange(lastPrice, closeData.prevClose)
+                      : undefined;
+                    const changeColor = pctChange !== undefined
+                      ? (pctChange >= 0 ? "#16a34a" : "#dc2626")
+                      : undefined;
+
                     // Format symbol display based on secType
                     let symbolDisplay: React.ReactNode;
                     if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
@@ -829,7 +854,7 @@ useEffect(() => {
                         key={i}
                         style={{
                           ...rowStyle,
-                          gridTemplateColumns: "75px 140px 36px 36px 65px 80px 100px 80px 130px",
+                          gridTemplateColumns: "75px 140px 36px 36px 65px 80px 75px 100px 80px 130px",
                         }}
                       >
                         <div style={cellEllipsis}>{p.account}</div>
@@ -841,6 +866,13 @@ useEffect(() => {
                         </div>
                         <div style={rightMono}>
                           {lastPrice > 0 ? lastPrice.toFixed(4) : "—"}
+                        </div>
+                        <div style={rightMono}>
+                          {pctChange !== undefined ? (
+                            <span style={{ color: changeColor, fontWeight: 600 }}>
+                              {pctChange >= 0 ? "▲" : "▼"} {formatPctChange(pctChange)}
+                            </span>
+                          ) : "—"}
                         </div>
                         <div style={rightMono}>
                           {mktValueDisplay}
