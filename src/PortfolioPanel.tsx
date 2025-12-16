@@ -37,6 +37,7 @@ type IbExecution = {
   price: number;
   execId: string;
   orderId: number;
+  permId: number;
   ts: string;
   // Option fields (optional)
   strike?: number;
@@ -339,7 +340,7 @@ export default function PortfolioPanel() {
           lastUpdated: String(c.lastUpdated ?? ""),
         }));
 
-        const executions = (raw.executions_raw || []).map((e: any) => ({
+        const executions: IbExecution[] = (raw.executions_raw || []).map((e: any) => ({
           account: String(e.account ?? ""),
           symbol: String(e.symbol ?? ""),
           secType: String(e.secType ?? ""),
@@ -349,6 +350,7 @@ export default function PortfolioPanel() {
           price: Number(e.price ?? 0),
           execId: String(e.execId ?? ""),
           orderId: Number(e.orderId ?? 0),
+          permId: Number(e.permId ?? 0),
           ts: String(e.ts ?? ""),
           // Option fields (if present)
           strike: e.strike !== undefined ? Number(e.strike) : undefined,
@@ -379,17 +381,19 @@ export default function PortfolioPanel() {
 
         setAccountState({ positions, cash, executions, openOrders });
 
-        // Build a map of executions by orderId for looking up fill data
-        const execByOrderId = new Map<number, { quantity: number; price: number }>();
-        executions.forEach((e: IbExecution) => {
-          const existing = execByOrderId.get(e.orderId);
+        // Build a map of executions by permId for looking up fill data (orderId is 0 in completed orders)
+        const execByPermId = new Map<number, { quantity: number; price: number }>();
+        executions.forEach((e) => {
+          if (e.permId === 0) return; // Skip if no permId
+          const existing = execByPermId.get(e.permId);
           if (existing) {
             // Aggregate multiple fills for the same order
+            const prevTotal = existing.quantity;
             existing.quantity += e.quantity;
             // Use weighted average price
-            existing.price = (existing.price * (existing.quantity - e.quantity) + e.price * e.quantity) / existing.quantity;
+            existing.price = (existing.price * prevTotal + e.price * e.quantity) / existing.quantity;
           } else {
-            execByOrderId.set(e.orderId, { quantity: e.quantity, price: e.price });
+            execByPermId.set(e.permId, { quantity: e.quantity, price: e.price });
           }
         });
 
@@ -400,13 +404,15 @@ export default function PortfolioPanel() {
           const tsParsed = parseIBTimestamp(tsRaw);
 
           const orderId = Number(o.orderId ?? 0);
+          const permId = Number(o.permId ?? 0);
           const status = String(o.status ?? "");
           let quantity = String(o.quantity ?? "0");
           let price = o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined;
 
           // For filled orders, ALWAYS use execution data (completed_orders_raw quantity is unreliable)
-          if (status === "Filled") {
-            const execData = execByOrderId.get(orderId);
+          // Match by permId since orderId is always 0 in completed orders
+          if (status === "Filled" && permId > 0) {
+            const execData = execByPermId.get(permId);
             if (execData) {
               quantity = String(execData.quantity);
               price = execData.price;
