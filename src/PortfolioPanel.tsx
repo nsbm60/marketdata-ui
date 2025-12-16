@@ -404,18 +404,11 @@ export default function PortfolioPanel() {
           let quantity = String(o.quantity ?? "0");
           let price = o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined;
 
-          // For filled orders with 0 quantity, look up from executions
-          if (status === "Filled" && (quantity === "0" || quantity === "")) {
+          // For filled orders, ALWAYS use execution data (completed_orders_raw quantity is unreliable)
+          if (status === "Filled") {
             const execData = execByOrderId.get(orderId);
             if (execData) {
               quantity = String(execData.quantity);
-              price = execData.price;
-            }
-          }
-          // For filled orders, always use execution price if available (more accurate than lmtPrice)
-          if (status === "Filled") {
-            const execData = execByOrderId.get(orderId);
-            if (execData && execData.price > 0) {
               price = execData.price;
             }
           }
