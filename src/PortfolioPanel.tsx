@@ -44,10 +44,28 @@ type IbExecution = {
   right?: string;   // "Call" or "Put"
 };
 
+type IbOpenOrder = {
+  orderId: number;
+  symbol: string;
+  secType: string;
+  side: string;
+  quantity: string;
+  orderType: string;
+  lmtPrice?: number;
+  auxPrice?: number;
+  status: string;
+  ts: string;
+  // Option fields
+  strike?: number;
+  expiry?: string;
+  right?: string;
+};
+
 type IbAccountState = {
   positions: IbPosition[];
   cash: IbCash[];
   executions: IbExecution[];
+  openOrders: IbOpenOrder[];
 };
 
 const DEBUG_MAX = 300;
@@ -205,13 +223,6 @@ export default function PortfolioPanel() {
         snapshot = m;
       }
 
-      // IMMORTAL DEBUG — always store every message
-      setAllDebugMsgs(prev => {
-        const next = [...prev, snapshot];
-        if (next.length > DEBUG_MAX) next.splice(0, next.length - DEBUG_MAX);
-        return next;
-      });
-
       // Live market data — update price cache
       if (snapshot?.topic && typeof snapshot.topic === "string") {
         const topic = snapshot.topic;
@@ -317,10 +328,56 @@ export default function PortfolioPanel() {
           right: e.right !== undefined ? String(e.right) : undefined,
         }));
 
-        setAccountState({ positions, cash, executions });
+        setAccountState({ positions, cash, executions, openOrders: [] });
         setError(null);
         setLoading(false);
         setLastUpdated(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+        return;
+      }
+
+      // Handle ib.openOrder messages
+      if (snapshot?.topic === "ib.openOrder") {
+        const d = snapshot.data;
+        if (!d || d.kind !== "open_order") return;
+
+        const order: IbOpenOrder = {
+          orderId: Number(d.orderId ?? 0),
+          symbol: String(d.symbol ?? ""),
+          secType: String(d.secType ?? "STK"),
+          side: String(d.side ?? ""),
+          quantity: String(d.quantity ?? "0"),
+          orderType: String(d.orderType ?? ""),
+          lmtPrice: d.lmtPrice !== undefined ? Number(d.lmtPrice) : undefined,
+          auxPrice: d.auxPrice !== undefined ? Number(d.auxPrice) : undefined,
+          status: String(d.status ?? ""),
+          ts: String(d.ts ?? ""),
+          strike: d.strike !== undefined ? Number(d.strike) : undefined,
+          expiry: d.expiry !== undefined ? String(d.expiry) : undefined,
+          right: d.right !== undefined ? String(d.right) : undefined,
+        };
+
+        setAccountState((prev) => {
+          if (!prev) return prev;
+          
+          // Only show Submitted/PreSubmitted orders
+          if (order.status !== "Submitted" && order.status !== "PreSubmitted") {
+            // Remove from list if status changed to Filled/Cancelled
+            return {
+              ...prev,
+              openOrders: prev.openOrders.filter(o => o.orderId !== order.orderId)
+            };
+          }
+
+          // Update or add order
+          const existing = prev.openOrders.findIndex(o => o.orderId === order.orderId);
+          if (existing >= 0) {
+            const updated = [...prev.openOrders];
+            updated[existing] = order;
+            return { ...prev, openOrders: updated };
+          } else {
+            return { ...prev, openOrders: [...prev.openOrders, order] };
+          }
+        });
         return;
       }
 
@@ -344,6 +401,10 @@ export default function PortfolioPanel() {
           execId: String(exec.execId ?? ""),
           orderId: Number(exec.orderId ?? 0),
           ts: String(exec.ts ?? new Date().toISOString()),
+          // Option fields
+          strike: exec.strike !== undefined ? Number(exec.strike) : undefined,
+          expiry: exec.expiry !== undefined ? String(exec.expiry) : undefined,
+          right: exec.right !== undefined ? String(exec.right) : undefined,
         };
 
         setAccountState((prev) => {
@@ -647,6 +708,63 @@ useEffect(() => {
                     </div>
                   ))}
                 </div>
+              </section>
+
+              {/* Open Orders */}
+              <section style={section}>
+                <div style={title}>Open Orders ({accountState.openOrders.length})</div>
+                {accountState.openOrders.length === 0 ? (
+                  <div style={emptyRow}>No open orders</div>
+                ) : (
+                  <div style={table}>
+                    <div style={{ ...hdr, gridTemplateColumns: "78px 160px 50px 60px 80px 95px 95px" }}>
+                      <div style={timeHeader}>Time</div>
+                      <div>Symbol</div>
+                      <div>Side</div>
+                      <div style={right}>Qty</div>
+                      <div>Type</div>
+                      <div style={right}>Price</div>
+                      <div>Status</div>
+                    </div>
+                    {accountState.openOrders.map((o) => {
+                      let symbolDisplay: React.ReactNode;
+                      if (o.secType === "OPT" && o.strike !== undefined && o.expiry !== undefined && o.right !== undefined) {
+                        const rightLabel = o.right === "C" || o.right === "Call" ? "Call" : "Put";
+                        const formattedExpiry = formatExpiryFromYYYYMMDD(o.expiry);
+                        symbolDisplay = (
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 11 }}>
+                              {o.symbol} {o.strike.toFixed(0)} {rightLabel}
+                            </div>
+                            <div style={{ fontSize: 9, color: "#666" }}>
+                              {formattedExpiry}
+                            </div>
+                          </div>
+                        );
+                      } else {
+                        symbolDisplay = <div style={{ fontWeight: 600 }}>{o.symbol}</div>;
+                      }
+
+                      return (
+                        <div key={o.orderId} style={{ ...rowStyle, gridTemplateColumns: "78px 160px 50px 60px 80px 95px 95px" }}>
+                          <div style={timeCell}>
+                            {new Date(o.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                          <div>{symbolDisplay}</div>
+                          <div style={{ ...centerBold, color: o.side === "BUY" ? "#166534" : "#991b1b" }}>
+                            {o.side}
+                          </div>
+                          <div style={{ ...right, fontWeight: 600 }}>{o.quantity}</div>
+                          <div style={{ fontSize: 11 }}>{o.orderType}</div>
+                          <div style={rightMonoBold}>
+                            {o.lmtPrice !== undefined ? `$${o.lmtPrice.toFixed(2)}` : "—"}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#666" }}>{o.status}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </section>
 
               {/* Recent Executions */}
