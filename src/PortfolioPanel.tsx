@@ -1033,9 +1033,12 @@ useEffect(() => {
 
                       const statusColor = h.status === "Cancelled" ? "#dc2626" : h.status === "Filled" ? "#16a34a" : "#666";
                       // Show fill price for Filled, limit price for Cancelled
-                      const displayPrice = h.status === "Filled" && h.price !== undefined
+                      // Only show price if > 0 (market orders have 0 price)
+                      const rawPrice = h.status === "Filled" && h.price !== undefined && h.price > 0
                         ? h.price
-                        : h.lmtPrice;
+                        : (h.lmtPrice !== undefined && h.lmtPrice > 0 ? h.lmtPrice : undefined);
+                      const displayPrice = rawPrice;
+                      const isMktOrder = h.orderType === "MKT";
 
                       return (
                         <div key={`${h.orderId}-${h.ts}-${idx}`} style={{ ...rowStyle, gridTemplateColumns: "70px 130px 46px 50px 80px 80px", gap: 8 }}>
@@ -1046,9 +1049,9 @@ useEffect(() => {
                           <div style={{ ...centerBold, color: h.side === "BUY" ? "#166534" : "#991b1b" }}>
                             {h.side}
                           </div>
-                          <div style={{ ...right, fontWeight: 600 }}>{h.quantity}</div>
+                          <div style={{ ...right, fontWeight: 600 }}>{h.quantity !== "0" ? h.quantity : "—"}</div>
                           <div style={rightMonoBold}>
-                            {displayPrice !== undefined ? `$${displayPrice.toFixed(2)}` : "—"}
+                            {displayPrice !== undefined ? `$${displayPrice.toFixed(2)}` : (isMktOrder ? "MKT" : "—")}
                           </div>
                           <div style={{ fontSize: 10, fontWeight: 600, color: statusColor }}>{h.status}</div>
                         </div>
