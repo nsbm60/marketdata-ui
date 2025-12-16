@@ -379,22 +379,57 @@ export default function PortfolioPanel() {
 
         setAccountState({ positions, cash, executions, openOrders });
 
+        // Build a map of executions by orderId for looking up fill data
+        const execByOrderId = new Map<number, { quantity: number; price: number }>();
+        executions.forEach((e: IbExecution) => {
+          const existing = execByOrderId.get(e.orderId);
+          if (existing) {
+            // Aggregate multiple fills for the same order
+            existing.quantity += e.quantity;
+            // Use weighted average price
+            existing.price = (existing.price * (existing.quantity - e.quantity) + e.price * e.quantity) / existing.quantity;
+          } else {
+            execByOrderId.set(e.orderId, { quantity: e.quantity, price: e.price });
+          }
+        });
+
         // Populate order history from completed_orders_raw (filled + cancelled from IB)
         const completedOrders: IbOrderHistory[] = (raw.completed_orders_raw || []).map((o: any) => {
           // Parse IB's completedTime format, fallback to ts (ISO from Instant)
           const tsRaw = o.completedTime || o.ts || "";
           const tsParsed = parseIBTimestamp(tsRaw);
 
+          const orderId = Number(o.orderId ?? 0);
+          const status = String(o.status ?? "");
+          let quantity = String(o.quantity ?? "0");
+          let price = o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined;
+
+          // For filled orders with 0 quantity, look up from executions
+          if (status === "Filled" && (quantity === "0" || quantity === "")) {
+            const execData = execByOrderId.get(orderId);
+            if (execData) {
+              quantity = String(execData.quantity);
+              price = execData.price;
+            }
+          }
+          // For filled orders, always use execution price if available (more accurate than lmtPrice)
+          if (status === "Filled") {
+            const execData = execByOrderId.get(orderId);
+            if (execData && execData.price > 0) {
+              price = execData.price;
+            }
+          }
+
           return {
-            orderId: Number(o.orderId ?? 0),
+            orderId,
             symbol: String(o.symbol ?? ""),
             secType: String(o.secType ?? "STK"),
             side: String(o.side ?? ""),
-            quantity: String(o.quantity ?? "0"),
+            quantity,
             orderType: o.orderType !== undefined ? String(o.orderType) : undefined,
             lmtPrice: o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined,
-            price: o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined,
-            status: String(o.status ?? ""),
+            price,
+            status,
             ts: tsParsed,
             strike: o.strike !== undefined ? Number(o.strike) : undefined,
             expiry: o.expiry !== undefined ? String(o.expiry) : undefined,
