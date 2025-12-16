@@ -5,8 +5,7 @@ import TradeTicket from "./components/TradeTicket";
 import OptionTradeTicket from "./components/OptionTradeTicket";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
-
-const CHANNELS = ["md.equity.quote", "md.equity.trade"];
+import { useMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
 
 type IbPosition = {
   account: string;
@@ -131,12 +130,23 @@ export default function PortfolioPanel() {
   const [showIbAll, setShowIbAll] = useState(true);
 
   const debugRef = useRef<HTMLDivElement>(null);
-  const cacheRef = useRef<Map<string, any>>(new Map());
-  const subsSetRef = useRef<Set<string>>(new Set());
-  const [priceUpdateTrigger, setPriceUpdateTrigger] = useState(0);
 
   // Market state for prevTradingDay
   const marketState = useMarketState();
+
+  // Build list of equity symbols for market data subscription
+  const equitySymbols = useMemo(() => {
+    if (!accountState?.positions) return [];
+    return accountState.positions
+      .filter(p => p.secType === "STK")
+      .map(p => p.symbol.toUpperCase());
+  }, [accountState?.positions]);
+
+  // Subscribe to equity market data via MarketDataBus
+  const equityPrices = useMarketPrices(equitySymbols, "equity");
+
+  // Listen to option channel updates (backend manages option subscriptions)
+  const optionVersion = useChannelUpdates("option", 100);
 
   // Close prices for % change display (equities)
   const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
@@ -235,77 +245,34 @@ export default function PortfolioPanel() {
     setShowTradeTicket(true);
   };
 
-  // Get stable symbol list for dependency tracking
-  const positionSymbolsKey = useMemo(() => {
-    if (!accountState?.positions) return "";
-    return accountState.positions.map(p => p.symbol.toUpperCase()).sort().join(",");
-  }, [accountState?.positions]);
-
-  // Subscribe to market data for position symbols
-  useEffect(() => {
-    if (!positionSymbolsKey) return;
-
-    const positionSymbols = positionSymbolsKey.split(",").filter(Boolean);
-    const prev = subsSetRef.current;
-    const next = new Set(positionSymbols);
-
-    const toAdd: string[] = [];
-    const toDel: string[] = [];
-
-    next.forEach((s) => { if (!prev.has(s)) toAdd.push(s); });
-    prev.forEach((s) => { if (!next.has(s)) toDel.push(s); });
-
-    if (toAdd.length) {
-      console.log("[PortfolioPanel] Subscribing to market data:", toAdd);
-      socketHub.send({ type: "subscribe", channels: CHANNELS, symbols: toAdd });
-    }
-    if (toDel.length) {
-      console.log("[PortfolioPanel] Unsubscribing from market data:", toDel);
-      socketHub.send({ type: "unsubscribe", channels: CHANNELS, symbols: toDel });
-    }
-
-    subsSetRef.current = next;
-  }, [positionSymbolsKey]);
-
-  // Subscribe to option market data for option positions
-  useEffect(() => {
-    if (!accountState?.positions) return;
-
-    // Build OSI symbols for option positions
+  // Build OSI symbols for option positions (for backend subscription)
+  const optionOsiSymbols = useMemo(() => {
+    if (!accountState?.positions) return [];
     const osiSymbols: string[] = [];
-    
     accountState.positions.forEach(p => {
       if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        // Build OSI format: SYMBOL + YYMMDD + C/P + STRIKE (8 digits, strike * 1000)
         const yy = p.expiry.substring(2, 4);
         const mm = p.expiry.substring(4, 6);
         const dd = p.expiry.substring(6, 8);
         const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
         const strikeFormatted = String(Math.round(p.strike * 1000)).padStart(8, "0");
-        const osiSymbol = `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
-        osiSymbols.push(osiSymbol);
+        osiSymbols.push(`${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`);
       }
     });
+    return osiSymbols;
+  }, [accountState?.positions]);
 
-    if (osiSymbols.length > 0) {
-      // Subscribe via control message (backend Alpaca subscription + snapshot poller)
-      console.log(`[PortfolioPanel] Backend: Subscribing to ${osiSymbols.length} portfolio option contracts`);
+  // Tell backend to subscribe to portfolio option contracts
+  useEffect(() => {
+    if (optionOsiSymbols.length > 0) {
       socketHub.send({
         type: "control",
         target: "marketData",
         op: "subscribe_portfolio_contracts",
-        contracts: osiSymbols,
-      });
-
-      // Also subscribe via WebSocket channels (frontend message routing)
-      console.log(`[PortfolioPanel] Frontend: Subscribing to option channels for ${osiSymbols.length} symbols`);
-      socketHub.send({
-        type: "subscribe",
-        channels: ["md.option.quote", "md.option.trade"],
-        symbols: osiSymbols,
+        contracts: optionOsiSymbols,
       });
     }
-  }, [accountState?.positions]);
+  }, [optionOsiSymbols]);
 
   useEffect(() => {
     const handler = (m: any) => {
@@ -316,63 +283,6 @@ export default function PortfolioPanel() {
         snapshot = JSON.parse(JSON.stringify(m));
       } catch {
         snapshot = m;
-      }
-
-      // Live market data — update price cache
-      if (snapshot?.topic && typeof snapshot.topic === "string") {
-        const topic = snapshot.topic;
-        
-        // Handle md.equity.quote.SYMBOL and md.equity.trade.SYMBOL format
-        if (topic.startsWith("md.equity.")) {
-          const parts = topic.split(".");
-          const topicSymbol = parts.length >= 4 ? parts.slice(3).join(".").toUpperCase() : "";
-          
-          const d = snapshot.data?.data || snapshot.data || {};
-          
-          // Extract price data
-          const bid = d.bidPrice ?? d.bp ?? d.bid;
-          const ask = d.askPrice ?? d.ap ?? d.ask;
-          const last = d.lastPrice ?? d.last ?? d.price ?? d.p ?? d.lp;
-          
-          if (topicSymbol && (bid !== undefined || ask !== undefined || last !== undefined)) {
-            const current = cacheRef.current.get(topicSymbol) || {};
-            cacheRef.current.set(topicSymbol, {
-              ...current,
-              ...(last !== undefined && { last: Number(last) }),
-              ...(bid !== undefined && { bid: Number(bid) }),
-              ...(ask !== undefined && { ask: Number(ask) }),
-            });
-            
-            // Force re-render to update market values
-            setPriceUpdateTrigger(prev => prev + 1);
-          }
-        }
-        
-        // Handle md.option.quote.SYMBOL and md.option.trade.SYMBOL format
-        if (topic.startsWith("md.option.")) {
-          const parts = topic.split(".");
-          const topicSymbol = parts.length >= 4 ? parts.slice(3).join(".").toUpperCase() : "";
-          
-          const d = snapshot.data?.data || snapshot.data || {};
-          
-          // Extract price data
-          const bid = d.bidPrice ?? d.bp ?? d.bid;
-          const ask = d.askPrice ?? d.ap ?? d.ask;
-          const last = d.lastPrice ?? d.last ?? d.price ?? d.p ?? d.lp;
-          
-          if (topicSymbol && (bid !== undefined || ask !== undefined || last !== undefined)) {
-            const current = cacheRef.current.get(topicSymbol) || {};
-            cacheRef.current.set(topicSymbol, {
-              ...current,
-              ...(last !== undefined && { last: Number(last) }),
-              ...(bid !== undefined && { bid: Number(bid) }),
-              ...(ask !== undefined && { ask: Number(ask) }),
-            });
-            
-            // Force re-render to update market values
-            setPriceUpdateTrigger(prev => prev + 1);
-          }
-        }
       }
 
       // Initial snapshot
@@ -659,6 +569,7 @@ export default function PortfolioPanel() {
           price: Number(exec.price ?? 0),
           execId: String(exec.execId ?? ""),
           orderId: Number(exec.orderId ?? 0),
+          permId: Number(exec.permId ?? 0),
           ts: String(exec.ts ?? new Date().toISOString()),
           // Option fields
           strike: exec.strike !== undefined ? Number(exec.strike) : undefined,
@@ -745,17 +656,10 @@ export default function PortfolioPanel() {
     socketHub.onMessage(handler);
     socketHub.onTick(handler);  // Option messages come through onTick
     socketHub.send({ type: "control", target: "ibAccount", op: "account_state" });
-    
-    // Cleanup: unsubscribe from all market data and remove handler
+
     return () => {
       socketHub.offMessage(handler);
       socketHub.offTick(handler);
-      const symbols = Array.from(subsSetRef.current);
-      if (symbols.length > 0) {
-        console.log("[PortfolioPanel] Cleanup: Unsubscribing from all symbols:", symbols);
-        socketHub.send({ type: "unsubscribe", channels: CHANNELS, symbols });
-        subsSetRef.current.clear();
-      }
     };
   }, []);
 
@@ -810,7 +714,6 @@ useEffect(() => {
           <>
             <div style={summary}>
               positions: {accountState.positions.length} · cash: {accountState.cash.length} · execs: {accountState.executions.length}
-              {subsSetRef.current.size > 0 && <> · subscribed: {subsSetRef.current.size}</>}
             </div>
 
             <div style={gridWrap}>
@@ -843,8 +746,9 @@ useEffect(() => {
                       return 0;
                     })
                     .map((p, i) => {
-                    // Build the proper symbol for cache lookup
-                    let cacheKey = p.symbol;
+                    // Build the proper symbol for price lookup
+                    let priceKey = p.symbol.toUpperCase();
+                    let priceData;
                     if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
                       // Build OSI format: SYMBOL + YYMMDD + C/P + STRIKE (8 digits, strike * 1000)
                       const yy = p.expiry.substring(2, 4);
@@ -852,13 +756,16 @@ useEffect(() => {
                       const dd = p.expiry.substring(6, 8);
                       const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
                       const strikeFormatted = String(Math.round(p.strike * 1000)).padStart(8, "0");
-                      cacheKey = `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
+                      priceKey = `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
+                      priceData = getChannelPrices("option").get(priceKey);
+                    } else {
+                      priceData = equityPrices.get(priceKey);
                     }
-                    
-                    const lastPrice = cacheRef.current.get(cacheKey)?.last || 0;
+
+                    const lastPrice = priceData?.last || 0;
 
                     // Use todayClose as fallback when no live price (after market close / no post-market trades)
-                    const optPriceData = p.secType === "OPT" ? optionClosePrices.get(cacheKey) : undefined;
+                    const optPriceData = p.secType === "OPT" ? optionClosePrices.get(priceKey) : undefined;
                     const equityCloseData = p.secType === "STK" ? closePrices.get(p.symbol) : undefined;
                     let displayPrice = lastPrice;
                     if (lastPrice === 0) {
@@ -954,20 +861,7 @@ useEffect(() => {
                               const optionDetails = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
                                 ? { strike: p.strike, expiry: p.expiry, right: p.right }
                                 : undefined;
-                              
-                              // Calculate cache key for this position
-                              let lookupKey = p.symbol.toUpperCase().trim();
-                              if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-                                const yy = p.expiry.substring(2, 4);
-                                const mm = p.expiry.substring(4, 6);
-                                const dd = p.expiry.substring(6, 8);
-                                const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
-                                const strikeFormatted = String(Math.round(p.strike * 1000)).padStart(8, "0");
-                                lookupKey = `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
-                              }
-                              
-                              const marketData = cacheRef.current.get(lookupKey);
-                              openTradeTicket(p.symbol, p.account, "BUY", p.secType, optionDetails, marketData);
+                              openTradeTicket(p.symbol, p.account, "BUY", p.secType, optionDetails, priceData);
                             }}
                             style={{ ...iconBtn, background: "#dcfce7", color: "#166534" }}
                           >
@@ -979,20 +873,7 @@ useEffect(() => {
                               const optionDetails = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
                                 ? { strike: p.strike, expiry: p.expiry, right: p.right }
                                 : undefined;
-                              
-                              // Calculate cache key for this position
-                              let lookupKey = p.symbol.toUpperCase().trim();
-                              if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-                                const yy = p.expiry.substring(2, 4);
-                                const mm = p.expiry.substring(4, 6);
-                                const dd = p.expiry.substring(6, 8);
-                                const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
-                                const strikeFormatted = String(Math.round(p.strike * 1000)).padStart(8, "0");
-                                lookupKey = `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
-                              }
-                              
-                              const marketData = cacheRef.current.get(lookupKey);
-                              openTradeTicket(p.symbol, p.account, "SELL", p.secType, optionDetails, marketData);
+                              openTradeTicket(p.symbol, p.account, "SELL", p.secType, optionDetails, priceData);
                             }}
                             style={{ ...iconBtn, background: "#fce7f3", color: "#831843" }}
                           >
