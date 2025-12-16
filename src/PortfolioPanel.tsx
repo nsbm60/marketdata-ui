@@ -61,6 +61,23 @@ type IbOpenOrder = {
   right?: string;
 };
 
+type IbOrderHistory = {
+  orderId: number;
+  symbol: string;
+  secType: string;
+  side: string;
+  quantity: string;
+  orderType?: string;
+  lmtPrice?: number;
+  price?: number;     // Fill price for executions
+  status: string;     // "Cancelled", "Filled", etc.
+  ts: string;
+  // Option fields
+  strike?: number;
+  expiry?: string;
+  right?: string;
+};
+
 type IbAccountState = {
   positions: IbPosition[];
   cash: IbCash[];
@@ -91,6 +108,17 @@ export default function PortfolioPanel() {
     expiry: string;
     right: "C" | "P";
   } | null>(null);
+
+  // Modify order modal state
+  const [modifyingOrder, setModifyingOrder] = useState<IbOpenOrder | null>(null);
+  const [modifyPrice, setModifyPrice] = useState<string>("");
+  const [modifyQuantity, setModifyQuantity] = useState<string>("");
+
+  // Cancel confirmation modal state
+  const [cancellingOrder, setCancellingOrder] = useState<IbOpenOrder | null>(null);
+
+  // Order history (cancelled/filled orders)
+  const [orderHistory, setOrderHistory] = useState<IbOrderHistory[]>([]);
 
   // Debug — immortal + filtered + frozen
   const [allDebugMsgs, setAllDebugMsgs] = useState<any[]>([]);
@@ -328,7 +356,53 @@ export default function PortfolioPanel() {
           right: e.right !== undefined ? String(e.right) : undefined,
         }));
 
-        setAccountState({ positions, cash, executions, openOrders: [] });
+        // Parse open orders from account_state response
+        const openOrders = (raw.open_orders_raw || [])
+          .map((o: any) => ({
+            orderId: Number(o.orderId ?? 0),
+            symbol: String(o.symbol ?? ""),
+            secType: String(o.secType ?? "STK"),
+            side: String(o.side ?? ""),
+            quantity: String(o.quantity ?? "0"),
+            orderType: String(o.orderType ?? ""),
+            lmtPrice: o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined,
+            auxPrice: o.auxPrice !== undefined ? Number(o.auxPrice) : undefined,
+            status: String(o.status ?? ""),
+            ts: String(o.ts ?? ""),
+            // Option fields (if present)
+            strike: o.strike !== undefined ? Number(o.strike) : undefined,
+            expiry: o.expiry !== undefined ? String(o.expiry) : undefined,
+            right: o.right !== undefined ? String(o.right) : undefined,
+          }))
+          // Only show active orders (Submitted/PreSubmitted)
+          .filter((o: IbOpenOrder) => o.status === "Submitted" || o.status === "PreSubmitted");
+
+        setAccountState({ positions, cash, executions, openOrders });
+
+        // Populate order history from completed_orders_raw (filled + cancelled from IB)
+        const completedOrders: IbOrderHistory[] = (raw.completed_orders_raw || []).map((o: any) => {
+          // Parse IB's completedTime format, fallback to ts (ISO from Instant)
+          const tsRaw = o.completedTime || o.ts || "";
+          const tsParsed = parseIBTimestamp(tsRaw);
+
+          return {
+            orderId: Number(o.orderId ?? 0),
+            symbol: String(o.symbol ?? ""),
+            secType: String(o.secType ?? "STK"),
+            side: String(o.side ?? ""),
+            quantity: String(o.quantity ?? "0"),
+            orderType: o.orderType !== undefined ? String(o.orderType) : undefined,
+            lmtPrice: o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined,
+            price: o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined,
+            status: String(o.status ?? ""),
+            ts: tsParsed,
+            strike: o.strike !== undefined ? Number(o.strike) : undefined,
+            expiry: o.expiry !== undefined ? String(o.expiry) : undefined,
+            right: o.right !== undefined ? String(o.right) : undefined,
+          };
+        });
+        setOrderHistory(completedOrders.slice(0, 50));
+
         setError(null);
         setLoading(false);
         setLastUpdated(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
@@ -358,7 +432,7 @@ export default function PortfolioPanel() {
 
         setAccountState((prev) => {
           if (!prev) return prev;
-          
+
           // Only show Submitted/PreSubmitted orders
           if (order.status !== "Submitted" && order.status !== "PreSubmitted") {
             // Remove from list if status changed to Filled/Cancelled
@@ -378,6 +452,91 @@ export default function PortfolioPanel() {
             return { ...prev, openOrders: [...prev.openOrders, order] };
           }
         });
+        return;
+      }
+
+      // Handle ib.order (order status) messages - for cancel/fill updates
+      if (snapshot?.topic === "ib.order") {
+        const d = snapshot.data;
+        if (!d || d.kind !== "order_status") return;
+
+        const orderId = Number(d.orderId ?? 0);
+        const status = String(d.status ?? "");
+
+        // Remove order from UI if cancelled or filled, and add to history
+        if (status === "Cancelled" || status === "Filled" || status === "Inactive") {
+          setAccountState((prev) => {
+            if (!prev) return prev;
+
+            // Find the order to move to history
+            const orderToMove = prev.openOrders.find(o => o.orderId === orderId);
+            if (orderToMove) {
+              // Add to order history with deduplication check
+              const historyEntry: IbOrderHistory = {
+                orderId: orderToMove.orderId,
+                symbol: orderToMove.symbol,
+                secType: orderToMove.secType,
+                side: orderToMove.side,
+                quantity: orderToMove.quantity,
+                orderType: orderToMove.orderType,
+                lmtPrice: orderToMove.lmtPrice,
+                status: status,
+                ts: new Date().toISOString(),
+                strike: orderToMove.strike,
+                expiry: orderToMove.expiry,
+                right: orderToMove.right,
+              };
+              setOrderHistory(h => {
+                // Check if this order is already in history (deduplication)
+                if (h.some(existing => existing.orderId === orderId)) {
+                  return h; // Already in history, don't add duplicate
+                }
+                return [historyEntry, ...h].slice(0, 50); // Keep last 50
+              });
+            }
+
+            return {
+              ...prev,
+              openOrders: prev.openOrders.filter(o => o.orderId !== orderId)
+            };
+          });
+        }
+        return;
+      }
+
+      // Handle ib.accountSummary messages - real-time cash balance updates
+      if (snapshot?.topic === "ib.accountSummary") {
+        const d = snapshot.data;
+        if (!d || d.kind !== "account_summary") return;
+
+        const account = String(d.account ?? "");
+        const tag = String(d.tag ?? "");
+        const value = parseFloat(d.value ?? "0");
+        const currency = String(d.currency ?? "USD");
+        const ts = String(d.ts ?? new Date().toISOString());
+
+        // Only update for cash-related tags
+        if (tag === "TotalCashValue" || tag === "CashBalance") {
+          setAccountState((prev) => {
+            if (!prev) return prev;
+
+            const cash = [...prev.cash];
+            const idx = cash.findIndex(
+              (c) => c.account === account && c.currency === currency
+            );
+
+            if (idx >= 0) {
+              cash[idx] = { ...cash[idx], amount: value, lastUpdated: ts };
+            } else {
+              // Add new cash entry if not found
+              cash.push({ account, currency, amount: value, lastUpdated: ts });
+            }
+
+            return { ...prev, cash };
+          });
+
+          setLastUpdated(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+        }
         return;
       }
 
@@ -452,7 +611,31 @@ export default function PortfolioPanel() {
             });
           }
 
+          // Cash balance will be updated via ib.accountSummary stream from IB
           return { ...prev, positions, executions: newExecs };
+        });
+
+        // Also add to order history as "Filled"
+        setOrderHistory(h => {
+          // Deduplicate by execId (use orderId + symbol + ts as key since execId might not be unique display)
+          const key = `${newExec.orderId}-${newExec.execId}`;
+          if (h.some(existing => `${existing.orderId}-${existing.symbol}-${existing.ts}` === `${newExec.orderId}-${newExec.symbol}-${newExec.ts}`)) {
+            return h;
+          }
+          const historyEntry: IbOrderHistory = {
+            orderId: newExec.orderId,
+            symbol: newExec.symbol,
+            secType: newExec.secType,
+            side: newExec.side,
+            quantity: String(newExec.quantity),
+            price: newExec.price,
+            status: "Filled",
+            ts: newExec.ts,
+            strike: newExec.strike,
+            expiry: newExec.expiry,
+            right: newExec.right,
+          };
+          return [historyEntry, ...h].slice(0, 50);
         });
 
         setLastUpdated(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
@@ -531,6 +714,8 @@ useEffect(() => {
             </div>
 
             <div style={gridWrap}>
+              {/* Left Column: Positions + Cash */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {/* Positions with BUY/SELL buttons */}
               <section style={section}>
                 <div style={title}>Positions</div>
@@ -709,7 +894,10 @@ useEffect(() => {
                   ))}
                 </div>
               </section>
+              </div>
 
+              {/* Right Column: Open Orders + Order History */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {/* Open Orders */}
               <section style={section}>
                 <div style={title}>Open Orders ({accountState.openOrders.length})</div>
@@ -717,7 +905,7 @@ useEffect(() => {
                   <div style={emptyRow}>No open orders</div>
                 ) : (
                   <div style={table}>
-                    <div style={{ ...hdr, gridTemplateColumns: "78px 160px 50px 60px 80px 95px 95px" }}>
+                    <div style={{ ...hdr, gridTemplateColumns: "70px 130px 46px 50px 46px 80px 80px 65px", gap: 8 }}>
                       <div style={timeHeader}>Time</div>
                       <div>Symbol</div>
                       <div>Side</div>
@@ -725,7 +913,9 @@ useEffect(() => {
                       <div>Type</div>
                       <div style={right}>Price</div>
                       <div>Status</div>
+                      <div style={center}>Action</div>
                     </div>
+                    <div style={{ maxHeight: 200, overflowY: "auto" }}>
                     {accountState.openOrders.map((o) => {
                       let symbolDisplay: React.ReactNode;
                       if (o.secType === "OPT" && o.strike !== undefined && o.expiry !== undefined && o.right !== undefined) {
@@ -746,7 +936,7 @@ useEffect(() => {
                       }
 
                       return (
-                        <div key={o.orderId} style={{ ...rowStyle, gridTemplateColumns: "78px 160px 50px 60px 80px 95px 95px" }}>
+                        <div key={o.orderId} style={{ ...rowStyle, gridTemplateColumns: "70px 130px 46px 50px 46px 80px 80px 65px", gap: 8 }}>
                           <div style={timeCell}>
                             {new Date(o.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </div>
@@ -760,40 +950,77 @@ useEffect(() => {
                             {o.lmtPrice !== undefined ? `$${o.lmtPrice.toFixed(2)}` : "—"}
                           </div>
                           <div style={{ fontSize: 10, color: "#666" }}>{o.status}</div>
+                          <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
+                            {o.orderType !== "MKT" && (
+                              <button
+                                onClick={() => {
+                                  setModifyingOrder(o);
+                                  setModifyPrice(o.lmtPrice !== undefined ? o.lmtPrice.toString() : "");
+                                  setModifyQuantity(o.quantity);
+                                }}
+                                style={{
+                                  padding: "2px 8px",
+                                  border: "1px solid #2563eb",
+                                  borderRadius: "4px",
+                                  background: "#eff6ff",
+                                  color: "#2563eb",
+                                  fontSize: "10px",
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Mod
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setCancellingOrder(o)}
+                              style={{
+                                padding: "2px 8px",
+                                border: "1px solid #dc2626",
+                                borderRadius: "4px",
+                                background: "#fef2f2",
+                                color: "#dc2626",
+                                fontSize: "10px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Cxl
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
+                    </div>
                   </div>
                 )}
               </section>
 
-              {/* Recent Executions */}
+              {/* Order History (Fills + Cancellations) */}
               <section style={section}>
-                <div style={title}>Recent Executions ({accountState.executions.length})</div>
-                {accountState.executions.length === 0 ? (
-                  <div style={emptyRow}>No executions yet</div>
+                <div style={title}>Order History ({orderHistory.length})</div>
+                {orderHistory.length === 0 ? (
+                  <div style={emptyRow}>No order history</div>
                 ) : (
                   <div style={table}>
-                    <div style={{ ...hdr, gridTemplateColumns: "78px 98px 140px 48px 68px 100px 110px" }}>
+                    <div style={{ ...hdr, gridTemplateColumns: "70px 130px 46px 50px 80px 80px", gap: 8 }}>
                       <div style={timeHeader}>Time</div>
-                      <div>Account</div>
                       <div>Symbol</div>
                       <div>Side</div>
                       <div style={right}>Qty</div>
                       <div style={right}>Price</div>
-                      <div style={right}>ID</div>
+                      <div>Status</div>
                     </div>
-                    {accountState.executions.map((e, i) => {
-                      // Format symbol display based on secType
+                    <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                    {orderHistory.map((h, idx) => {
                       let symbolDisplay: React.ReactNode;
-                      if (e.secType === "OPT" && e.strike !== undefined && e.expiry !== undefined && e.right !== undefined) {
-                        // Use the fields directly from the backend
-                        const rightLabel = e.right === "C" || e.right === "Call" ? "Call" : "Put";
-                        const formattedExpiry = formatExpiryFromYYYYMMDD(e.expiry);
+                      if (h.secType === "OPT" && h.strike !== undefined && h.expiry !== undefined && h.right !== undefined) {
+                        const rightLabel = h.right === "C" || h.right === "Call" ? "Call" : "Put";
+                        const formattedExpiry = formatExpiryFromYYYYMMDD(h.expiry);
                         symbolDisplay = (
                           <div>
                             <div style={{ fontWeight: 600, fontSize: 11 }}>
-                              {e.symbol} {e.strike.toFixed(0)} {rightLabel}
+                              {h.symbol} {h.strike.toFixed(0)} {rightLabel}
                             </div>
                             <div style={{ fontSize: 9, color: "#666" }}>
                               {formattedExpiry}
@@ -801,31 +1028,38 @@ useEffect(() => {
                           </div>
                         );
                       } else {
-                        // Equity or incomplete option data
-                        symbolDisplay = <div style={{ fontWeight: 600 }}>{e.symbol}</div>;
+                        symbolDisplay = <div style={{ fontWeight: 600 }}>{h.symbol}</div>;
                       }
 
+                      const statusColor = h.status === "Cancelled" ? "#dc2626" : h.status === "Filled" ? "#16a34a" : "#666";
+                      // Show fill price for Filled, limit price for Cancelled
+                      const displayPrice = h.status === "Filled" && h.price !== undefined
+                        ? h.price
+                        : h.lmtPrice;
+
                       return (
-                        <div key={e.execId || i} style={{ ...rowStyle, gridTemplateColumns: "78px 98px 140px 48px 68px 100px 110px" }}>
+                        <div key={`${h.orderId}-${h.ts}-${idx}`} style={{ ...rowStyle, gridTemplateColumns: "70px 130px 46px 50px 80px 80px", gap: 8 }}>
                           <div style={timeCell}>
-                            {new Date(e.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                            {new Date(h.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </div>
-                          <div style={cellEllipsis}>{e.account}</div>
                           <div>{symbolDisplay}</div>
-                          <div style={{ ...centerBold, color: e.side === "BUY" ? "#16a34a" : "#dc2626" }}>
-                            {e.side}
+                          <div style={{ ...centerBold, color: h.side === "BUY" ? "#166534" : "#991b1b" }}>
+                            {h.side}
                           </div>
-                          <div style={right}>{e.quantity.toLocaleString()}</div>
-                          <div style={rightMono}>{e.price.toFixed(4)}</div>
-                          <div style={{ ...right, ...gray9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                            {e.execId.slice(-12)}
+                          <div style={{ ...right, fontWeight: 600 }}>{h.quantity}</div>
+                          <div style={rightMonoBold}>
+                            {displayPrice !== undefined ? `$${displayPrice.toFixed(2)}` : "—"}
                           </div>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: statusColor }}>{h.status}</div>
                         </div>
                       );
                     })}
+                    </div>
                   </div>
                 )}
               </section>
+              </div>
+
             </div>
           </>
         ) : (
@@ -859,6 +1093,268 @@ useEffect(() => {
                 onClose={() => setShowTradeTicket(false)}
               />
             ) : null}
+          </div>
+        )}
+
+        {/* Cancel Confirmation Modal */}
+        {cancellingOrder && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: "rgba(0,0,0,0.5)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1001,
+            }}
+            onClick={() => setCancellingOrder(null)}
+          >
+            <div
+              style={{
+                background: "white",
+                borderRadius: 12,
+                padding: 20,
+                minWidth: 340,
+                boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: "#dc2626" }}>
+                Cancel Order?
+              </div>
+
+              <div style={{ background: "#f8fafc", borderRadius: 8, padding: 12, marginBottom: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 8, fontSize: 13 }}>
+                  <div style={{ color: "#666" }}>Order ID:</div>
+                  <div style={{ fontWeight: 600 }}>#{cancellingOrder.orderId}</div>
+
+                  <div style={{ color: "#666" }}>Symbol:</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {cancellingOrder.symbol}
+                    {cancellingOrder.secType === "OPT" && cancellingOrder.strike && (
+                      <span style={{ fontWeight: 400, color: "#666" }}>
+                        {" "}{cancellingOrder.strike} {cancellingOrder.right === "C" || cancellingOrder.right === "Call" ? "Call" : "Put"}
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ color: "#666" }}>Side:</div>
+                  <div style={{ fontWeight: 600, color: cancellingOrder.side === "BUY" ? "#16a34a" : "#dc2626" }}>
+                    {cancellingOrder.side}
+                  </div>
+
+                  <div style={{ color: "#666" }}>Quantity:</div>
+                  <div style={{ fontWeight: 600 }}>{cancellingOrder.quantity}</div>
+
+                  <div style={{ color: "#666" }}>Type:</div>
+                  <div style={{ fontWeight: 600 }}>{cancellingOrder.orderType}</div>
+
+                  {cancellingOrder.lmtPrice !== undefined && (
+                    <>
+                      <div style={{ color: "#666" }}>Limit Price:</div>
+                      <div style={{ fontWeight: 600 }}>${cancellingOrder.lmtPrice.toFixed(2)}</div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 12 }}>
+                <button
+                  onClick={() => setCancellingOrder(null)}
+                  style={{
+                    flex: 1,
+                    padding: "10px 16px",
+                    border: "1px solid #d1d5db",
+                    borderRadius: 6,
+                    background: "white",
+                    fontSize: 14,
+                    cursor: "pointer",
+                  }}
+                >
+                  Keep Order
+                </button>
+                <button
+                  onClick={() => {
+                    socketHub.send({
+                      type: "control",
+                      target: "ibAccount",
+                      op: "cancel_order",
+                      orderId: cancellingOrder.orderId,
+                    });
+                    setCancellingOrder(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: "10px 16px",
+                    border: "none",
+                    borderRadius: 6,
+                    background: "#dc2626",
+                    color: "white",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel Order
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modify Order Modal */}
+        {modifyingOrder && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: "rgba(0,0,0,0.5)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1001,
+            }}
+            onClick={() => setModifyingOrder(null)}
+          >
+            <div
+              style={{
+                background: "white",
+                borderRadius: 12,
+                padding: 20,
+                minWidth: 320,
+                boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>
+                Modify Order #{modifyingOrder.orderId}
+              </div>
+              <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
+                {modifyingOrder.symbol} {modifyingOrder.side} {modifyingOrder.orderType}
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>
+                  Quantity
+                </label>
+                <input
+                  type="number"
+                  value={modifyQuantity}
+                  onChange={(e) => setModifyQuantity(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    border: "1px solid #d1d5db",
+                    borderRadius: 6,
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+
+              {(modifyingOrder.orderType === "LMT" || modifyingOrder.orderType === "STPLMT") && (
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>
+                    Limit Price
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={modifyPrice}
+                    onChange={(e) => setModifyPrice(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 6,
+                      fontSize: 14,
+                    }}
+                  />
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+                <button
+                  onClick={() => setModifyingOrder(null)}
+                  style={{
+                    flex: 1,
+                    padding: "10px 16px",
+                    border: "1px solid #d1d5db",
+                    borderRadius: 6,
+                    background: "white",
+                    fontSize: 14,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const qty = parseInt(modifyQuantity, 10);
+                    const price = parseFloat(modifyPrice);
+
+                    if (isNaN(qty) || qty <= 0) {
+                      alert("Invalid quantity");
+                      return;
+                    }
+                    if ((modifyingOrder.orderType === "LMT" || modifyingOrder.orderType === "STPLMT") && (isNaN(price) || price <= 0)) {
+                      alert("Invalid price");
+                      return;
+                    }
+
+                    const payload: any = {
+                      type: "control",
+                      target: "ibAccount",
+                      op: "modify_order",
+                      orderId: modifyingOrder.orderId,
+                      symbol: modifyingOrder.symbol,
+                      secType: modifyingOrder.secType,
+                      side: modifyingOrder.side,
+                      quantity: qty,
+                      orderType: modifyingOrder.orderType,
+                    };
+
+                    if (modifyingOrder.orderType === "LMT" || modifyingOrder.orderType === "STPLMT") {
+                      payload.lmtPrice = price;
+                    }
+                    if (modifyingOrder.orderType === "STP" || modifyingOrder.orderType === "STPLMT") {
+                      payload.auxPrice = modifyingOrder.auxPrice;
+                    }
+
+                    // Option fields
+                    if (modifyingOrder.secType === "OPT") {
+                      payload.strike = modifyingOrder.strike;
+                      payload.expiry = modifyingOrder.expiry;
+                      // Normalize right to "C" or "P" for backend
+                      const rightVal = modifyingOrder.right;
+                      payload.right = (rightVal === "Call" || rightVal === "C") ? "C" : "P";
+                    }
+
+                    socketHub.send(payload);
+                    setModifyingOrder(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: "10px 16px",
+                    border: "none",
+                    borderRadius: 6,
+                    background: "#2563eb",
+                    color: "white",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Modify Order
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -978,6 +1474,36 @@ function parseOptionSymbol(sym: string): ParsedOption | null {
   }
   
   return null;
+}
+
+/**
+ * Parse IB's completedTime format "YYYYMMDD HH:MM:SS" or "YYYYMMDD-HH:MM:SS" to ISO string.
+ * Falls back to the input if parsing fails.
+ */
+function parseIBTimestamp(ibTime: string): string {
+  if (!ibTime) return "";
+  try {
+    // IB format: "20231215 14:30:00" or "20231215-14:30:00" possibly with timezone
+    // Remove timezone suffix if present (e.g., " US/Eastern")
+    const cleaned = ibTime.split(" ").slice(0, 2).join(" ");
+
+    // Match "YYYYMMDD HH:MM:SS" or "YYYYMMDD-HH:MM:SS"
+    const match = /^(\d{4})(\d{2})(\d{2})[\s-](\d{2}):(\d{2}):(\d{2})/.exec(cleaned);
+    if (match) {
+      const [, y, mo, d, h, mi, s] = match;
+      return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)).toISOString();
+    }
+
+    // Try parsing as-is (might already be ISO)
+    const parsed = new Date(ibTime);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+
+    return ibTime;
+  } catch {
+    return ibTime;
+  }
 }
 
 function formatExpiryFromYYYYMMDD(expiry: string): string {
