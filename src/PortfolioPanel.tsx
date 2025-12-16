@@ -857,11 +857,17 @@ useEffect(() => {
                     
                     const lastPrice = cacheRef.current.get(cacheKey)?.last || 0;
 
-                    // For options, use todayClose as fallback when no live price
+                    // Use todayClose as fallback when no live price (after market close / no post-market trades)
                     const optPriceData = p.secType === "OPT" ? optionClosePrices.get(cacheKey) : undefined;
-                    const displayPrice = p.secType === "OPT" && lastPrice === 0 && optPriceData?.todayClose
-                      ? optPriceData.todayClose
-                      : lastPrice;
+                    const equityCloseData = p.secType === "STK" ? closePrices.get(p.symbol) : undefined;
+                    let displayPrice = lastPrice;
+                    if (lastPrice === 0) {
+                      if (p.secType === "OPT" && optPriceData?.todayClose) {
+                        displayPrice = optPriceData.todayClose;
+                      } else if (p.secType === "STK" && equityCloseData?.todayClose) {
+                        displayPrice = equityCloseData.todayClose;
+                      }
+                    }
 
                     // For options, multiply by contract size (100)
                     const contractMultiplier = p.secType === "OPT" ? 100 : 1;
@@ -879,9 +885,8 @@ useEffect(() => {
                     // Calculate % change for equities and options
                     let pctChange: number | undefined;
                     if (p.secType === "STK") {
-                      const closeData = closePrices.get(p.symbol);
-                      if (closeData && lastPrice > 0) {
-                        pctChange = calcPctChange(lastPrice, closeData.prevClose);
+                      if (displayPrice > 0 && equityCloseData?.prevClose && equityCloseData.prevClose > 0) {
+                        pctChange = calcPctChange(displayPrice, equityCloseData.prevClose);
                       }
                     } else if (p.secType === "OPT") {
                       if (displayPrice > 0 && optPriceData?.prevClose && optPriceData.prevClose > 0) {
