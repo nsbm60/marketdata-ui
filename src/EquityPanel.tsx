@@ -1,7 +1,9 @@
 // src/EquityPanel.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
-import TradeTicket from "./components/TradeTicket"; // ← ONLY NEW IMPORT
+import TradeTicket from "./components/TradeTicket";
+import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange } from "./services/closePrices";
+import { useMarketState } from "./services/marketState";
 
 const CHANNELS = ["md.equity.quote", "md.equity.trade"];
 const LS_APPLIED = "wl.applied";
@@ -44,6 +46,16 @@ export default function EquityPanel({
     setTicketSide(side);
     setShowTradeTicket(true);
   };
+
+  /* ---------------- MARKET STATE & CLOSE PRICES ---------------- */
+  const marketState = useMarketState();
+  const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
+
+  // Fetch close prices when symbols change
+  useEffect(() => {
+    if (symbols.length === 0) return;
+    fetchClosePrices(symbols).then(setClosePrices);
+  }, [symbols.join(",")]);
 
   /* ---------------- caches and WS plumbing ---------------- */
   const cacheRef = useRef(new Map<string, any>());
@@ -308,14 +320,16 @@ export default function EquityPanel({
             <col style={{ width: "9ch" }} />
             <col style={{ width: "9ch" }} />
             <col style={{ width: "9ch" }} />
+            <col style={{ width: "9ch" }} />
             <col style={{ width: "7ch" }} />
             <col style={{ width: "12ch" }} />
-            <col style={{ width: "14ch" }} /> {/* NEW */}
+            <col style={{ width: "14ch" }} />
           </colgroup>
           <thead>
             <tr>
               <Th>Symbol</Th>
               <Th center>Last</Th>
+              <Th center>Change</Th>
               <Th center>Bid</Th>
               <Th center>Ask</Th>
               <Th center>Mid</Th>
@@ -327,7 +341,7 @@ export default function EquityPanel({
           <tbody>
             {symbols.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ padding: 6, color: "#666", textAlign: "center", borderTop: "1px solid #eee", fontSize: 12 }}>
+                <td colSpan={9} style={{ padding: 6, color: "#666", textAlign: "center", borderTop: "1px solid #eee", fontSize: 12 }}>
                   No tickers selected.
                 </td>
               </tr>
@@ -340,6 +354,16 @@ export default function EquityPanel({
                 const lastVal = isNum(r.last) ? r.last : mid;
                 const stale = isStale(r.updatedAt, STALE_MS);
                 const isSelected = r.symbol === selectedSym;
+
+                // Calculate price change
+                const closeData = closePrices.get(r.symbol);
+                const pctChange = (closeData && isNum(lastVal))
+                  ? calcPctChange(lastVal, closeData.prevClose)
+                  : undefined;
+                const changeColor = pctChange !== undefined
+                  ? (pctChange >= 0 ? "#16a34a" : "#dc2626")
+                  : undefined;
+
                 return (
                   <tr
                     key={r.symbol}
@@ -350,6 +374,13 @@ export default function EquityPanel({
                   >
                     <Td mono strong={isSelected} selected={isSelected} first>{r.symbol}</Td>
                     <Td num strong={isSelected} selected={isSelected}>{fmtPrice(lastVal)}</Td>
+                    <Td num selected={isSelected}>
+                      {pctChange !== undefined ? (
+                        <span style={{ color: changeColor, fontWeight: 600 }}>
+                          {pctChange >= 0 ? "▲" : "▼"} {formatPctChange(pctChange)}
+                        </span>
+                      ) : "—"}
+                    </Td>
                     <Td num selected={isSelected}>{fmtPrice(r.bid)}</Td>
                     <Td num selected={isSelected}>{fmtPrice(r.ask)}</Td>
                     <Td num selected={isSelected}>{fmtPrice(mid)}</Td>
