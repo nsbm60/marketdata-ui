@@ -1,18 +1,15 @@
 // src/EquityPanel.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
+import { useMarketPrices } from "./hooks/useMarketData";
+import { PriceData } from "./services/MarketDataBus";
 
-const CHANNELS = ["md.equity.quote", "md.equity.trade"];
 const LS_APPLIED = "wl.applied";
 const LS_INPUT = "wl.input";
 const STALE_MS = 15_000;
-const MAX_FPS = 15;
-const MAX_QUEUE = 5000;
-const BATCH_CHUNK = 1000;
-type TickEnvelope = { topic: string; data: any };
 
 export default function EquityPanel({
   onSelect,
@@ -35,7 +32,7 @@ export default function EquityPanel({
   /* ---------------- pause/resume ---------------- */
   const [paused, setPaused] = useState(false);
 
-  /* ---------------- TRADE TICKET — NEW ---------------- */
+  /* ---------------- TRADE TICKET ---------------- */
   const [showTradeTicket, setShowTradeTicket] = useState(false);
   const [ticketSymbol, setTicketSymbol] = useState("");
   const [ticketAccount] = useState("DU333427");
@@ -57,137 +54,23 @@ export default function EquityPanel({
     fetchClosePrices(symbols).then(setClosePrices);
   }, [symbols.join(",")]);
 
-  /* ---------------- caches and WS plumbing ---------------- */
-  const cacheRef = useRef(new Map<string, any>());
+  /* ---------------- WS status (simple) ---------------- */
   const [wsStatus, setWsStatus] = useState<"idle"|"connecting"|"open"|"closed">("idle");
-  const queueRef = useRef<TickEnvelope[]>([]);
-  const subsSetRef = useRef<Set<string>>(new Set());
-  const [version, setVersion] = useState(0);
-  const lastPaintRef = useRef(0);
-  const rafRef = useRef<number>(0 as any);
-  const needPaintRef = useRef(false);
 
   useEffect(() => {
     socketHub.connect();
     setWsStatus("connecting");
-    const onAny = (m: any) => {
+    const onAny = () => {
       if (wsStatus !== "open") setWsStatus("open");
     };
     socketHub.onMessage(onAny);
     return () => socketHub.offMessage(onAny);
   }, []);
 
-  const schedule = () => {
-    if (rafRef.current) return;
-    rafRef.current = requestAnimationFrame(tick);
-  };
-
-  function processBatch(batch: TickEnvelope[]) {
-    let anyChanged = false;
-    const cache = cacheRef.current;
-    const subs = subsSetRef.current;
-    for (let i = 0; i < batch.length; i++) {
-      const env = batch[i];
-      if (!env) continue;
-      const t = env.topic;
-      const d = env.data && typeof env.data === "object" ? env.data : env;
-      if (typeof t === "string" && t.startsWith("md.equity.")) {
-        const info = fastExtract(t, d);
-        if (!info) continue;
-        if (subs.size && !subs.has(info.symbol)) continue;
-        const prev = (cache.get(info.symbol) as any) || { symbol: info.symbol };
-        if (info.kind === "quote") {
-          const next = {
-            ...prev,
-            bid: info.bid ?? prev.bid,
-            ask: info.ask ?? prev.ask,
-            updatedAt: info.ts ?? prev.updatedAt,
-          };
-          if (!shallowEqualQuote(prev, next)) { cache.set(info.symbol, next); anyChanged = true; }
-          else cache.set(info.symbol, next);
-        } else if (info.kind === "trade") {
-          const next = {
-            ...prev,
-            last: info.last ?? prev.last,
-            updatedAt: info.ts ?? prev.updatedAt,
-          };
-          if (!shallowEqualTrade(prev, next)) { cache.set(info.symbol, next); anyChanged = true; }
-          else cache.set(info.symbol, next);
-        }
-        continue;
-      }
-      const events = normalizeGeneric({ topic: t, data: d });
-      for (const ev of events) {
-        if (subs.size && !subs.has(ev.symbol)) continue;
-        const prev = (cache.get(ev.symbol) as any) || { symbol: ev.symbol };
-        if (ev.kind === "quote") {
-          const next = {
-            ...prev,
-            bid: ev.bid ?? prev.bid,
-            ask: ev.ask ?? prev.ask,
-            updatedAt: ev.ts ?? prev.updatedAt,
-          };
-          if (!shallowEqualQuote(prev, next)) { cache.set(ev.symbol, next); anyChanged = true; }
-          else cache.set(ev.symbol, next);
-        } else if (ev.kind === "trade") {
-          const next = {
-            ...prev,
-            last: ev.last ?? prev.last,
-            updatedAt: ev.ts ?? prev.updatedAt,
-          };
-          if (!shallowEqualTrade(prev, next)) { cache.set(ev.symbol, next); anyChanged = true; }
-          else cache.set(ev.symbol, next);
-        }
-      }
-    }
-    return anyChanged;
-  }
-
-  const tick = () => {
-    rafRef.current = 0;
-    if (paused) return;
-    if (queueRef.current.length > MAX_QUEUE) {
-      queueRef.current = queueRef.current.slice(-MAX_QUEUE);
-    }
-    const batch = queueRef.current.splice(0, Math.min(queueRef.current.length, BATCH_CHUNK));
-    let changed = false;
-    if (batch.length) changed = processBatch(batch);
-    const now = performance.now();
-    const minDelta = 1000 / MAX_FPS;
-    if (changed && now - lastPaintRef.current >= minDelta) {
-      lastPaintRef.current = now;
-      setVersion((v) => (v + 1) & 0xffff);
-      needPaintRef.current = false;
-    } else if (changed) {
-      needPaintRef.current = true;
-    }
-    if (queueRef.current.length || needPaintRef.current) schedule();
-  };
-
-  useEffect(() => {
-    const onTick = (te: TickEnvelope) => {
-      try {
-        queueRef.current.push(te);
-        schedule();
-      } catch {}
-    };
-    socketHub.onTick(onTick);
-    return () => socketHub.offTick(onTick);
-  }, []);
-
-  const sendJson = (obj: any) => socketHub.send(obj);
-
-  const applySubscriptionDelta = (target: string[]) => {
-    const prev = subsSetRef.current;
-    const next = new Set(target.map((s) => s.toUpperCase()));
-    const toAdd: string[] = [];
-    const toDel: string[] = [];
-    next.forEach((s) => { if (!prev.has(s)) toAdd.push(s); });
-    prev.forEach((s) => { if (!next.has(s)) toDel.push(s); });
-    if (!paused && toAdd.length) sendJson({ type: "subscribe", channels: CHANNELS, symbols: toAdd });
-    if (toDel.length) sendJson({ type: "unsubscribe", channels: CHANNELS, symbols: toDel });
-    subsSetRef.current = next;
-  };
+  /* ---------------- MARKET DATA via MarketDataBus ---------------- */
+  // When paused, pass empty array to avoid subscriptions
+  const activeSymbols = paused ? [] : symbols;
+  const prices = useMarketPrices(activeSymbols, "equity");
 
   /* ---------------- actions ---------------- */
   const applySymbols = (next: string[]) => {
@@ -195,15 +78,16 @@ export default function EquityPanel({
     setSymbols(norm);
     if (norm.length === 0) localStorage.removeItem(LS_APPLIED);
     else localStorage.setItem(LS_APPLIED, norm.join(","));
-    const cache = cacheRef.current;
-    for (const s of norm) if (!cache.has(s)) cache.set(s, { symbol: s });
-    setVersion((v) => (v + 1) & 0xffff);
-    applySubscriptionDelta(norm);
     if (selectedSym && !norm.includes(selectedSym)) {
       setSelectedSym(norm.length ? norm[0] : null);
     }
   };
-  const actAdd = () => { const add = parseSymbols(input); applySymbols(Array.from(new Set([...symbols, ...add]))); setInput(""); };
+
+  const actAdd = () => {
+    const add = parseSymbols(input);
+    applySymbols(Array.from(new Set([...symbols, ...add])));
+    setInput("");
+  };
   const actReplace = () => { applySymbols(parseSymbols(input)); setInput(""); };
   const actClear = () => { applySymbols([]); setInput(""); onClear?.(); };
   const actPurge = () => {
@@ -211,23 +95,9 @@ export default function EquityPanel({
     localStorage.removeItem(LS_INPUT);
     setInput("");
     applySymbols([]);
-    cacheRef.current = new Map();
-    setVersion((v) => (v + 1) & 0xffff);
     setSelectedSym(null);
   };
-  const togglePaused = () => {
-    const next = !paused;
-    setPaused(next);
-    if (next) {
-      const prev = Array.from(subsSetRef.current);
-      if (prev.length) sendJson({ type: "unsubscribe", channels: CHANNELS, symbols: prev });
-      subsSetRef.current = new Set();
-      queueRef.current = [];
-    } else if (symbols.length) {
-      applySubscriptionDelta(symbols);
-      schedule();
-    }
-  };
+  const togglePaused = () => setPaused((p) => !p);
   const removeOne = (sym: string) => {
     const target = String(sym).toUpperCase();
     const next = symbols.filter((s) => s.toUpperCase() !== target);
@@ -236,13 +106,21 @@ export default function EquityPanel({
 
   /* ---------------- view model ---------------- */
   const list = useMemo(() => {
-    const cache = cacheRef.current;
-    return symbols.map((s) => (cache.get(s) as any) || { symbol: s });
-  }, [symbols, version]);
+    return symbols.map((s) => {
+      const price = prices.get(s);
+      return {
+        symbol: s,
+        last: price?.last,
+        bid: price?.bid,
+        ask: price?.ask,
+        updatedAt: price?.timestamp,
+      };
+    });
+  }, [symbols, prices]);
 
   const stats = useMemo(() => {
     let withQuote = 0, withTrade = 0;
-    for (const r of list as any[]) {
+    for (const r of list) {
       if (isNum(r.bid) || isNum(r.ask)) withQuote++;
       if (isNum(r.last)) withTrade++;
     }
@@ -278,7 +156,7 @@ export default function EquityPanel({
           <button onClick={actClear} style={btn({ variant: "secondary" }) as any}>Clear</button>
           <button onClick={actPurge} style={linkBtn() as any}>Purge saved</button>
           <span style={{ marginLeft: "auto", fontSize: 12 }}>
-            Equity: 
+            Equity:
             <button onClick={togglePaused} style={toggle(!paused) as any}>
               {paused ? "Paused" : "Active"}
             </button>
@@ -311,7 +189,7 @@ export default function EquityPanel({
         </div>
       </div>
 
-      {/* Table — ONLY CHANGE: added Trade column + buttons */}
+      {/* Table */}
       <div style={tableWrap as any}>
         <table style={tableStyle as any}>
           <colgroup>
@@ -346,11 +224,11 @@ export default function EquityPanel({
                 </td>
               </tr>
             ) : (
-              (list as any[]).map((r) => {
+              list.map((r) => {
                 const hasBid = isNum(r.bid);
                 const hasAsk = isNum(r.ask);
-                const mid = (hasBid && hasAsk) ? (r.bid + r.ask) / 2 : undefined;
-                const spread = (hasBid && hasAsk) ? (r.ask - r.bid) : undefined;
+                const mid = (hasBid && hasAsk) ? (r.bid! + r.ask!) / 2 : undefined;
+                const spread = (hasBid && hasAsk) ? (r.ask! - r.bid!) : undefined;
                 const lastVal = isNum(r.last) ? r.last : mid;
                 const stale = isStale(r.updatedAt, STALE_MS);
                 const isSelected = r.symbol === selectedSym;
@@ -358,7 +236,7 @@ export default function EquityPanel({
                 // Calculate price change
                 const closeData = closePrices.get(r.symbol);
                 const pctChange = (closeData && isNum(lastVal))
-                  ? calcPctChange(lastVal, closeData.prevClose)
+                  ? calcPctChange(lastVal!, closeData.prevClose)
                   : undefined;
                 const changeColor = pctChange !== undefined
                   ? (pctChange >= 0 ? "#16a34a" : "#dc2626")
@@ -387,7 +265,7 @@ export default function EquityPanel({
                     <Td num selected={isSelected}>{fmtPrice(spread)}</Td>
                     <Td selected={isSelected}>{fmtTime(r.updatedAt)}</Td>
 
-                    {/* NEW: BUY/SELL */}
+                    {/* BUY/SELL */}
                     <Td selected={isSelected}>
                       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
                         <button
@@ -434,7 +312,7 @@ export default function EquityPanel({
         </table>
       </div>
 
-      {/* NEW: Trade Ticket */}
+      {/* Trade Ticket */}
       {showTradeTicket && (
         <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 1000 }}>
           <TradeTicket
@@ -456,74 +334,22 @@ function parseSymbols(s: string): string[] {
     .map((x) => x.trim().toUpperCase())
     .filter(Boolean);
 }
-function tryJSON(s: string) { try { return JSON.parse(s); } catch { return undefined; } }
-function tryJSONFromFirstBrace(s: string) { const i = s.indexOf("{"); if (i < 0) return undefined; try { return JSON.parse(s.slice(i)); } catch { return undefined; } }
-function numberToISO(n: number) { const ms = n < 2e10 ? n * 1000 : n; return new Date(ms).toISOString(); }
-function num(v: any) { const n = Number(v); return Number.isFinite(n) ? n : undefined; }
-function isNum(v: any) { return typeof v === "number" && Number.isFinite(v); }
+function isNum(v: any): v is number { return typeof v === "number" && Number.isFinite(v); }
 const priceFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 function fmtPrice(v: any) { return isNum(v) ? priceFmt.format(v) : "—"; }
-function fmtTime(iso: any) { if (!iso) return ""; try { return new Date(iso).toLocaleTimeString([], { hour12: false }); } catch { return String(iso); } }
-function isStale(iso: any, ms: number) { if (!iso) return true; try { const t = typeof iso === "string" ? Date.parse(iso) : iso; return (Date.now() - t) > ms; } catch { return false; } }
-function shallowEqualQuote(a: any, b: any) { return a.bid === b.bid && a.ask === b.ask && a.updatedAt === b.updatedAt; }
-function shallowEqualTrade(a: any, b: any) { return a.last === b.last && a.updatedAt === b.updatedAt; }
-function fastExtract(topic: string, data: any) {
-  const parts = topic.split(".");
-  if (parts.length < 4) return null;
-  const kind = parts[2] === "quote" ? "quote" : (parts[2] === "trade" ? "trade" : "");
-  const symbolFromTopic = parts.slice(3).join(".");
-  const inner = (data && typeof data.data === "object") ? data.data : data;
-  const symbol = (data.symbol || inner.symbol || symbolFromTopic || "").toString().toUpperCase();
-  if (!symbol) return null;
-  let ts: any = inner.timestamp || data.timestamp;
-  if (typeof ts === "number") ts = numberToISO(ts);
-  if (typeof ts === "string" && /^\d+$/.test(ts)) ts = numberToISO(Number(ts));
-  if (kind === "quote") {
-    const bid = num(inner.bidPrice ?? inner.bp ?? inner.bid);
-    const ask = num(inner.askPrice ?? inner.ap ?? inner.ask);
-    return { kind, symbol, bid, ask, ts };
-  }
-  if (kind === "trade") {
-    const last = num(inner.lastPrice ?? inner.price ?? inner.lp ?? inner.p ?? inner.close ?? inner.last);
-    return { kind, symbol, last, ts };
-  }
-  const bid = num(inner.bidPrice ?? inner.bp ?? inner.bid);
-  const ask = num(inner.askPrice ?? inner.ap ?? inner.ask);
-  const last = num(inner.lastPrice ?? inner.price ?? inner.lp ?? inner.p ?? inner.close ?? inner.last);
-  if (bid != null || ask != null) return { kind: "quote", symbol, bid, ask, ts };
-  if (last != null) return { kind: "trade", symbol, last, ts };
-  return null;
+function fmtTime(ts: any) {
+  if (!ts) return "";
+  try {
+    const d = typeof ts === "number" ? new Date(ts) : new Date(ts);
+    return d.toLocaleTimeString([], { hour12: false });
+  } catch { return String(ts); }
 }
-function normalizeGeneric(o: any) {
-  const out: any[] = [];
-  const topic = o.topic || o.t || o.key;
-  let topicKind = "", topicSym = "";
-  if (typeof topic === "string" && topic.startsWith("md.")) {
-    const parts = topic.split(".");
-    if (parts.length >= 4) { topicKind = parts[2]; topicSym = parts.slice(3).join("."); }
-  }
-  const payload = (o.data && typeof o.data === "object") ? o.data : o;
-  const inner = (payload.data && typeof payload.data === "object") ? payload.data : payload;
-  const symbol = (payload.symbol || inner.symbol || topicSym || "").toString().toUpperCase();
-  if (!symbol) return out;
-  const rawKind = (String(payload.type || payload.event || payload.ev || topicKind || "")).toLowerCase();
-  let kind = rawKind.includes("trade") || rawKind === "t" || rawKind === "last" ? "trade"
-    : rawKind.includes("quote") ? "quote"
-    : (topicKind === "trade" || topicKind === "quote" ? topicKind : "");
-  const bid = num(inner.bidPrice ?? inner.bp ?? inner.bid);
-  const ask = num(inner.askPrice ?? inner.ap ?? inner.ask);
-  const last = num(inner.lastPrice ?? inner.price ?? inner.lp ?? inner.p ?? inner.close ?? inner.last);
-  let ts: any = inner.timestamp ?? payload.timestamp;
-  if (typeof ts === "number") ts = numberToISO(ts);
-  if (typeof ts === "string" && /^\d+$/.test(ts)) ts = numberToISO(Number(ts));
-  if (!kind) {
-    if (bid != null || ask != null) kind = "quote";
-    else if (last != null) kind = "trade";
-    else return out;
-  }
-  if (kind === "quote") out.push({ kind, symbol, bid, ask, ts });
-  else if (kind === "trade") out.push({ kind, symbol, last, ts });
-  return out;
+function isStale(ts: any, ms: number) {
+  if (!ts) return true;
+  try {
+    const t = typeof ts === "number" ? ts : Date.parse(ts);
+    return (Date.now() - t) > ms;
+  } catch { return false; }
 }
 
 /* ---- visuals ---- */
