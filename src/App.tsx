@@ -1,11 +1,16 @@
 // src/App.tsx
 import { useEffect } from "react";
 import { socketHub } from "./ws/SocketHub";
+import { getMarketState } from "./services/marketState";
 import TwoPane from "./TwoPane";
 
 export default function App() {
   useEffect(() => {
     socketHub.connect();
+    // Initialize market state after connection
+    // Small delay to ensure socket is ready
+    const timer = setTimeout(() => getMarketState(), 500);
+    return () => clearTimeout(timer);
   }, []);
 
   return (
