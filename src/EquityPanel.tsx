@@ -6,6 +6,7 @@ import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange } from
 import { useMarketState } from "./services/marketState";
 import { useMarketPrices } from "./hooks/useMarketData";
 import { PriceData } from "./services/MarketDataBus";
+import { isNum, fmtPrice } from "./utils/formatters";
 
 const LS_APPLIED = "wl.applied";
 const LS_INPUT = "wl.input";
@@ -334,9 +335,6 @@ function parseSymbols(s: string): string[] {
     .map((x) => x.trim().toUpperCase())
     .filter(Boolean);
 }
-function isNum(v: any): v is number { return typeof v === "number" && Number.isFinite(v); }
-const priceFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-function fmtPrice(v: any) { return isNum(v) ? priceFmt.format(v) : "—"; }
 function fmtTime(ts: any) {
   if (!ts) return "";
   try {

@@ -3,6 +3,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
 import OptionTradeTicket from "./components/OptionTradeTicket";
 import { useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
+import { isNum, fmtPrice, fmtGreek } from "./utils/formatters";
 
 /** ---------- Types ---------- */
 type OptionSide = "call" | "put";
@@ -432,7 +433,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
 
                       {/* Strike */}
                       <div style={{ ...baseCell, textAlign: "center", fontWeight: 700 }}>
-                        {isNum(r.strike) ? priceFmt.format(r.strike as number) : "—"}
+                        {fmtPrice(r.strike)}
                       </div>
 
                       {/* Puts: Last | Bid | Mid | Ask | Greeks */}
@@ -514,23 +515,10 @@ function num(v: any): number | undefined {
   const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
 }
-function isNum(v: any) {
-  return typeof v === "number" && Number.isFinite(v);
-}
 function mid(b?: number, a?: number, last?: number) {
   if (isNum(b) && isNum(a)) return ((b as number) + (a as number)) / 2;
   if (isNum(last)) return last as number;
   return undefined;
-}
-
-const priceFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-function fmtPrice(v: any) {
-  return isNum(v) ? priceFmt.format(v) : "—";
-}
-
-const greekFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 });
-function fmtGreek(v: any) {
-  return isNum(v) ? greekFmt.format(v) : "—";
 }
 
 function fmtExpiryShort(s: string) {
