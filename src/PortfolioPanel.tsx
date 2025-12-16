@@ -4,6 +4,7 @@ import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
 import OptionTradeTicket from "./components/OptionTradeTicket";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange } from "./services/closePrices";
+import { useMarketState } from "./services/marketState";
 
 const CHANNELS = ["md.equity.quote", "md.equity.trade"];
 
@@ -134,8 +135,15 @@ export default function PortfolioPanel() {
   const subsSetRef = useRef<Set<string>>(new Set());
   const [priceUpdateTrigger, setPriceUpdateTrigger] = useState(0);
 
-  // Close prices for % change display
+  // Market state for prevTradingDay
+  const marketState = useMarketState();
+
+  // Close prices for % change display (equities)
   const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
+
+  // Option close prices for % change display
+  type OptionPriceData = { prevClose: number; todayClose?: number };
+  const [optionClosePrices, setOptionClosePrices] = useState<Map<string, OptionPriceData>>(new Map());
 
   // Fetch close prices for equity positions
   useEffect(() => {
@@ -147,6 +155,49 @@ export default function PortfolioPanel() {
       fetchClosePrices(equitySymbols).then(setClosePrices);
     }
   }, [accountState?.positions]);
+
+  // Fetch close prices for option positions
+  useEffect(() => {
+    if (!accountState?.positions || !marketState?.prevTradingDay) return;
+
+    const optionPositions = accountState.positions.filter(p =>
+      p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
+    );
+
+    if (optionPositions.length === 0) return;
+
+    // Build OSI symbols for options
+    const osiSymbols = optionPositions.map(p => {
+      const yy = p.expiry!.substring(2, 4);
+      const mm = p.expiry!.substring(4, 6);
+      const dd = p.expiry!.substring(6, 8);
+      const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
+      const strikeFormatted = String(Math.round(p.strike! * 1000)).padStart(8, "0");
+      return `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
+    });
+
+    // Fetch option close prices
+    socketHub.sendControl("option_close_prices", {
+      symbols: osiSymbols,
+      prev_trading_day: marketState.prevTradingDay,
+    }, { timeoutMs: 10000 }).then(ack => {
+      if (ack.ok && ack.data) {
+        const data = (ack.data as any).data || ack.data;
+        const newMap = new Map<string, OptionPriceData>();
+        Object.entries(data).forEach(([symbol, prices]: [string, any]) => {
+          if (prices && typeof prices.prevClose === "number") {
+            newMap.set(symbol.toUpperCase(), {
+              prevClose: prices.prevClose,
+              todayClose: typeof prices.todayClose === "number" ? prices.todayClose : undefined,
+            });
+          }
+        });
+        setOptionClosePrices(newMap);
+      }
+    }).catch(err => {
+      console.error("[PortfolioPanel] Failed to fetch option close prices:", err);
+    });
+  }, [accountState?.positions, marketState?.prevTradingDay]);
 
   const openTradeTicket = (
     symbol: string, 
@@ -805,12 +856,18 @@ useEffect(() => {
                     }
                     
                     const lastPrice = cacheRef.current.get(cacheKey)?.last || 0;
-                    
+
+                    // For options, use todayClose as fallback when no live price
+                    const optPriceData = p.secType === "OPT" ? optionClosePrices.get(cacheKey) : undefined;
+                    const displayPrice = p.secType === "OPT" && lastPrice === 0 && optPriceData?.todayClose
+                      ? optPriceData.todayClose
+                      : lastPrice;
+
                     // For options, multiply by contract size (100)
                     const contractMultiplier = p.secType === "OPT" ? 100 : 1;
-                    const mktValue = p.quantity * lastPrice * contractMultiplier;
-                    
-                    const mktValueDisplay = lastPrice > 0
+                    const mktValue = p.quantity * displayPrice * contractMultiplier;
+
+                    const mktValueDisplay = displayPrice > 0
                       ? (mktValue < 0
                           ? `(${Math.abs(mktValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
                           : mktValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
@@ -819,11 +876,18 @@ useEffect(() => {
                     // For options, display avg cost per share (divide by 100)
                     const displayAvgCost = p.secType === "OPT" ? p.avgCost / 100 : p.avgCost;
 
-                    // Calculate % change for equities
-                    const closeData = p.secType === "STK" ? closePrices.get(p.symbol) : undefined;
-                    const pctChange = (closeData && lastPrice > 0)
-                      ? calcPctChange(lastPrice, closeData.prevClose)
-                      : undefined;
+                    // Calculate % change for equities and options
+                    let pctChange: number | undefined;
+                    if (p.secType === "STK") {
+                      const closeData = closePrices.get(p.symbol);
+                      if (closeData && lastPrice > 0) {
+                        pctChange = calcPctChange(lastPrice, closeData.prevClose);
+                      }
+                    } else if (p.secType === "OPT") {
+                      if (displayPrice > 0 && optPriceData?.prevClose && optPriceData.prevClose > 0) {
+                        pctChange = calcPctChange(displayPrice, optPriceData.prevClose);
+                      }
+                    }
                     const changeColor = pctChange !== undefined
                       ? (pctChange >= 0 ? "#16a34a" : "#dc2626")
                       : undefined;
@@ -865,7 +929,7 @@ useEffect(() => {
                           {p.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 })}
                         </div>
                         <div style={rightMono}>
-                          {lastPrice > 0 ? lastPrice.toFixed(4) : "—"}
+                          {displayPrice > 0 ? displayPrice.toFixed(4) : "—"}
                         </div>
                         <div style={rightMono}>
                           {pctChange !== undefined ? (

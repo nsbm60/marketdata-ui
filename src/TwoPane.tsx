@@ -125,7 +125,7 @@ const tabBody = {
 
 const marketWrap = {
   display: "grid",
-  gridTemplateColumns: "560px 1fr", // left fixed, right flexible
+  gridTemplateColumns: "680px 1fr", // left fixed, right flexible
   gap: 12,
   alignItems: "start",
   width: "100%",
@@ -134,8 +134,8 @@ const marketWrap = {
 };
 
 const leftPane = {
-  minWidth: 560,
-  maxWidth: 560,
+  minWidth: 680,
+  maxWidth: 680,
 };
 
 const rightPane = {
