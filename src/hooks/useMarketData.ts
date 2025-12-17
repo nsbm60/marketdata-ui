@@ -7,7 +7,7 @@
  * - Handles cleanup properly
  */
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   marketDataBus,
   PriceData,
@@ -226,16 +226,57 @@ export function useMarketPricesRef(
 }
 
 // ─────────────────────────────────────────────────────────────
+// Shared flush scheduler - synchronizes all throttled hooks
+// ─────────────────────────────────────────────────────────────
+
+type FlushCallback = () => void;
+const flushRegistry = new Map<number, Set<FlushCallback>>();
+const flushTimers = new Map<number, ReturnType<typeof setInterval>>();
+
+function registerFlush(throttleMs: number, callback: FlushCallback): () => void {
+  let callbacks = flushRegistry.get(throttleMs);
+  if (!callbacks) {
+    callbacks = new Set();
+    flushRegistry.set(throttleMs, callbacks);
+    // Start shared timer for this throttle interval
+    const timer = setInterval(() => {
+      const cbs = flushRegistry.get(throttleMs);
+      if (cbs && cbs.size > 0) {
+        cbs.forEach((cb) => cb());
+      }
+    }, throttleMs);
+    flushTimers.set(throttleMs, timer);
+  }
+  callbacks.add(callback);
+
+  return () => {
+    const cbs = flushRegistry.get(throttleMs);
+    if (cbs) {
+      cbs.delete(callback);
+      if (cbs.size === 0) {
+        flushRegistry.delete(throttleMs);
+        const timer = flushTimers.get(throttleMs);
+        if (timer) {
+          clearInterval(timer);
+          flushTimers.delete(throttleMs);
+        }
+      }
+    }
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
 // useThrottledMarketPrices - Throttled updates for performance
 // ─────────────────────────────────────────────────────────────
 
 /**
  * Subscribe to multiple symbols with throttled updates.
- * Useful when displaying many symbols and you don't need every tick.
+ * Uses a shared flush scheduler so all hooks with the same throttle
+ * interval update at exactly the same time (synchronized).
  *
  * @param symbols - Array of symbols to subscribe to
  * @param channel - "equity" or "option" (default: "equity")
- * @param throttleMs - Minimum ms between re-renders (default: 100)
+ * @param throttleMs - Interval between re-renders (default: 100)
  * @returns Map of symbol -> price data
  */
 export function useThrottledMarketPrices(
@@ -245,8 +286,6 @@ export function useThrottledMarketPrices(
 ): Map<string, PriceData> {
   const [prices, setPrices] = useState<Map<string, PriceData>>(new Map());
   const pendingRef = useRef<Map<string, PriceData>>(new Map());
-  const lastUpdateRef = useRef<number>(0);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const symbolsKey = useMemo(() => {
     return symbols
@@ -255,21 +294,6 @@ export function useThrottledMarketPrices(
       .sort()
       .join(",");
   }, [symbols]);
-
-  const flushPending = useCallback(() => {
-    if (pendingRef.current.size > 0) {
-      setPrices((prev) => {
-        const next = new Map(prev);
-        pendingRef.current.forEach((price, symbol) => {
-          next.set(symbol, price);
-        });
-        return next;
-      });
-      pendingRef.current.clear();
-      lastUpdateRef.current = Date.now();
-    }
-    timeoutRef.current = null;
-  }, []);
 
   useEffect(() => {
     if (!symbolsKey) {
@@ -280,35 +304,42 @@ export function useThrottledMarketPrices(
     const symbolList = symbolsKey.split(",");
     const unsubscribes: (() => void)[] = [];
 
+    // Subscribe to all symbols, accumulate updates in pendingRef
     symbolList.forEach((symbol) => {
       const unsubscribe = marketDataBus.subscribe(
         symbol,
         (price) => {
           pendingRef.current.set(symbol, price);
-
-          const now = Date.now();
-          const elapsed = now - lastUpdateRef.current;
-
-          if (elapsed >= throttleMs) {
-            // Enough time passed, update immediately
-            flushPending();
-          } else if (!timeoutRef.current) {
-            // Schedule update for later
-            timeoutRef.current = setTimeout(flushPending, throttleMs - elapsed);
-          }
         },
         channel
       );
       unsubscribes.push(unsubscribe);
     });
 
-    return () => {
-      unsubscribes.forEach((fn) => fn());
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
+    // Register with shared flush scheduler (all hooks with same throttleMs flush together)
+    const flush = () => {
+      if (pendingRef.current.size > 0) {
+        // Capture snapshot before clearing - React strict mode may call the callback twice
+        const snapshot = new Map(pendingRef.current);
+        pendingRef.current.clear();
+
+        setPrices((prev) => {
+          const next = new Map(prev);
+          snapshot.forEach((price, symbol) => {
+            next.set(symbol, price);
+          });
+          return next;
+        });
       }
     };
-  }, [symbolsKey, channel, throttleMs, flushPending]);
+
+    const unregisterFlush = registerFlush(throttleMs, flush);
+
+    return () => {
+      unregisterFlush();
+      unsubscribes.forEach((fn) => fn());
+    };
+  }, [symbolsKey, channel, throttleMs]);
 
   return prices;
 }
@@ -321,9 +352,10 @@ export function useThrottledMarketPrices(
  * Listen to all price updates on a channel.
  * Useful when backend manages subscriptions (e.g., options via get_chain).
  * Returns a version number that increments on updates - use with getPricesForChannel().
+ * Uses the shared flush scheduler for synchronized updates with useThrottledMarketPrices.
  *
  * @param channel - Channel to listen to
- * @param throttleMs - Minimum ms between re-renders (default: 100)
+ * @param throttleMs - Interval between re-renders (default: 100)
  * @returns Version number that increments on updates
  */
 export function useChannelUpdates(
@@ -331,40 +363,29 @@ export function useChannelUpdates(
   throttleMs: number = 100
 ): number {
   const [version, setVersion] = useState(0);
-  const lastUpdateRef = useRef<number>(0);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingRef = useRef(false);
 
-  const flush = useCallback(() => {
-    if (pendingRef.current) {
-      setVersion((v) => (v + 1) & 0xffff);
-      pendingRef.current = false;
-      lastUpdateRef.current = Date.now();
-    }
-    timeoutRef.current = null;
-  }, []);
-
   useEffect(() => {
+    // Listen for any updates on this channel
     const unsubscribe = marketDataBus.onChannelUpdate(channel, () => {
       pendingRef.current = true;
-
-      const now = Date.now();
-      const elapsed = now - lastUpdateRef.current;
-
-      if (elapsed >= throttleMs) {
-        flush();
-      } else if (!timeoutRef.current) {
-        timeoutRef.current = setTimeout(flush, throttleMs - elapsed);
-      }
     });
+
+    // Use shared flush scheduler for synchronized updates
+    const flush = () => {
+      if (pendingRef.current) {
+        setVersion((v) => (v + 1) & 0xffff);
+        pendingRef.current = false;
+      }
+    };
+
+    const unregisterFlush = registerFlush(throttleMs, flush);
 
     return () => {
       unsubscribe();
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
+      unregisterFlush();
     };
-  }, [channel, throttleMs, flush]);
+  }, [channel, throttleMs]);
 
   return version;
 }
