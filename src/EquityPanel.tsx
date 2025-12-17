@@ -2,14 +2,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
-import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange } from "./services/closePrices";
-import { useMarketState } from "./services/marketState";
+import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, getPrevCloseDateFromCache, formatCloseDateShort } from "./services/closePrices";
+import { useMarketState, TimeframeOption } from "./services/marketState";
 import { useMarketPrices } from "./hooks/useMarketData";
 import { PriceData } from "./services/MarketDataBus";
 import { isNum, fmtPrice } from "./utils/formatters";
 
 const LS_APPLIED = "wl.applied";
 const LS_INPUT = "wl.input";
+const LS_TIMEFRAME = "wl.timeframe";
 const STALE_MS = 15_000;
 
 export default function EquityPanel({
@@ -48,12 +49,21 @@ export default function EquityPanel({
   /* ---------------- MARKET STATE & CLOSE PRICES ---------------- */
   const marketState = useMarketState();
   const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
+  const [timeframe, setTimeframe] = useState(() => localStorage.getItem(LS_TIMEFRAME) ?? "1d");
 
-  // Fetch close prices when symbols change
+  // Persist timeframe selection
+  useEffect(() => { localStorage.setItem(LS_TIMEFRAME, timeframe); }, [timeframe]);
+
+  // Get current timeframe info for display
+  const currentTimeframeInfo = useMemo(() => {
+    return marketState?.timeframes?.find(t => t.id === timeframe);
+  }, [marketState?.timeframes, timeframe]);
+
+  // Fetch close prices when symbols or timeframe change
   useEffect(() => {
     if (symbols.length === 0) return;
-    fetchClosePrices(symbols).then(setClosePrices);
-  }, [symbols.join(",")]);
+    fetchClosePrices(symbols, timeframe).then(setClosePrices);
+  }, [symbols.join(","), timeframe]);
 
   /* ---------------- WS status (simple) ---------------- */
   const [wsStatus, setWsStatus] = useState<"idle"|"connecting"|"open"|"closed">("idle");
@@ -182,11 +192,32 @@ export default function EquityPanel({
             ))}
           </div>
         )}
-        <div style={{ fontSize: 11, color: "#333", display: "flex", gap: 16, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 11, color: "#333", display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
           <span><b>symbols:</b> {stats.total}</span>
           <span><b>quotes:</b> {stats.withQuote}</span>
           <span><b>trades:</b> {stats.withTrade}</span>
           {paused && <span style={{ color: "#b45309" }}>Paused — unsubscribed</span>}
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+            <b>vs:</b>
+            <select
+              value={timeframe}
+              onChange={(e) => setTimeframe(e.target.value)}
+              style={{
+                padding: "2px 6px",
+                fontSize: 11,
+                border: "1px solid #d1d5db",
+                borderRadius: 4,
+                background: "white",
+                color: "#111",
+              }}
+            >
+              {(marketState?.timeframes ?? []).map((tf) => (
+                <option key={tf.id} value={tf.id}>
+                  {formatCloseDateShort(tf.date)}{tf.label ? ` (${tf.label})` : ""}
+                </option>
+              ))}
+            </select>
+          </span>
         </div>
       </div>
 
@@ -196,7 +227,8 @@ export default function EquityPanel({
           <colgroup>
             <col style={{ width: "6ch" }} />
             <col style={{ width: "9ch" }} />
-            <col style={{ width: "9ch" }} />
+            <col style={{ width: "8ch" }} />
+            <col style={{ width: "8ch" }} />
             <col style={{ width: "9ch" }} />
             <col style={{ width: "9ch" }} />
             <col style={{ width: "9ch" }} />
@@ -208,7 +240,11 @@ export default function EquityPanel({
             <tr>
               <Th>Symbol</Th>
               <Th center>Last</Th>
-              <Th center>Change</Th>
+              <Th center colSpan={2}>
+                {currentTimeframeInfo
+                  ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
+                  : "Change"}
+              </Th>
               <Th center>Bid</Th>
               <Th center>Ask</Th>
               <Th center>Mid</Th>
@@ -220,7 +256,7 @@ export default function EquityPanel({
           <tbody>
             {symbols.length === 0 ? (
               <tr>
-                <td colSpan={9} style={{ padding: 6, color: "#666", textAlign: "center", borderTop: "1px solid #eee", fontSize: 12 }}>
+                <td colSpan={10} style={{ padding: 6, color: "#666", textAlign: "center", borderTop: "1px solid #eee", fontSize: 12 }}>
                   No tickers selected.
                 </td>
               </tr>
@@ -234,10 +270,13 @@ export default function EquityPanel({
                 const stale = isStale(r.updatedAt, STALE_MS);
                 const isSelected = r.symbol === selectedSym;
 
-                // Calculate price change
+                // Calculate price change (% and $)
                 const closeData = closePrices.get(r.symbol);
                 const pctChange = (closeData && isNum(lastVal))
                   ? calcPctChange(lastVal!, closeData.prevClose)
+                  : undefined;
+                const dollarChange = (closeData && isNum(lastVal))
+                  ? lastVal! - closeData.prevClose
                   : undefined;
                 const changeColor = pctChange !== undefined
                   ? (pctChange >= 0 ? "#16a34a" : "#dc2626")
@@ -257,6 +296,13 @@ export default function EquityPanel({
                       {pctChange !== undefined ? (
                         <span style={{ color: changeColor, fontWeight: 600 }}>
                           {pctChange >= 0 ? "▲" : "▼"} {formatPctChange(pctChange)}
+                        </span>
+                      ) : "—"}
+                    </Td>
+                    <Td num selected={isSelected}>
+                      {dollarChange !== undefined ? (
+                        <span style={{ color: changeColor, fontWeight: 600 }}>
+                          {dollarChange >= 0 ? "+" : ""}{dollarChange.toFixed(2)}
                         </span>
                       ) : "—"}
                     </Td>
@@ -443,9 +489,10 @@ function chipX() {
     padding: 0,
   };
 }
-function Th({ children, center }: { children: any; center?: boolean }) {
+function Th({ children, center, colSpan }: { children: any; center?: boolean; colSpan?: number }) {
   return (
     <th
+      colSpan={colSpan}
       style={{
         padding: "4px 6px",
         borderTop: "1px solid #eee",

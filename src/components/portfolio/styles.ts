@@ -31,7 +31,24 @@ export const hdr: CSSProperties = {
   padding: "0 10px",
   background: "#f8fafc",
   height: 26,
-  alignItems: "center"
+  alignItems: "center",
+  borderBottom: "1px solid #e5e7eb"
+};
+
+// Header cell with right border
+export const hdrCell: CSSProperties = {
+  borderRight: "1px solid #ddd",
+  paddingRight: 4
+};
+
+export const hdrCellRight: CSSProperties = {
+  ...hdrCell,
+  textAlign: "right"
+};
+
+export const hdrCellCenter: CSSProperties = {
+  ...hdrCell,
+  textAlign: "center"
 };
 
 export const rowStyle: CSSProperties = {
@@ -43,7 +60,15 @@ export const rowStyle: CSSProperties = {
   borderBottom: "1px solid #f3f4f6"
 };
 
+// Base cell style with right border for column dividers
+const cellBorder: CSSProperties = {
+  borderRight: "1px solid #eee",
+  paddingRight: 4,
+  paddingLeft: 2
+};
+
 export const cellEllipsis: CSSProperties = {
+  ...cellBorder,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
@@ -52,6 +77,7 @@ export const cellEllipsis: CSSProperties = {
 };
 
 export const right: CSSProperties = {
+  ...cellBorder,
   textAlign: "right"
 };
 
@@ -66,6 +92,7 @@ export const rightMonoBold: CSSProperties = {
 };
 
 export const center: CSSProperties = {
+  ...cellBorder,
   textAlign: "center"
 };
 
@@ -75,8 +102,14 @@ export const centerBold: CSSProperties = {
 };
 
 export const gray10: CSSProperties = {
+  ...cellBorder,
   fontSize: 10,
   color: "#666"
+};
+
+// For cells that should not have a right border (last column)
+export const cellNoBorder: CSSProperties = {
+  borderRight: "none"
 };
 
 export const timeHeader: CSSProperties = {

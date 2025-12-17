@@ -20,6 +20,12 @@ export interface MarketSession {
   end: string;    // "09:30", "16:00", "20:00"
 }
 
+export interface TimeframeOption {
+  id: string;     // "1d", "2d", "1w", "1m"
+  date: string;   // "2025-12-16" - the actual date for this timeframe
+  label: string;  // "" (for 1d), "-1d", "-1w", "-1m"
+}
+
 export interface MarketState {
   state: SessionState;
   isTradingDay: boolean;
@@ -27,6 +33,7 @@ export interface MarketState {
   regularOpen?: string;             // ISO timestamp
   regularClose?: string;            // ISO timestamp
   sessions: MarketSession[];
+  timeframes: TimeframeOption[];    // Available timeframe options with dates
   lastUpdated: number;              // timestamp of last update
 }
 
@@ -66,10 +73,12 @@ async function initialize() {
         regularOpen: d.regularOpen,
         regularClose: d.regularClose,
         sessions: d.sessions ?? [],
+        timeframes: d.timeframes ?? [],
         lastUpdated: Date.now(),
       };
       console.log("[MarketState] Initialized:", currentState.state,
-        "prevTradingDay:", currentState.prevTradingDay);
+        "prevTradingDay:", currentState.prevTradingDay,
+        "timeframes:", currentState.timeframes.map((t: TimeframeOption) => `${t.id}=${t.date}`).join(", "));
       notify();
     }
   } catch (err) {

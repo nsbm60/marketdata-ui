@@ -12,6 +12,7 @@ import { socketHub } from "../ws/SocketHub";
 
 export interface ClosePriceData {
   prevClose: number;          // Previous trading day's close
+  prevCloseDate?: string;     // Date of prevClose (YYYY-MM-DD) for display
   todayClose?: number;        // Today's close (available after market close)
   todayOpen?: number;         // Today's open
   fetchedAt: number;          // Timestamp when fetched
@@ -60,15 +61,21 @@ export async function getClosePrices(symbol: string): Promise<ClosePriceData | n
 /**
  * Batch fetch close prices for multiple symbols.
  * More efficient than individual calls.
+ *
+ * @param symbols List of equity symbols
+ * @param timeframe Timeframe for comparison: "1d", "2d", "1w", "1m" (default: "1d")
  */
-export async function fetchClosePrices(symbols: string[]): Promise<Map<string, ClosePriceData>> {
+export async function fetchClosePrices(symbols: string[], timeframe: string = "1d"): Promise<Map<string, ClosePriceData>> {
   const syms = symbols.map(s => s.toUpperCase()).filter(s => s.length > 0);
   if (syms.length === 0) return new Map();
+
+  // Cache key includes timeframe to allow different timeframes to be cached separately
+  const cacheKey = (s: string) => `${s}:${timeframe}`;
 
   // Filter to only symbols not in cache or expired
   const now = Date.now();
   const toFetch = syms.filter(s => {
-    const cached = cache.get(s);
+    const cached = cache.get(cacheKey(s));
     return !cached || (now - cached.fetchedAt >= CACHE_TTL_MS);
   });
 
@@ -76,14 +83,16 @@ export async function fetchClosePrices(symbols: string[]): Promise<Map<string, C
   if (toFetch.length === 0) {
     const result = new Map<string, ClosePriceData>();
     syms.forEach(s => {
-      const cached = cache.get(s);
+      const cached = cache.get(cacheKey(s));
       if (cached) result.set(s, cached);
     });
     return result;
   }
 
   try {
-    const ack = await socketHub.sendControl("close_prices", { symbols: toFetch }, { timeoutMs: 10000 });
+    // Build request with timeframe for date calculation
+    const request: { symbols: string[]; timeframe: string } = { symbols: toFetch, timeframe };
+    const ack = await socketHub.sendControl("close_prices", request, { timeoutMs: 10000 });
 
     if (ack.ok && ack.data) {
       const data = (ack.data as any).data || ack.data;
@@ -92,15 +101,21 @@ export async function fetchClosePrices(symbols: string[]): Promise<Map<string, C
         if (prices && typeof prices.prevClose === "number") {
           const entry: ClosePriceData = {
             prevClose: prices.prevClose,
+            prevCloseDate: typeof prices.prevCloseDate === "string" ? prices.prevCloseDate : undefined,
             todayClose: typeof prices.todayClose === "number" ? prices.todayClose : undefined,
             todayOpen: typeof prices.todayOpen === "number" ? prices.todayOpen : undefined,
             fetchedAt: now,
           };
-          cache.set(symbol.toUpperCase(), entry);
+          cache.set(cacheKey(symbol.toUpperCase()), entry);
         }
       });
 
-      console.log(`[ClosePrices] Fetched ${Object.keys(data).length} symbols`);
+      // Log the dates we received for debugging
+      const dates = new Set<string>();
+      Object.values(data).forEach((prices: any) => {
+        if (prices?.prevCloseDate) dates.add(prices.prevCloseDate);
+      });
+      console.log(`[ClosePrices] Fetched ${Object.keys(data).length} symbols (${timeframe}), prevCloseDates:`, [...dates]);
     }
   } catch (err) {
     console.error("[ClosePrices] Fetch failed:", err);
@@ -109,7 +124,7 @@ export async function fetchClosePrices(symbols: string[]): Promise<Map<string, C
   // Return all requested symbols from cache
   const result = new Map<string, ClosePriceData>();
   syms.forEach(s => {
-    const cached = cache.get(s);
+    const cached = cache.get(cacheKey(s));
     if (cached) result.set(s, cached);
   });
   return result;
@@ -151,4 +166,43 @@ export function getCachedClosePrice(symbol: string): ClosePriceData | null {
  */
 export function clearCache(): void {
   cache.clear();
+}
+
+/**
+ * Get the most common prevCloseDate from cached data.
+ * Useful for displaying which date the % changes are relative to.
+ */
+export function getPrevCloseDateFromCache(): string | null {
+  const dateCounts = new Map<string, number>();
+  cache.forEach((data) => {
+    if (data.prevCloseDate) {
+      dateCounts.set(data.prevCloseDate, (dateCounts.get(data.prevCloseDate) ?? 0) + 1);
+    }
+  });
+
+  if (dateCounts.size === 0) return null;
+
+  // Return most common date
+  let maxDate: string | null = null;
+  let maxCount = 0;
+  dateCounts.forEach((count, date) => {
+    if (count > maxCount) {
+      maxCount = count;
+      maxDate = date;
+    }
+  });
+
+  return maxDate;
+}
+
+/**
+ * Format a YYYY-MM-DD date as a shorter display format.
+ * e.g., "2025-12-16" -> "Dec 16"
+ */
+export function formatCloseDateShort(dateStr: string): string {
+  if (!dateStr || dateStr.length !== 10) return dateStr;
+  const [, month, day] = dateStr.split("-");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const monthName = months[parseInt(month, 10) - 1] || month;
+  return `${monthName} ${parseInt(day, 10)}`;
 }

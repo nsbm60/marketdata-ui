@@ -10,8 +10,8 @@ import {
   CancelOrderModal,
   ModifyOrderModal,
 } from "./components/portfolio";
-import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange } from "./services/closePrices";
-import { useMarketState } from "./services/marketState";
+import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, getPrevCloseDateFromCache, formatCloseDateShort } from "./services/closePrices";
+import { useMarketState, TimeframeOption } from "./services/marketState";
 import { useMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
 import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
 import {
@@ -67,8 +67,17 @@ export default function PortfolioPanel() {
 
   const debugRef = useRef<HTMLDivElement>(null);
 
-  // Market state for prevTradingDay
+  // Market state for prevTradingDay and timeframes
   const marketState = useMarketState();
+  const [timeframe, setTimeframe] = useState(() => localStorage.getItem("portfolio.timeframe") ?? "1d");
+
+  // Persist timeframe selection
+  useEffect(() => { localStorage.setItem("portfolio.timeframe", timeframe); }, [timeframe]);
+
+  // Get current timeframe info for display
+  const currentTimeframeInfo = useMemo(() => {
+    return marketState?.timeframes?.find(t => t.id === timeframe);
+  }, [marketState?.timeframes, timeframe]);
 
   // Build list of equity symbols for market data subscription
   const equitySymbols = useMemo(() => {
@@ -98,9 +107,10 @@ export default function PortfolioPanel() {
       .filter(p => p.secType === "STK")
       .map(p => p.symbol);
     if (equitySymbols.length > 0) {
-      fetchClosePrices(equitySymbols).then(setClosePrices);
+      // Pass timeframe for date calculation
+      fetchClosePrices(equitySymbols, timeframe).then(setClosePrices);
     }
-  }, [accountState?.positions]);
+  }, [accountState?.positions, timeframe]);
 
   // Fetch close prices for option positions
   useEffect(() => {
@@ -665,19 +675,46 @@ useEffect(() => {
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {/* Positions with BUY/SELL buttons */}
               <section style={section}>
-                <div style={title}>Positions</div>
+                <div style={{ ...title, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>Positions</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, fontSize: 11 }}>
+                    <span>vs:</span>
+                    <select
+                      value={timeframe}
+                      onChange={(e) => setTimeframe(e.target.value)}
+                      style={{
+                        padding: "2px 6px",
+                        fontSize: 11,
+                        border: "1px solid #d1d5db",
+                        borderRadius: 4,
+                        background: "white",
+                        color: "#111",
+                      }}
+                    >
+                      {(marketState?.timeframes ?? []).map((tf) => (
+                        <option key={tf.id} value={tf.id}>
+                          {formatCloseDateShort(tf.date)}{tf.label ? ` (${tf.label})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
+                </div>
                 <div style={table}>
-                  <div style={{ ...hdr, gridTemplateColumns: "75px 140px 36px 36px 65px 80px 75px 100px 80px 130px" }}>
-                    <div>Account</div>
-                    <div>Symbol</div>
-                    <div>Type</div>
-                    <div style={center}>CCY</div>
-                    <div style={right}>Qty</div>
-                    <div style={right}>Last</div>
-                    <div style={right}>Change</div>
-                    <div style={right}>Mkt Value</div>
-                    <div style={right}>Avg Cost</div>
-                    <div style={right}>Trade</div>
+                  <div style={{ ...hdr, gridTemplateColumns: "75px 140px 36px 36px 65px 80px 65px 65px 100px 80px 130px" }}>
+                    <div style={hdrCell}>Account</div>
+                    <div style={hdrCell}>Symbol</div>
+                    <div style={hdrCell}>Type</div>
+                    <div style={hdrCellCenter}>CCY</div>
+                    <div style={hdrCellRight}>Qty</div>
+                    <div style={hdrCellRight}>Last</div>
+                    <div style={{ ...hdrCellCenter, gridColumn: "span 2" }}>
+                      {currentTimeframeInfo
+                        ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
+                        : "Change"}
+                    </div>
+                    <div style={hdrCellRight}>Mkt Value</div>
+                    <div style={hdrCellRight}>Avg Cost</div>
+                    <div style={{ textAlign: "right" as const }}>Trade</div>
                   </div>
 
                   {accountState.positions
@@ -727,15 +764,18 @@ useEffect(() => {
                     // For options, display avg cost per share (divide by 100)
                     const displayAvgCost = p.secType === "OPT" ? p.avgCost / 100 : p.avgCost;
 
-                    // Calculate % change for equities and options
+                    // Calculate % and $ change for equities and options
                     let pctChange: number | undefined;
+                    let dollarChange: number | undefined;
                     if (p.secType === "STK") {
                       if (displayPrice > 0 && equityCloseData?.prevClose && equityCloseData.prevClose > 0) {
                         pctChange = calcPctChange(displayPrice, equityCloseData.prevClose);
+                        dollarChange = displayPrice - equityCloseData.prevClose;
                       }
                     } else if (p.secType === "OPT") {
                       if (displayPrice > 0 && optPriceData?.prevClose && optPriceData.prevClose > 0) {
                         pctChange = calcPctChange(displayPrice, optPriceData.prevClose);
+                        dollarChange = displayPrice - optPriceData.prevClose;
                       }
                     }
                     const changeColor = pctChange !== undefined
@@ -768,7 +808,7 @@ useEffect(() => {
                         key={i}
                         style={{
                           ...rowStyle,
-                          gridTemplateColumns: "75px 140px 36px 36px 65px 80px 75px 100px 80px 130px",
+                          gridTemplateColumns: "75px 140px 36px 36px 65px 80px 65px 65px 100px 80px 130px",
                         }}
                       >
                         <div style={cellEllipsis}>{p.account}</div>
@@ -785,6 +825,13 @@ useEffect(() => {
                           {pctChange !== undefined ? (
                             <span style={{ color: changeColor, fontWeight: 600 }}>
                               {pctChange >= 0 ? "▲" : "▼"} {formatPctChange(pctChange)}
+                            </span>
+                          ) : "—"}
+                        </div>
+                        <div style={rightMono}>
+                          {dollarChange !== undefined ? (
+                            <span style={{ color: changeColor, fontWeight: 600 }}>
+                              {dollarChange >= 0 ? "+" : ""}{dollarChange.toFixed(2)}
                             </span>
                           ) : "—"}
                         </div>
@@ -1013,17 +1060,22 @@ const gridWrap = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 };
 const section = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" };
 const title = { fontSize: 12, fontWeight: 600, padding: "8px 10px", background: "#f1f5f9", borderBottom: "1px solid #e5e7eb" };
 const table = { display: "flex", flexDirection: "column" as const };
-const hdr = { display: "grid", fontWeight: 600, fontSize: 10.5, color: "#374151", padding: "0 10px", background: "#f8fafc", height: 26, alignItems: "center" };
+const hdr = { display: "grid", fontWeight: 600, fontSize: 10.5, color: "#374151", padding: "0 10px", background: "#f8fafc", height: 26, alignItems: "center", borderBottom: "1px solid #e5e7eb" };
+const hdrCell = { borderRight: "1px solid #ddd", paddingRight: 4 };
+const hdrCellRight = { ...hdrCell, textAlign: "right" as const };
+const hdrCellCenter = { ...hdrCell, textAlign: "center" as const };
 const rowStyle = { display: "grid", fontSize: 11, minHeight: 32, alignItems: "center", padding: "0 10px", borderBottom: "1px solid #f3f4f6" };
 
-const cellEllipsis = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, monospace", fontSize: 10 };
-const right = { textAlign: "right" as const };
+// Cell border for column dividers
+const cellBorder = { borderRight: "1px solid #eee", paddingRight: 4, paddingLeft: 2 };
+const cellEllipsis = { ...cellBorder, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, monospace", fontSize: 10 };
+const right = { ...cellBorder, textAlign: "right" as const };
 const rightMono = { ...right, fontFamily: "ui-monospace, monospace" };
 const rightMonoBold = { ...rightMono, fontWeight: 600 };
-const center = { textAlign: "center" as const };
+const center = { ...cellBorder, textAlign: "center" as const };
 const centerBold = { ...center, fontWeight: 600 };
 const bold = { fontWeight: 600 };
-const gray10 = { fontSize: 10, color: "#666" };
+const gray10 = { ...cellBorder, fontSize: 10, color: "#666" };
 const gray9 = { fontSize: 9, color: "#888" };
 
 const timeHeader = { ...center, fontSize: 10, color: "#374151" };
