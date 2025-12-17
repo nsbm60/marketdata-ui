@@ -102,7 +102,10 @@ export default function PortfolioPanel() {
   const [ticketAccount, setTicketAccount] = useState("");
   const [ticketSide, setTicketSide] = useState<"BUY" | "SELL">("BUY");
   const [ticketSecType, setTicketSecType] = useState<"STK" | "OPT">("STK");
-  const [ticketMarketData, setTicketMarketData] = useState<{ last?: number; bid?: number; ask?: number }>({});
+  const [ticketMarketData, setTicketMarketData] = useState<{
+    last?: number; bid?: number; ask?: number; mid?: number;
+    delta?: number; gamma?: number; theta?: number; vega?: number; iv?: number;
+  }>({});
   
   // Option-specific ticket data
   const [ticketOptionData, setTicketOptionData] = useState<{
@@ -211,7 +214,10 @@ export default function PortfolioPanel() {
     side: "BUY" | "SELL",
     secType: string,
     optionDetails?: { strike: number; expiry: string; right: string },
-    marketData?: { last?: number; bid?: number; ask?: number }
+    marketData?: {
+      last?: number; bid?: number; ask?: number; mid?: number;
+      delta?: number; gamma?: number; theta?: number; vega?: number; iv?: number;
+    }
   ) => {
     setTicketSymbol(symbol);
     setTicketAccount(account);
@@ -1098,6 +1104,12 @@ useEffect(() => {
                 last={ticketMarketData.last}
                 bid={ticketMarketData.bid}
                 ask={ticketMarketData.ask}
+                mid={ticketMarketData.mid}
+                delta={ticketMarketData.delta}
+                gamma={ticketMarketData.gamma}
+                theta={ticketMarketData.theta}
+                vega={ticketMarketData.vega}
+                iv={ticketMarketData.iv}
                 onClose={() => setShowTradeTicket(false)}
               />
             ) : null}
