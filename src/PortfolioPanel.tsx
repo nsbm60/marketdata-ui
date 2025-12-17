@@ -3,90 +3,24 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
 import OptionTradeTicket from "./components/OptionTradeTicket";
+import {
+  CashBalances,
+  OpenOrdersTable,
+  OrderHistoryTable,
+  CancelOrderModal,
+  ModifyOrderModal,
+} from "./components/portfolio";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { useMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
 import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
-
-type IbPosition = {
-  account: string;
-  symbol: string;
-  secType: string;
-  currency: string;
-  quantity: number;
-  avgCost: number;
-  lastUpdated: string;
-  // Option fields (optional)
-  strike?: number;
-  expiry?: string;  // YYYYMMDD format
-  right?: string;   // "Call" or "Put"
-};
-
-type IbCash = {
-  account: string;
-  currency: string;
-  amount: number;
-  lastUpdated: string;
-};
-
-type IbExecution = {
-  account: string;
-  symbol: string;
-  secType: string;
-  currency: string;
-  side: string;
-  quantity: number;
-  price: number;
-  execId: string;
-  orderId: number;
-  permId: number;
-  ts: string;
-  // Option fields (optional)
-  strike?: number;
-  expiry?: string;  // YYYYMMDD format
-  right?: string;   // "Call" or "Put"
-};
-
-type IbOpenOrder = {
-  orderId: number;
-  symbol: string;
-  secType: string;
-  side: string;
-  quantity: string;
-  orderType: string;
-  lmtPrice?: number;
-  auxPrice?: number;
-  status: string;
-  ts: string;
-  // Option fields
-  strike?: number;
-  expiry?: string;
-  right?: string;
-};
-
-type IbOrderHistory = {
-  orderId: number;
-  symbol: string;
-  secType: string;
-  side: string;
-  quantity: string;
-  orderType?: string;
-  lmtPrice?: number;
-  price?: number;     // Fill price for executions
-  status: string;     // "Cancelled", "Filled", etc.
-  ts: string;
-  // Option fields
-  strike?: number;
-  expiry?: string;
-  right?: string;
-};
-
-type IbAccountState = {
-  positions: IbPosition[];
-  cash: IbCash[];
-  executions: IbExecution[];
-  openOrders: IbOpenOrder[];
-};
+import {
+  IbPosition,
+  IbExecution,
+  IbOpenOrder,
+  IbOrderHistory,
+  IbAccountState,
+} from "./types/portfolio";
 
 const DEBUG_MAX = 300;
 
@@ -117,8 +51,6 @@ export default function PortfolioPanel() {
 
   // Modify order modal state
   const [modifyingOrder, setModifyingOrder] = useState<IbOpenOrder | null>(null);
-  const [modifyPrice, setModifyPrice] = useState<string>("");
-  const [modifyQuantity, setModifyQuantity] = useState<string>("");
 
   // Cancel confirmation modal state
   const [cancellingOrder, setCancellingOrder] = useState<IbOpenOrder | null>(null);
@@ -901,196 +833,20 @@ useEffect(() => {
               </section>
 
               {/* Cash */}
-              <section style={section}>
-                <div style={title}>Cash Balances</div>
-                <div style={table}>
-                  <div style={{ ...hdr, gridTemplateColumns: "120px 40px 98px 72px" }}>
-                    <div>Account</div>
-                    <div>CCY</div>
-                    <div style={right}>Amount</div>
-                    <div style={timeHeader}>Time</div>
-                  </div>
-                  {accountState.cash.map((c, i) => (
-                    <div key={i} style={{ ...rowStyle, gridTemplateColumns: "120px 40px 98px 72px" }}>
-                      <div style={cellEllipsis}>{c.account}</div>
-                      <div style={centerBold}>{c.currency}</div>
-                      <div style={rightMonoBold}>
-                        {c.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                      <div style={timeCell}>
-                        {new Date(c.lastUpdated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+              <CashBalances cash={accountState.cash} />
               </div>
 
               {/* Right Column: Open Orders + Order History */}
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {/* Open Orders */}
-              <section style={section}>
-                <div style={title}>Open Orders ({accountState.openOrders.length})</div>
-                {accountState.openOrders.length === 0 ? (
-                  <div style={emptyRow}>No open orders</div>
-                ) : (
-                  <div style={table}>
-                    <div style={{ ...hdr, gridTemplateColumns: "70px 130px 46px 50px 46px 80px 80px 65px", gap: 8 }}>
-                      <div style={timeHeader}>Time</div>
-                      <div>Symbol</div>
-                      <div>Side</div>
-                      <div style={right}>Qty</div>
-                      <div>Type</div>
-                      <div style={right}>Price</div>
-                      <div>Status</div>
-                      <div style={center}>Action</div>
-                    </div>
-                    <div style={{ maxHeight: 200, overflowY: "auto" }}>
-                    {accountState.openOrders.map((o) => {
-                      let symbolDisplay: React.ReactNode;
-                      if (o.secType === "OPT" && o.strike !== undefined && o.expiry !== undefined && o.right !== undefined) {
-                        const rightLabel = o.right === "C" || o.right === "Call" ? "Call" : "Put";
-                        const formattedExpiry = formatExpiryYYYYMMDD(o.expiry);
-                        symbolDisplay = (
-                          <div>
-                            <div style={{ fontWeight: 600, fontSize: 11 }}>
-                              {o.symbol} {o.strike.toFixed(0)} {rightLabel}
-                            </div>
-                            <div style={{ fontSize: 9, color: "#666" }}>
-                              {formattedExpiry}
-                            </div>
-                          </div>
-                        );
-                      } else {
-                        symbolDisplay = <div style={{ fontWeight: 600 }}>{o.symbol}</div>;
-                      }
-
-                      return (
-                        <div key={o.orderId} style={{ ...rowStyle, gridTemplateColumns: "70px 130px 46px 50px 46px 80px 80px 65px", gap: 8 }}>
-                          <div style={timeCell}>
-                            {new Date(o.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                          </div>
-                          <div>{symbolDisplay}</div>
-                          <div style={{ ...centerBold, color: o.side === "BUY" ? "#166534" : "#991b1b" }}>
-                            {o.side}
-                          </div>
-                          <div style={{ ...right, fontWeight: 600 }}>{o.quantity}</div>
-                          <div style={{ fontSize: 11 }}>{o.orderType}</div>
-                          <div style={rightMonoBold}>
-                            {o.lmtPrice !== undefined ? `$${o.lmtPrice.toFixed(2)}` : "—"}
-                          </div>
-                          <div style={{ fontSize: 10, color: "#666" }}>{o.status}</div>
-                          <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
-                            {o.orderType !== "MKT" && (
-                              <button
-                                onClick={() => {
-                                  setModifyingOrder(o);
-                                  setModifyPrice(o.lmtPrice !== undefined ? o.lmtPrice.toString() : "");
-                                  setModifyQuantity(o.quantity);
-                                }}
-                                style={{
-                                  padding: "2px 8px",
-                                  border: "1px solid #2563eb",
-                                  borderRadius: "4px",
-                                  background: "#eff6ff",
-                                  color: "#2563eb",
-                                  fontSize: "10px",
-                                  fontWeight: 600,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                Mod
-                              </button>
-                            )}
-                            <button
-                              onClick={() => setCancellingOrder(o)}
-                              style={{
-                                padding: "2px 8px",
-                                border: "1px solid #dc2626",
-                                borderRadius: "4px",
-                                background: "#fef2f2",
-                                color: "#dc2626",
-                                fontSize: "10px",
-                                fontWeight: 600,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Cxl
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    </div>
-                  </div>
-                )}
-              </section>
+              <OpenOrdersTable
+                orders={accountState.openOrders}
+                onModify={(o) => setModifyingOrder(o)}
+                onCancel={(o) => setCancellingOrder(o)}
+              />
 
               {/* Order History (Fills + Cancellations) */}
-              <section style={section}>
-                <div style={title}>Order History ({orderHistory.length})</div>
-                {orderHistory.length === 0 ? (
-                  <div style={emptyRow}>No order history</div>
-                ) : (
-                  <div style={table}>
-                    <div style={{ ...hdr, gridTemplateColumns: "70px 130px 46px 50px 80px 80px", gap: 8 }}>
-                      <div style={timeHeader}>Time</div>
-                      <div>Symbol</div>
-                      <div>Side</div>
-                      <div style={right}>Qty</div>
-                      <div style={right}>Price</div>
-                      <div>Status</div>
-                    </div>
-                    <div style={{ maxHeight: 200, overflowY: "auto" }}>
-                    {orderHistory.map((h, idx) => {
-                      let symbolDisplay: React.ReactNode;
-                      if (h.secType === "OPT" && h.strike !== undefined && h.expiry !== undefined && h.right !== undefined) {
-                        const rightLabel = h.right === "C" || h.right === "Call" ? "Call" : "Put";
-                        const formattedExpiry = formatExpiryYYYYMMDD(h.expiry);
-                        symbolDisplay = (
-                          <div>
-                            <div style={{ fontWeight: 600, fontSize: 11 }}>
-                              {h.symbol} {h.strike.toFixed(0)} {rightLabel}
-                            </div>
-                            <div style={{ fontSize: 9, color: "#666" }}>
-                              {formattedExpiry}
-                            </div>
-                          </div>
-                        );
-                      } else {
-                        symbolDisplay = <div style={{ fontWeight: 600 }}>{h.symbol}</div>;
-                      }
-
-                      const statusColor = h.status === "Cancelled" ? "#dc2626" : h.status === "Filled" ? "#16a34a" : "#666";
-                      // Show fill price for Filled, limit price for Cancelled
-                      // Only show price if > 0 (market orders have 0 price)
-                      const rawPrice = h.status === "Filled" && h.price !== undefined && h.price > 0
-                        ? h.price
-                        : (h.lmtPrice !== undefined && h.lmtPrice > 0 ? h.lmtPrice : undefined);
-                      const displayPrice = rawPrice;
-                      const isMktOrder = h.orderType === "MKT";
-
-                      return (
-                        <div key={`${h.orderId}-${h.ts}-${idx}`} style={{ ...rowStyle, gridTemplateColumns: "70px 130px 46px 50px 80px 80px", gap: 8 }}>
-                          <div style={timeCell}>
-                            {new Date(h.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                          </div>
-                          <div>{symbolDisplay}</div>
-                          <div style={{ ...centerBold, color: h.side === "BUY" ? "#166534" : "#991b1b" }}>
-                            {h.side}
-                          </div>
-                          <div style={{ ...right, fontWeight: 600 }}>{h.quantity !== "0" ? h.quantity : "—"}</div>
-                          <div style={rightMonoBold}>
-                            {displayPrice !== undefined ? `$${displayPrice.toFixed(2)}` : (isMktOrder ? "MKT" : "—")}
-                          </div>
-                          <div style={{ fontSize: 10, fontWeight: 600, color: statusColor }}>{h.status}</div>
-                        </div>
-                      );
-                    })}
-                    </div>
-                  </div>
-                )}
-              </section>
+              <OrderHistoryTable orders={orderHistory} />
               </div>
 
             </div>
@@ -1137,264 +893,18 @@ useEffect(() => {
 
         {/* Cancel Confirmation Modal */}
         {cancellingOrder && (
-          <div
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: "rgba(0,0,0,0.5)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 1001,
-            }}
-            onClick={() => setCancellingOrder(null)}
-          >
-            <div
-              style={{
-                background: "white",
-                borderRadius: 12,
-                padding: 20,
-                minWidth: 340,
-                boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: "#dc2626" }}>
-                Cancel Order?
-              </div>
-
-              <div style={{ background: "#f8fafc", borderRadius: 8, padding: 12, marginBottom: 16 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 8, fontSize: 13 }}>
-                  <div style={{ color: "#666" }}>Order ID:</div>
-                  <div style={{ fontWeight: 600 }}>#{cancellingOrder.orderId}</div>
-
-                  <div style={{ color: "#666" }}>Symbol:</div>
-                  <div style={{ fontWeight: 600 }}>
-                    {cancellingOrder.symbol}
-                    {cancellingOrder.secType === "OPT" && cancellingOrder.strike && (
-                      <span style={{ fontWeight: 400, color: "#666" }}>
-                        {" "}{cancellingOrder.strike} {cancellingOrder.right === "C" || cancellingOrder.right === "Call" ? "Call" : "Put"}
-                      </span>
-                    )}
-                  </div>
-
-                  <div style={{ color: "#666" }}>Side:</div>
-                  <div style={{ fontWeight: 600, color: cancellingOrder.side === "BUY" ? "#16a34a" : "#dc2626" }}>
-                    {cancellingOrder.side}
-                  </div>
-
-                  <div style={{ color: "#666" }}>Quantity:</div>
-                  <div style={{ fontWeight: 600 }}>{cancellingOrder.quantity}</div>
-
-                  <div style={{ color: "#666" }}>Type:</div>
-                  <div style={{ fontWeight: 600 }}>{cancellingOrder.orderType}</div>
-
-                  {cancellingOrder.lmtPrice !== undefined && (
-                    <>
-                      <div style={{ color: "#666" }}>Limit Price:</div>
-                      <div style={{ fontWeight: 600 }}>${cancellingOrder.lmtPrice.toFixed(2)}</div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: 12 }}>
-                <button
-                  onClick={() => setCancellingOrder(null)}
-                  style={{
-                    flex: 1,
-                    padding: "10px 16px",
-                    border: "1px solid #d1d5db",
-                    borderRadius: 6,
-                    background: "white",
-                    fontSize: 14,
-                    cursor: "pointer",
-                  }}
-                >
-                  Keep Order
-                </button>
-                <button
-                  onClick={() => {
-                    socketHub.send({
-                      type: "control",
-                      target: "ibAccount",
-                      op: "cancel_order",
-                      orderId: cancellingOrder.orderId,
-                    });
-                    setCancellingOrder(null);
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: "10px 16px",
-                    border: "none",
-                    borderRadius: 6,
-                    background: "#dc2626",
-                    color: "white",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel Order
-                </button>
-              </div>
-            </div>
-          </div>
+          <CancelOrderModal
+            order={cancellingOrder}
+            onClose={() => setCancellingOrder(null)}
+          />
         )}
 
         {/* Modify Order Modal */}
         {modifyingOrder && (
-          <div
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: "rgba(0,0,0,0.5)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 1001,
-            }}
-            onClick={() => setModifyingOrder(null)}
-          >
-            <div
-              style={{
-                background: "white",
-                borderRadius: 12,
-                padding: 20,
-                minWidth: 320,
-                boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>
-                Modify Order #{modifyingOrder.orderId}
-              </div>
-              <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
-                {modifyingOrder.symbol} {modifyingOrder.side} {modifyingOrder.orderType}
-              </div>
-
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>
-                  Quantity
-                </label>
-                <input
-                  type="number"
-                  value={modifyQuantity}
-                  onChange={(e) => setModifyQuantity(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    border: "1px solid #d1d5db",
-                    borderRadius: 6,
-                    fontSize: 14,
-                  }}
-                />
-              </div>
-
-              {(modifyingOrder.orderType === "LMT" || modifyingOrder.orderType === "STPLMT") && (
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>
-                    Limit Price
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={modifyPrice}
-                    onChange={(e) => setModifyPrice(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "8px 12px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 6,
-                      fontSize: 14,
-                    }}
-                  />
-                </div>
-              )}
-
-              <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
-                <button
-                  onClick={() => setModifyingOrder(null)}
-                  style={{
-                    flex: 1,
-                    padding: "10px 16px",
-                    border: "1px solid #d1d5db",
-                    borderRadius: 6,
-                    background: "white",
-                    fontSize: 14,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    const qty = parseInt(modifyQuantity, 10);
-                    const price = parseFloat(modifyPrice);
-
-                    if (isNaN(qty) || qty <= 0) {
-                      alert("Invalid quantity");
-                      return;
-                    }
-                    if ((modifyingOrder.orderType === "LMT" || modifyingOrder.orderType === "STPLMT") && (isNaN(price) || price <= 0)) {
-                      alert("Invalid price");
-                      return;
-                    }
-
-                    const payload: any = {
-                      type: "control",
-                      target: "ibAccount",
-                      op: "modify_order",
-                      orderId: modifyingOrder.orderId,
-                      symbol: modifyingOrder.symbol,
-                      secType: modifyingOrder.secType,
-                      side: modifyingOrder.side,
-                      quantity: qty,
-                      orderType: modifyingOrder.orderType,
-                    };
-
-                    if (modifyingOrder.orderType === "LMT" || modifyingOrder.orderType === "STPLMT") {
-                      payload.lmtPrice = price;
-                    }
-                    if (modifyingOrder.orderType === "STP" || modifyingOrder.orderType === "STPLMT") {
-                      payload.auxPrice = modifyingOrder.auxPrice;
-                    }
-
-                    // Option fields
-                    if (modifyingOrder.secType === "OPT") {
-                      payload.strike = modifyingOrder.strike;
-                      payload.expiry = modifyingOrder.expiry;
-                      // Normalize right to "C" or "P" for backend
-                      const rightVal = modifyingOrder.right;
-                      payload.right = (rightVal === "Call" || rightVal === "C") ? "C" : "P";
-                    }
-
-                    socketHub.send(payload);
-                    setModifyingOrder(null);
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: "10px 16px",
-                    border: "none",
-                    borderRadius: 6,
-                    background: "#2563eb",
-                    color: "white",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Modify Order
-                </button>
-              </div>
-            </div>
-          </div>
+          <ModifyOrderModal
+            order={modifyingOrder}
+            onClose={() => setModifyingOrder(null)}
+          />
         )}
 
         {/* Debug — immortal + frozen */}
