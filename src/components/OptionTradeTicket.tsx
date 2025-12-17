@@ -51,11 +51,18 @@ export default function OptionTradeTicket({
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
 
-  // Live market data updates
+  // Live market data updates (prices)
   const [liveLast, setLiveLast] = useState(last?.toFixed(4) || "—");
   const [liveBid, setLiveBid] = useState(bid?.toFixed(4) || "—");
   const [liveAsk, setLiveAsk] = useState(ask?.toFixed(4) || "—");
   const [liveMid, setLiveMid] = useState(mid?.toFixed(4) || "—");
+
+  // Live Greeks updates
+  const [liveDelta, setLiveDelta] = useState(delta?.toFixed(4) || "—");
+  const [liveGamma, setLiveGamma] = useState(gamma?.toFixed(4) || "—");
+  const [liveTheta, setLiveTheta] = useState(theta?.toFixed(4) || "—");
+  const [liveVega, setLiveVega] = useState(vega?.toFixed(4) || "—");
+  const [liveIv, setLiveIv] = useState(iv?.toFixed(4) || "—");
 
   // Format expiry nicely
   const formattedExpiry = formatExpiryWithWeekday(expiry);
@@ -107,6 +114,22 @@ export default function OptionTradeTicket({
         const midVal = (Number(b) + Number(a)) / 2;
         setLiveMid(midVal.toFixed(4));
       }
+
+      // Update Greeks (from md.option.greeks.* or included in quote data)
+      const dl = d.delta ?? d.d;
+      if (dl !== undefined && dl !== null) setLiveDelta(Number(dl).toFixed(4));
+
+      const gm = d.gamma ?? d.g;
+      if (gm !== undefined && gm !== null) setLiveGamma(Number(gm).toFixed(4));
+
+      const th = d.theta ?? d.th;
+      if (th !== undefined && th !== null) setLiveTheta(Number(th).toFixed(4));
+
+      const vg = d.vega;
+      if (vg !== undefined && vg !== null) setLiveVega(Number(vg).toFixed(4));
+
+      const ivVal = d.iv ?? d.impliedVolatility ?? d.impliedVol;
+      if (ivVal !== undefined && ivVal !== null) setLiveIv(Number(ivVal).toFixed(4));
     };
 
     socketHub.onMessage(handler);
@@ -210,25 +233,23 @@ export default function OptionTradeTicket({
         <div><strong>Ask</strong><br />{liveAsk}</div>
       </div>
 
-      {/* Greeks */}
-      {(delta !== undefined || gamma !== undefined || theta !== undefined || vega !== undefined || iv !== undefined) && (
-        <div style={{
-          padding: "10px 16px",
-          background: "#fef3c7",
-          borderBottom: "1px solid #fde68a",
-          fontSize: 11,
-          display: "grid",
-          gridTemplateColumns: "repeat(5, 1fr)",
-          gap: 8,
-          textAlign: "center",
-        }}>
-          <div><strong>Δ</strong><br />{delta !== undefined ? delta.toFixed(4) : "—"}</div>
-          <div><strong>Γ</strong><br />{gamma !== undefined ? gamma.toFixed(4) : "—"}</div>
-          <div><strong>Θ</strong><br />{theta !== undefined ? theta.toFixed(4) : "—"}</div>
-          <div><strong>Vega</strong><br />{vega !== undefined ? vega.toFixed(4) : "—"}</div>
-          <div><strong>IV</strong><br />{iv !== undefined ? iv.toFixed(4) : "—"}</div>
-        </div>
-      )}
+      {/* Greeks (always shown, updates live) */}
+      <div style={{
+        padding: "10px 16px",
+        background: "#fef3c7",
+        borderBottom: "1px solid #fde68a",
+        fontSize: 11,
+        display: "grid",
+        gridTemplateColumns: "repeat(5, 1fr)",
+        gap: 8,
+        textAlign: "center",
+      }}>
+        <div><strong>Δ</strong><br />{liveDelta}</div>
+        <div><strong>Γ</strong><br />{liveGamma}</div>
+        <div><strong>Θ</strong><br />{liveTheta}</div>
+        <div><strong>Vega</strong><br />{liveVega}</div>
+        <div><strong>IV</strong><br />{liveIv}</div>
+      </div>
 
       {/* Order Form */}
       <div style={{ padding: 16 }}>
