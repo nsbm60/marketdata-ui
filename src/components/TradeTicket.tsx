@@ -1,6 +1,8 @@
 // src/components/TradeTicket.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { socketHub } from "../ws/SocketHub";
+
+const THROTTLE_MS = 200; // 5 updates/sec for trade tickets
 
 type Props = {
   symbol: string;
@@ -24,6 +26,11 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
   const [bid, setBid] = useState(initialBid !== undefined ? initialBid.toFixed(4) : "—");
   const [ask, setAsk] = useState(initialAsk !== undefined ? initialAsk.toFixed(4) : "—");
 
+  // Throttling refs
+  const pendingRef = useRef<{ last?: string; bid?: string; ask?: string }>({});
+  const lastFlushRef = useRef<number>(0);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     // Subscribe to market data when ticket opens
     socketHub.send({
@@ -32,37 +39,56 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
       symbols: [symbol],
     });
 
+    const flushUpdates = () => {
+      const p = pendingRef.current;
+      if (p.last !== undefined) setLast(p.last);
+      if (p.bid !== undefined) setBid(p.bid);
+      if (p.ask !== undefined) setAsk(p.ask);
+      pendingRef.current = {};
+      lastFlushRef.current = Date.now();
+      timeoutRef.current = null;
+    };
+
     const handler = (m: any) => {
       // Only accept equity topics for this symbol
       const topic = m?.topic;
       if (!topic || typeof topic !== "string") return;
-      
+
       // Must be an equity topic: md.equity.quote.SYMBOL or md.equity.trade.SYMBOL
       const parts = topic.split(".");
       if (parts.length < 4) return;
       if (parts[0] !== "md" || parts[1] !== "equity") return;
-      
+
       const topicSymbol = parts.slice(3).join(".").toUpperCase();
       if (topicSymbol !== symbol.toUpperCase()) return;
 
       const d = m.data?.data || m.data || {};
 
-      // Last can come from many possible fields
-      if (d.lastPrice !== undefined) setLast(d.lastPrice.toFixed(4));
-      else if (d.last !== undefined) setLast(d.last.toFixed(4));
-      else if (d.price !== undefined) setLast(d.price.toFixed(4));
-      else if (d.p !== undefined) setLast(d.p.toFixed(4));
+      // Accumulate updates in pending ref
+      if (d.lastPrice !== undefined) pendingRef.current.last = d.lastPrice.toFixed(4);
+      else if (d.last !== undefined) pendingRef.current.last = d.last.toFixed(4);
+      else if (d.price !== undefined) pendingRef.current.last = d.price.toFixed(4);
+      else if (d.p !== undefined) pendingRef.current.last = d.p.toFixed(4);
 
-      // Bid/Ask — already working
-      if (d.bidPrice !== undefined) setBid(d.bidPrice.toFixed(4));
-      if (d.askPrice !== undefined) setAsk(d.askPrice.toFixed(4));
+      if (d.bidPrice !== undefined) pendingRef.current.bid = d.bidPrice.toFixed(4);
+      if (d.askPrice !== undefined) pendingRef.current.ask = d.askPrice.toFixed(4);
+
+      // Throttle: flush if enough time passed, otherwise schedule
+      const now = Date.now();
+      const elapsed = now - lastFlushRef.current;
+      if (elapsed >= THROTTLE_MS) {
+        flushUpdates();
+      } else if (!timeoutRef.current) {
+        timeoutRef.current = setTimeout(flushUpdates, THROTTLE_MS - elapsed);
+      }
     };
 
     socketHub.onMessage(handler);
-    socketHub.onTick(handler);  // Also listen to onTick in case equity data comes through there
+    socketHub.onTick(handler);
     return () => {
       socketHub.offMessage(handler);
       socketHub.offTick(handler);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
       // Unsubscribe when closing
       socketHub.send({
         type: "unsubscribe",

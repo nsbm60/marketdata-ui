@@ -1,7 +1,9 @@
 // src/components/OptionTradeTicket.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { socketHub } from "../ws/SocketHub";
 import { formatExpiryWithWeekday } from "../utils/options";
+
+const THROTTLE_MS = 200; // 5 updates/sec for trade tickets
 
 type Props = {
   underlying: string;
@@ -68,72 +70,100 @@ export default function OptionTradeTicket({
   const formattedExpiry = formatExpiryWithWeekday(expiry);
   const rightLabel = right === "C" ? "Call" : "Put";
 
+  // Throttling refs
+  interface PendingUpdates {
+    last?: string; bid?: string; ask?: string; mid?: string;
+    delta?: string; gamma?: string; theta?: string; vega?: string; iv?: string;
+  }
+  const pendingRef = useRef<PendingUpdates>({});
+  const lastFlushRef = useRef<number>(0);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     // Build the expected option symbol for this specific contract
     // OSI format: UNDERLYING + YYMMDD + C/P + STRIKE (8 digits, strike * 1000)
-    const yy = expiry.substring(2, 4); // Get last 2 digits of year from YYYY-MM-DD
+    const yy = expiry.substring(2, 4);
     const mm = expiry.substring(5, 7);
     const dd = expiry.substring(8, 10);
     const strikeFormatted = String(Math.round(strike * 1000)).padStart(8, "0");
     const expectedSymbol = `${underlying.toUpperCase()}${yy}${mm}${dd}${right}${strikeFormatted}`;
-    
-    console.log("[OptionTradeTicket] Listening for symbol:", expectedSymbol);
+
+    const flushUpdates = () => {
+      const p = pendingRef.current;
+      if (p.last !== undefined) setLiveLast(p.last);
+      if (p.bid !== undefined) setLiveBid(p.bid);
+      if (p.ask !== undefined) setLiveAsk(p.ask);
+      if (p.mid !== undefined) setLiveMid(p.mid);
+      if (p.delta !== undefined) setLiveDelta(p.delta);
+      if (p.gamma !== undefined) setLiveGamma(p.gamma);
+      if (p.theta !== undefined) setLiveTheta(p.theta);
+      if (p.vega !== undefined) setLiveVega(p.vega);
+      if (p.iv !== undefined) setLiveIv(p.iv);
+      pendingRef.current = {};
+      lastFlushRef.current = Date.now();
+      timeoutRef.current = null;
+    };
 
     const handler = (m: any) => {
-      // Listen for option market data updates
       const topic = m?.topic;
       if (!topic || typeof topic !== "string") return;
-      
-      // Only process option market data
       if (!topic.startsWith("md.option.")) return;
-      
-      // Extract symbol from topic: md.option.quote.SYMBOL or md.option.trade.SYMBOL
+
       const parts = topic.split(".");
       const topicSymbol = parts.length >= 4 ? parts.slice(3).join(".").toUpperCase() : "";
-      
-      // Only update if this is for OUR specific option
       if (topicSymbol !== expectedSymbol) return;
 
       const d = m.data?.data || m.data || {};
 
-      // Update prices
-      if (d.lastPrice !== undefined) setLiveLast(Number(d.lastPrice).toFixed(4));
-      else if (d.last !== undefined) setLiveLast(Number(d.last).toFixed(4));
-      else if (d.price !== undefined) setLiveLast(Number(d.price).toFixed(4));
+      // Accumulate price updates
+      if (d.lastPrice !== undefined) pendingRef.current.last = Number(d.lastPrice).toFixed(4);
+      else if (d.last !== undefined) pendingRef.current.last = Number(d.last).toFixed(4);
+      else if (d.price !== undefined) pendingRef.current.last = Number(d.price).toFixed(4);
 
-      if (d.bidPrice !== undefined) setLiveBid(Number(d.bidPrice).toFixed(4));
-      else if (d.bid !== undefined) setLiveBid(Number(d.bid).toFixed(4));
+      if (d.bidPrice !== undefined) pendingRef.current.bid = Number(d.bidPrice).toFixed(4);
+      else if (d.bid !== undefined) pendingRef.current.bid = Number(d.bid).toFixed(4);
 
-      if (d.askPrice !== undefined) setLiveAsk(Number(d.askPrice).toFixed(4));
-      else if (d.ask !== undefined) setLiveAsk(Number(d.ask).toFixed(4));
+      if (d.askPrice !== undefined) pendingRef.current.ask = Number(d.askPrice).toFixed(4);
+      else if (d.ask !== undefined) pendingRef.current.ask = Number(d.ask).toFixed(4);
 
-      // Calculate mid if we have both bid and ask
+      // Calculate mid
       const b = d.bidPrice ?? d.bid;
       const a = d.askPrice ?? d.ask;
       if (b !== undefined && a !== undefined) {
-        const midVal = (Number(b) + Number(a)) / 2;
-        setLiveMid(midVal.toFixed(4));
+        pendingRef.current.mid = ((Number(b) + Number(a)) / 2).toFixed(4);
       }
 
-      // Update Greeks (from md.option.greeks.* or included in quote data)
+      // Accumulate Greeks
       const dl = d.delta ?? d.d;
-      if (dl !== undefined && dl !== null) setLiveDelta(Number(dl).toFixed(4));
+      if (dl !== undefined && dl !== null) pendingRef.current.delta = Number(dl).toFixed(4);
 
       const gm = d.gamma ?? d.g;
-      if (gm !== undefined && gm !== null) setLiveGamma(Number(gm).toFixed(4));
+      if (gm !== undefined && gm !== null) pendingRef.current.gamma = Number(gm).toFixed(4);
 
       const th = d.theta ?? d.th;
-      if (th !== undefined && th !== null) setLiveTheta(Number(th).toFixed(4));
+      if (th !== undefined && th !== null) pendingRef.current.theta = Number(th).toFixed(4);
 
       const vg = d.vega;
-      if (vg !== undefined && vg !== null) setLiveVega(Number(vg).toFixed(4));
+      if (vg !== undefined && vg !== null) pendingRef.current.vega = Number(vg).toFixed(4);
 
       const ivVal = d.iv ?? d.impliedVolatility ?? d.impliedVol;
-      if (ivVal !== undefined && ivVal !== null) setLiveIv(Number(ivVal).toFixed(4));
+      if (ivVal !== undefined && ivVal !== null) pendingRef.current.iv = Number(ivVal).toFixed(4);
+
+      // Throttle: flush if enough time passed, otherwise schedule
+      const now = Date.now();
+      const elapsed = now - lastFlushRef.current;
+      if (elapsed >= THROTTLE_MS) {
+        flushUpdates();
+      } else if (!timeoutRef.current) {
+        timeoutRef.current = setTimeout(flushUpdates, THROTTLE_MS - elapsed);
+      }
     };
 
     socketHub.onMessage(handler);
-    return () => socketHub.offMessage(handler);
+    return () => {
+      socketHub.offMessage(handler);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
   }, [underlying, strike, expiry, right]);
 
   const sendOrder = () => {
