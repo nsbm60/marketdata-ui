@@ -2,9 +2,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
+import TradeButton, { tradeButtonContainer } from "./components/shared/TradeButton";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, getPrevCloseDateFromCache, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState, TimeframeOption } from "./services/marketState";
-import { useMarketPrices } from "./hooks/useMarketData";
+import { useThrottledMarketPrices } from "./hooks/useMarketData";
 import { PriceData } from "./services/MarketDataBus";
 import { isNum, fmtPrice } from "./utils/formatters";
 
@@ -80,8 +81,9 @@ export default function EquityPanel({
 
   /* ---------------- MARKET DATA via MarketDataBus ---------------- */
   // When paused, pass empty array to avoid subscriptions
+  // Throttle to 250ms (4 updates/sec) for readability
   const activeSymbols = paused ? [] : symbols;
-  const prices = useMarketPrices(activeSymbols, "equity");
+  const prices = useThrottledMarketPrices(activeSymbols, "equity", 250);
 
   /* ---------------- actions ---------------- */
   const applySymbols = (next: string[]) => {
@@ -314,41 +316,15 @@ export default function EquityPanel({
 
                     {/* BUY/SELL */}
                     <Td selected={isSelected}>
-                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openTradeTicket(r.symbol, "BUY");
-                          }}
-                          style={{
-                            padding: "2px 8px",
-                            fontSize: 11,
-                            background: "#dcfce7",
-                            color: "#166534",
-                            border: "1px solid #86efac",
-                            borderRadius: 4,
-                            cursor: "pointer",
-                          }}
-                        >
-                          BUY
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openTradeTicket(r.symbol, "SELL");
-                          }}
-                          style={{
-                            padding: "2px 8px",
-                            fontSize: 11,
-                            background: "#fce7f3",
-                            color: "#831843",
-                            border: "1px solid #fda4af",
-                            borderRadius: 4,
-                            cursor: "pointer",
-                          }}
-                        >
-                          SELL
-                        </button>
+                      <div style={tradeButtonContainer}>
+                        <TradeButton
+                          side="BUY"
+                          onClick={(e) => { e.stopPropagation(); openTradeTicket(r.symbol, "BUY"); }}
+                        />
+                        <TradeButton
+                          side="SELL"
+                          onClick={(e) => { e.stopPropagation(); openTradeTicket(r.symbol, "SELL"); }}
+                        />
                       </div>
                     </Td>
                   </tr>

@@ -2,6 +2,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
 import OptionTradeTicket from "./components/OptionTradeTicket";
+import TradeButton, { tradeButtonContainerCompact } from "./components/shared/TradeButton";
 import { useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 import { isNum, fmtPrice, fmtGreek } from "./utils/formatters";
 import { parseOptionSymbol, formatExpiryShort } from "./utils/options";
@@ -32,7 +33,8 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
   const [ticketMarketData, setTicketMarketData] = useState<any>({});
 
   // Listen to option channel updates (triggers re-render on any option price change)
-  const optionVersion = useChannelUpdates("option", 100);
+  // Throttle to 250ms (4 updates/sec) for readability
+  const optionVersion = useChannelUpdates("option", 250);
 
   // Load expiries when ticker changes
   useEffect(() => {
@@ -384,22 +386,21 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                       onClick={() => setSelectedKey(rowKey)}
                     >
                       {/* Call Trade Buttons */}
-                      <div style={{ ...baseCell, display: "flex", justifyContent: "center", gap: 4, padding: "1px 2px" }}>
-                        <button
+                      <div style={{ ...baseCell, ...tradeButtonContainerCompact }}>
+                        <TradeButton
+                          side="BUY"
+                          compact
                           onClick={(e) => {
                             e.stopPropagation();
-                            const md = {
+                            openTradeTicket(underlying, r.strike, selectedExpiry, "C", "BUY", {
                               last: r.cLast, bid: r.cBid, ask: r.cAsk, mid: r.cMid,
                               delta: r.cDelta, gamma: r.cGamma, theta: r.cTheta, vega: r.cVega, iv: r.cIv,
-                            };
-                            console.log("[OptionPanel] Opening trade ticket with market data:", md);
-                            openTradeTicket(underlying, r.strike, selectedExpiry, "C", "BUY", md);
+                            });
                           }}
-                          style={tradeBtn("BUY")}
-                        >
-                          B
-                        </button>
-                        <button
+                        />
+                        <TradeButton
+                          side="SELL"
+                          compact
                           onClick={(e) => {
                             e.stopPropagation();
                             openTradeTicket(underlying, r.strike, selectedExpiry, "C", "SELL", {
@@ -407,10 +408,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                               delta: r.cDelta, gamma: r.cGamma, theta: r.cTheta, vega: r.cVega, iv: r.cIv,
                             });
                           }}
-                          style={tradeBtn("SELL")}
-                        >
-                          S
-                        </button>
+                        />
                       </div>
 
                       {/* Calls: Last | Bid | Mid | Ask | Greeks */}
@@ -441,8 +439,10 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pIv)}</div>
 
                       {/* Put Trade Buttons */}
-                      <div style={{ ...baseCell, display: "flex", justifyContent: "center", gap: 4, padding: "1px 2px" }}>
-                        <button
+                      <div style={{ ...baseCell, ...tradeButtonContainerCompact }}>
+                        <TradeButton
+                          side="BUY"
+                          compact
                           onClick={(e) => {
                             e.stopPropagation();
                             openTradeTicket(underlying, r.strike, selectedExpiry, "P", "BUY", {
@@ -450,11 +450,10 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                               delta: r.pDelta, gamma: r.pGamma, theta: r.pTheta, vega: r.pVega, iv: r.pIv,
                             });
                           }}
-                          style={tradeBtn("BUY")}
-                        >
-                          B
-                        </button>
-                        <button
+                        />
+                        <TradeButton
+                          side="SELL"
+                          compact
                           onClick={(e) => {
                             e.stopPropagation();
                             openTradeTicket(underlying, r.strike, selectedExpiry, "P", "SELL", {
@@ -462,10 +461,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                               delta: r.pDelta, gamma: r.pGamma, theta: r.pTheta, vega: r.pVega, iv: r.pIv,
                             });
                           }}
-                          style={tradeBtn("SELL")}
-                        >
-                          S
-                        </button>
+                        />
                       </div>
                     </div>
                   </Fragment>
@@ -655,17 +651,3 @@ const empty = {
   color: "#666",
   textAlign: "center" as const,
 };
-
-function tradeBtn(side: "BUY" | "SELL") {
-  return {
-    padding: "2px 6px",
-    fontSize: 9,
-    fontWeight: 600,
-    background: side === "BUY" ? "#dcfce7" : "#fce7f3",
-    color: side === "BUY" ? "#166534" : "#831843",
-    border: side === "BUY" ? "1px solid #86efac" : "1px solid #fda4af",
-    borderRadius: 3,
-    cursor: "pointer",
-    lineHeight: 1,
-  };
-}
