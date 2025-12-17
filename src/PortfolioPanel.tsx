@@ -12,7 +12,7 @@ import {
 } from "./components/portfolio";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, getPrevCloseDateFromCache, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState, TimeframeOption } from "./services/marketState";
-import { useMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
+import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
 import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
 import {
   IbPosition,
@@ -88,10 +88,12 @@ export default function PortfolioPanel() {
   }, [accountState?.positions]);
 
   // Subscribe to equity market data via MarketDataBus
-  const equityPrices = useMarketPrices(equitySymbols, "equity");
+  // Throttle to 250ms (4 updates/sec) for readability
+  const equityPrices = useThrottledMarketPrices(equitySymbols, "equity", 250);
 
   // Listen to option channel updates (backend manages option subscriptions)
-  const optionVersion = useChannelUpdates("option", 100);
+  // Throttle to 250ms for consistency
+  const optionVersion = useChannelUpdates("option", 250);
 
   // Close prices for % change display (equities)
   const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
