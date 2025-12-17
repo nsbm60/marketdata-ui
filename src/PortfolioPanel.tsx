@@ -255,9 +255,17 @@ export default function PortfolioPanel() {
       .map(p => buildOsiSymbol(p.symbol, p.expiry!, p.right!, p.strike!));
   }, [accountState?.positions]);
 
-  // Tell backend to subscribe to portfolio option contracts
+  // Tell backend to subscribe to portfolio option contracts AND register interest with UI bridge
   useEffect(() => {
     if (optionOsiSymbols.length > 0) {
+      // 1. Register interest with UI bridge so it forwards option messages to this client
+      socketHub.send({
+        type: "subscribe",
+        channels: ["md.option.quote", "md.option.trade", "md.option.greeks"],
+        symbols: optionOsiSymbols,
+      });
+
+      // 2. Tell backend to subscribe to Alpaca streaming for these contracts
       socketHub.send({
         type: "control",
         target: "marketData",
@@ -265,6 +273,17 @@ export default function PortfolioPanel() {
         contracts: optionOsiSymbols,
       });
     }
+
+    // Cleanup: unsubscribe when component unmounts or symbols change
+    return () => {
+      if (optionOsiSymbols.length > 0) {
+        socketHub.send({
+          type: "unsubscribe",
+          channels: ["md.option.quote", "md.option.trade", "md.option.greeks"],
+          symbols: optionOsiSymbols,
+        });
+      }
+    };
   }, [optionOsiSymbols]);
 
   useEffect(() => {
