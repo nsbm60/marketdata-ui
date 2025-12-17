@@ -6,6 +6,7 @@ import OptionTradeTicket from "./components/OptionTradeTicket";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { useMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
+import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
 
 type IbPosition = {
   account: string;
@@ -177,14 +178,9 @@ export default function PortfolioPanel() {
     if (optionPositions.length === 0) return;
 
     // Build OSI symbols for options
-    const osiSymbols = optionPositions.map(p => {
-      const yy = p.expiry!.substring(2, 4);
-      const mm = p.expiry!.substring(4, 6);
-      const dd = p.expiry!.substring(6, 8);
-      const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
-      const strikeFormatted = String(Math.round(p.strike! * 1000)).padStart(8, "0");
-      return `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
-    });
+    const osiSymbols = optionPositions.map(p =>
+      buildOsiSymbol(p.symbol, p.expiry!, p.right!, p.strike!)
+    );
 
     // Fetch option close prices
     socketHub.sendControl("option_close_prices", {
@@ -210,9 +206,9 @@ export default function PortfolioPanel() {
   }, [accountState?.positions, marketState?.prevTradingDay]);
 
   const openTradeTicket = (
-    symbol: string, 
-    account: string, 
-    side: "BUY" | "SELL", 
+    symbol: string,
+    account: string,
+    side: "BUY" | "SELL",
     secType: string,
     optionDetails?: { strike: number; expiry: string; right: string },
     marketData?: { last?: number; bid?: number; ask?: number }
@@ -248,18 +244,9 @@ export default function PortfolioPanel() {
   // Build OSI symbols for option positions (for backend subscription)
   const optionOsiSymbols = useMemo(() => {
     if (!accountState?.positions) return [];
-    const osiSymbols: string[] = [];
-    accountState.positions.forEach(p => {
-      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        const yy = p.expiry.substring(2, 4);
-        const mm = p.expiry.substring(4, 6);
-        const dd = p.expiry.substring(6, 8);
-        const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
-        const strikeFormatted = String(Math.round(p.strike * 1000)).padStart(8, "0");
-        osiSymbols.push(`${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`);
-      }
-    });
-    return osiSymbols;
+    return accountState.positions
+      .filter(p => p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined)
+      .map(p => buildOsiSymbol(p.symbol, p.expiry!, p.right!, p.strike!));
   }, [accountState?.positions]);
 
   // Tell backend to subscribe to portfolio option contracts
@@ -750,13 +737,7 @@ useEffect(() => {
                     let priceKey = p.symbol.toUpperCase();
                     let priceData;
                     if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-                      // Build OSI format: SYMBOL + YYMMDD + C/P + STRIKE (8 digits, strike * 1000)
-                      const yy = p.expiry.substring(2, 4);
-                      const mm = p.expiry.substring(4, 6);
-                      const dd = p.expiry.substring(6, 8);
-                      const rightChar = p.right === "Call" || p.right === "C" ? "C" : "P";
-                      const strikeFormatted = String(Math.round(p.strike * 1000)).padStart(8, "0");
-                      priceKey = `${p.symbol}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
+                      priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
                       priceData = getChannelPrices("option").get(priceKey);
                     } else {
                       priceData = equityPrices.get(priceKey);
@@ -809,7 +790,7 @@ useEffect(() => {
                     if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
                       // Use the fields directly from the backend
                       const rightLabel = p.right === "C" || p.right === "Call" ? "Call" : "Put";
-                      const formattedExpiry = formatExpiryFromYYYYMMDD(p.expiry);
+                      const formattedExpiry = formatExpiryYYYYMMDD(p.expiry);
                       symbolDisplay = (
                         <div>
                           <div style={{ fontWeight: 600, fontSize: 11 }}>
@@ -861,7 +842,11 @@ useEffect(() => {
                               const optionDetails = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
                                 ? { strike: p.strike, expiry: p.expiry, right: p.right }
                                 : undefined;
-                              openTradeTicket(p.symbol, p.account, "BUY", p.secType, optionDetails, priceData);
+                              // Get fresh price data at click time (not closure-captured render-time value)
+                              const freshPriceData = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
+                                ? getChannelPrices("option").get(buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike))
+                                : equityPrices.get(p.symbol.toUpperCase());
+                              openTradeTicket(p.symbol, p.account, "BUY", p.secType, optionDetails, freshPriceData);
                             }}
                             style={{ ...iconBtn, background: "#dcfce7", color: "#166534" }}
                           >
@@ -873,7 +858,11 @@ useEffect(() => {
                               const optionDetails = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
                                 ? { strike: p.strike, expiry: p.expiry, right: p.right }
                                 : undefined;
-                              openTradeTicket(p.symbol, p.account, "SELL", p.secType, optionDetails, priceData);
+                              // Get fresh price data at click time (not closure-captured render-time value)
+                              const freshPriceData = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
+                                ? getChannelPrices("option").get(buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike))
+                                : equityPrices.get(p.symbol.toUpperCase());
+                              openTradeTicket(p.symbol, p.account, "SELL", p.secType, optionDetails, freshPriceData);
                             }}
                             style={{ ...iconBtn, background: "#fce7f3", color: "#831843" }}
                           >
@@ -936,7 +925,7 @@ useEffect(() => {
                       let symbolDisplay: React.ReactNode;
                       if (o.secType === "OPT" && o.strike !== undefined && o.expiry !== undefined && o.right !== undefined) {
                         const rightLabel = o.right === "C" || o.right === "Call" ? "Call" : "Put";
-                        const formattedExpiry = formatExpiryFromYYYYMMDD(o.expiry);
+                        const formattedExpiry = formatExpiryYYYYMMDD(o.expiry);
                         symbolDisplay = (
                           <div>
                             <div style={{ fontWeight: 600, fontSize: 11 }}>
@@ -1032,7 +1021,7 @@ useEffect(() => {
                       let symbolDisplay: React.ReactNode;
                       if (h.secType === "OPT" && h.strike !== undefined && h.expiry !== undefined && h.right !== undefined) {
                         const rightLabel = h.right === "C" || h.right === "Call" ? "Call" : "Put";
-                        const formattedExpiry = formatExpiryFromYYYYMMDD(h.expiry);
+                        const formattedExpiry = formatExpiryYYYYMMDD(h.expiry);
                         symbolDisplay = (
                           <div>
                             <div style={{ fontWeight: 600, fontSize: 11 }}>
@@ -1444,57 +1433,6 @@ useEffect(() => {
   );
 }
 
-/* ---- Option Symbol Parser ---- */
-type ParsedOption = {
-  underlying: string;
-  right: "call" | "put";
-  strike: number;
-  expiration: string; // YYYY-MM-DD
-};
-
-function parseOptionSymbol(sym: string): ParsedOption | null {
-  const S = String(sym || "").toUpperCase().replace(/\s+/g, "");
-  
-  // OSI format: AAPL250117C00190000
-  const m1 = /^([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/.exec(S);
-  if (m1) {
-    const underlying = m1[1];
-    const yy = m1[2];
-    const mm = m1[3];
-    const dd = m1[4];
-    const right = m1[5] === "C" ? "call" : "put";
-    const strike = parseInt(m1[6], 10) / 1000;
-    const yyyy = Number(yy) + 2000;
-    const expiration = `${yyyy}-${mm}-${dd}`;
-    return { underlying, right, strike, expiration };
-  }
-  
-  // Underscore format: AAPL_011725C_190
-  const m2 = /^([A-Z]+)[._-](\d{2})(\d{2})(\d{2})([CP])[._-](\d+(\.\d+)?)$/.exec(S);
-  if (m2) {
-    const underlying = m2[1];
-    const yy = m2[2];
-    const mm = m2[3];
-    const dd = m2[4];
-    const right = m2[5] === "C" ? "call" : "put";
-    const strike = parseFloat(m2[6]);
-    const yyyy = Number(yy) + 2000;
-    const expiration = `${yyyy}-${mm}-${dd}`;
-    return { underlying, right, strike, expiration };
-  }
-  
-  // Fallback (no reliable expiry)
-  const m3 = /^([A-Z]+)\d{6,8}([CP])(\d+(\.\d+)?)$/.exec(S);
-  if (m3) {
-    const underlying = m3[1];
-    const right = m3[2] === "C" ? "call" : "put";
-    const strike = parseFloat(m3[3]);
-    return { underlying, right, strike, expiration: "1970-01-01" };
-  }
-  
-  return null;
-}
-
 /**
  * Parse IB's completedTime format "YYYYMMDD HH:MM:SS" or "YYYYMMDD-HH:MM:SS" to ISO string.
  * Falls back to the input if parsing fails.
@@ -1522,51 +1460,6 @@ function parseIBTimestamp(ibTime: string): string {
     return ibTime;
   } catch {
     return ibTime;
-  }
-}
-
-function formatExpiryFromYYYYMMDD(expiry: string): string {
-  try {
-    // Parse YYYYMMDD format: "20251212" -> "Dec 12, 2025"
-    if (expiry.length !== 8) return expiry;
-    
-    const y = expiry.substring(0, 4);
-    const m = expiry.substring(4, 6);
-    const d = expiry.substring(6, 8);
-    
-    const dt = new Date(Number(y), Number(m) - 1, Number(d));
-    
-    return dt.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  } catch {
-    return expiry;
-  }
-}
-
-function formatExpiryShort(expiry: string): string {
-  try {
-    // Match YYYY-MM-DD explicitly
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expiry);
-    if (!m) return expiry;
-
-    const y = Number(m[1]);
-    const mo = Number(m[2]);
-    const d = Number(m[3]);
-
-    // Construct LOCAL date (not UTC midnight)
-    const dt = new Date(y, mo - 1, d);
-
-    // Format as "Dec 19, 2025"
-    return dt.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  } catch {
-    return expiry;
   }
 }
 

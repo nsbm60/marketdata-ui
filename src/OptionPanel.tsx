@@ -4,16 +4,7 @@ import { socketHub } from "./ws/SocketHub";
 import OptionTradeTicket from "./components/OptionTradeTicket";
 import { useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 import { isNum, fmtPrice, fmtGreek } from "./utils/formatters";
-
-/** ---------- Types ---------- */
-type OptionSide = "call" | "put";
-
-type ParsedOption = {
-  underlying: string;
-  side: OptionSide;
-  strike: number;
-  expiration: string; // YYYY-MM-DD
-};
+import { parseOptionSymbol, formatExpiryShort } from "./utils/options";
 
 /** ---------- Component ---------- */
 export default function OptionPanel({ ticker }: { ticker?: string }) {
@@ -182,7 +173,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
       if (p.expiration !== selectedExpiry) continue;
 
       const at = strikeMap.get(p.strike) || {};
-      if (p.side === "call") at.call = price;
+      if (p.right === "call") at.call = price;
       else at.put = price;
       strikeMap.set(p.strike, at);
     }
@@ -315,7 +306,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                   ...(loadingChain && selectedExpiry === exp ? { opacity: 0.6 } : {}),
                 } as any}
               >
-                {fmtExpiryShort(exp)}
+                {formatExpiryShort(exp)}
               </button>
             ))}
           </div>
@@ -397,10 +388,12 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            openTradeTicket(underlying, r.strike, selectedExpiry, "C", "BUY", {
+                            const md = {
                               last: r.cLast, bid: r.cBid, ask: r.cAsk, mid: r.cMid,
                               delta: r.cDelta, gamma: r.cGamma, theta: r.cTheta, vega: r.cVega, iv: r.cIv,
-                            });
+                            };
+                            console.log("[OptionPanel] Opening trade ticket with market data:", md);
+                            openTradeTicket(underlying, r.strike, selectedExpiry, "C", "BUY", md);
                           }}
                           style={tradeBtn("BUY")}
                         >
@@ -487,6 +480,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
       {showTradeTicket && (
         <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 1000 }}>
           <OptionTradeTicket
+            key={`${ticketUnderlying}-${ticketStrike}-${ticketExpiry}-${ticketRight}`}
             underlying={ticketUnderlying}
             strike={ticketStrike}
             expiry={ticketExpiry}
@@ -519,54 +513,6 @@ function mid(b?: number, a?: number, last?: number) {
   if (isNum(b) && isNum(a)) return ((b as number) + (a as number)) / 2;
   if (isNum(last)) return last as number;
   return undefined;
-}
-
-function fmtExpiryShort(s: string) {
-  try {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
-    if (!m) return s;
-    const y = Number(m[1]);
-    const mo = Number(m[2]);
-    const d = Number(m[3]);
-    const dt = new Date(y, mo - 1, d);
-    return dt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  } catch {
-    return s;
-  }
-}
-
-// Parse OPRA/OSI option symbol
-function parseOptionSymbol(sym: string): ParsedOption | null {
-  const S = String(sym || "").toUpperCase().replace(/\s+/g, "");
-  // OSI: AAPL250117C00190000
-  const m1 = /^([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/.exec(S);
-  if (m1) {
-    const und = m1[1], yy = m1[2], mm = m1[3], dd = m1[4];
-    const side: OptionSide = m1[5] === "C" ? "call" : "put";
-    const strike = parseInt(m1[6], 10) / 1000;
-    const yyyy = Number(yy) + 2000;
-    const exp = `${yyyy}-${mm}-${dd}`;
-    return { underlying: und, side, strike, expiration: exp };
-  }
-  // AAPL_011725C_190
-  const m2 = /^([A-Z]+)[._-](\d{2})(\d{2})(\d{2})([CP])[._-](\d+(\.\d+)?)$/.exec(S);
-  if (m2) {
-    const und = m2[1], yy = m2[2], mm = m2[3], dd = m2[4];
-    const side: OptionSide = m2[5] === "C" ? "call" : "put";
-    const strike = parseFloat(m2[6]);
-    const yyyy = Number(yy) + 2000;
-    const exp = `${yyyy}-${mm}-${dd}`;
-    return { underlying: und, side, strike, expiration: exp };
-  }
-  // Fallback
-  const m3 = /^([A-Z]+)\d{6,8}([CP])(\d+(\.\d+)?)$/.exec(S);
-  if (m3) {
-    const und = m3[1];
-    const side: OptionSide = m3[2] === "C" ? "call" : "put";
-    const strike = parseFloat(m3[3]);
-    return { underlying: und, side, strike, expiration: "1970-01-01" };
-  }
-  return null;
 }
 
 /** ---------- Styles ---------- */

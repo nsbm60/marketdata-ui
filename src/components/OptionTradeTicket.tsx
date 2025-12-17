@@ -1,6 +1,7 @@
 // src/components/OptionTradeTicket.tsx
 import { useEffect, useState } from "react";
 import { socketHub } from "../ws/SocketHub";
+import { formatExpiryWithWeekday } from "../utils/options";
 
 type Props = {
   underlying: string;
@@ -57,7 +58,7 @@ export default function OptionTradeTicket({
   const [liveMid, setLiveMid] = useState(mid?.toFixed(4) || "—");
 
   // Format expiry nicely
-  const formattedExpiry = formatExpiry(expiry);
+  const formattedExpiry = formatExpiryWithWeekday(expiry);
   const rightLabel = right === "C" ? "Call" : "Put";
 
   useEffect(() => {
@@ -318,29 +319,4 @@ export default function OptionTradeTicket({
       </div>
     </div>
   );
-}
-
-function formatExpiry(expiry: string): string {
-  try {
-    // Match YYYY-MM-DD explicitly
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expiry);
-    if (!m) return expiry;
-
-    const y = Number(m[1]);
-    const mo = Number(m[2]);
-    const d = Number(m[3]);
-
-    // Construct LOCAL date (not UTC midnight)
-    const dt = new Date(y, mo - 1, d);
-
-    // Format in local time
-    return dt.toLocaleDateString(undefined, {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-    });
-  } catch {
-    return expiry;
-  }
 }
