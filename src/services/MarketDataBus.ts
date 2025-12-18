@@ -236,7 +236,24 @@ class MarketDataBus {
     socketHub.onTick(handler);
     socketHub.onMessage(handler);
 
+    // Resubscribe to all active subscriptions on reconnect
+    socketHub.onConnect(() => this.resubscribeAll());
+
     this.log("[MarketDataBus] Initialized");
+  }
+
+  /**
+   * Resubscribe to all active subscriptions.
+   * Called automatically on WebSocket reconnect.
+   */
+  private resubscribeAll(): void {
+    if (this.subscriptions.size === 0) return;
+
+    this.log("[MarketDataBus] Reconnected - resubscribing to", this.subscriptions.size, "symbols");
+
+    this.subscriptions.forEach((sub) => {
+      this.wireSubscribe(sub.symbol, sub.channel);
+    });
   }
 
   private handleMessage(msg: any): void {

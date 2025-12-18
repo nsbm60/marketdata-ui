@@ -6,3 +6,4 @@ export { default as OpenOrdersTable } from "./OpenOrdersTable";
 export { default as OrderHistoryTable } from "./OrderHistoryTable";
 export { default as CancelOrderModal } from "./CancelOrderModal";
 export { default as ModifyOrderModal } from "./ModifyOrderModal";
+export { default as OptionsAnalysisTable } from "./OptionsAnalysisTable";

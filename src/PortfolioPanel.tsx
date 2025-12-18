@@ -9,6 +9,7 @@ import {
   OrderHistoryTable,
   CancelOrderModal,
   ModifyOrderModal,
+  OptionsAnalysisTable,
 } from "./components/portfolio";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, getPrevCloseDateFromCache, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState, TimeframeOption } from "./services/marketState";
@@ -56,6 +57,9 @@ export default function PortfolioPanel() {
   // Order history (cancelled/filled orders)
   const [orderHistory, setOrderHistory] = useState<IbOrderHistory[]>([]);
 
+  // Tab for positions view: "positions" or "analysis"
+  const [positionsTab, setPositionsTab] = useState<"positions" | "analysis">("positions");
+
   // Market state for prevTradingDay and timeframes
   const marketState = useMarketState();
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem("portfolio.timeframe") ?? "1d");
@@ -69,11 +73,21 @@ export default function PortfolioPanel() {
   }, [marketState?.timeframes, timeframe]);
 
   // Build list of equity symbols for market data subscription
+  // Include both STK positions AND underlying symbols from options
   const equitySymbols = useMemo(() => {
     if (!accountState?.positions) return [];
-    return accountState.positions
-      .filter(p => p.secType === "STK")
-      .map(p => p.symbol.toUpperCase());
+    const symbols = new Set<string>();
+    accountState.positions.forEach(p => {
+      // Add equity positions
+      if (p.secType === "STK") {
+        symbols.add(p.symbol.toUpperCase());
+      }
+      // Also add underlying symbols from options (for Options Analysis)
+      if (p.secType === "OPT") {
+        symbols.add(p.symbol.toUpperCase());
+      }
+    });
+    return Array.from(symbols);
   }, [accountState?.positions]);
 
   // Subscribe to equity market data via MarketDataBus
@@ -669,9 +683,18 @@ export default function PortfolioPanel() {
     socketHub.onTick(handler);  // Option messages come through onTick
     socketHub.send({ type: "control", target: "ibAccount", op: "account_state" });
 
+    // Refresh account state on reconnect
+    const onReconnect = () => {
+      console.log("[PortfolioPanel] WebSocket reconnected, refreshing account state...");
+      setLoading(true);
+      socketHub.send({ type: "control", target: "ibAccount", op: "account_state" });
+    };
+    socketHub.onConnect(onReconnect);
+
     return () => {
       socketHub.offMessage(handler);
       socketHub.offTick(handler);
+      socketHub.offConnect(onReconnect);
     };
   }, []);
 
@@ -745,32 +768,71 @@ export default function PortfolioPanel() {
               {/* Positions with BUY/SELL buttons */}
               <section style={section}>
                 <div style={{ ...title, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span>Positions</span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, fontSize: 11 }}>
-                    <span>vs:</span>
-                    <select
-                      value={timeframe}
-                      onChange={(e) => setTimeframe(e.target.value)}
+                  {/* Tabs */}
+                  <div style={{ display: "flex", gap: 0 }}>
+                    <button
+                      onClick={() => setPositionsTab("positions")}
                       style={{
-                        padding: "4px 20px 4px 8px",
-                        fontSize: 11,
-                        lineHeight: 1.2,
+                        padding: "4px 12px",
                         border: "1px solid #d1d5db",
-                        borderRadius: 4,
-                        background: "white url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23666' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E\") no-repeat right 6px center",
-                        color: "#111",
-                        appearance: "none",
+                        borderRight: "none",
+                        borderRadius: "4px 0 0 4px",
+                        background: positionsTab === "positions" ? "#2563eb" : "white",
+                        color: positionsTab === "positions" ? "white" : "#374151",
+                        fontSize: 11,
+                        fontWeight: 500,
                         cursor: "pointer",
                       }}
                     >
-                      {(marketState?.timeframes ?? []).map((tf) => (
-                        <option key={tf.id} value={tf.id}>
-                          {formatCloseDateShort(tf.date)}{tf.label ? ` (${tf.label})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </span>
+                      Positions
+                    </button>
+                    <button
+                      onClick={() => setPositionsTab("analysis")}
+                      style={{
+                        padding: "4px 12px",
+                        border: "1px solid #d1d5db",
+                        borderRadius: "0 4px 4px 0",
+                        background: positionsTab === "analysis" ? "#2563eb" : "white",
+                        color: positionsTab === "analysis" ? "white" : "#374151",
+                        fontSize: 11,
+                        fontWeight: 500,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Options Analysis
+                    </button>
+                  </div>
+                  {/* Timeframe selector - only show for positions tab */}
+                  {positionsTab === "positions" && (
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, fontSize: 11 }}>
+                      <span>vs:</span>
+                      <select
+                        value={timeframe}
+                        onChange={(e) => setTimeframe(e.target.value)}
+                        style={{
+                          padding: "4px 20px 4px 8px",
+                          fontSize: 11,
+                          lineHeight: 1.2,
+                          border: "1px solid #d1d5db",
+                          borderRadius: 4,
+                          background: "white url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23666' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E\") no-repeat right 6px center",
+                          color: "#111",
+                          appearance: "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {(marketState?.timeframes ?? []).map((tf) => (
+                          <option key={tf.id} value={tf.id}>
+                            {formatCloseDateShort(tf.date)}{tf.label ? ` (${tf.label})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                  )}
                 </div>
+
+                {/* Positions Table */}
+                {positionsTab === "positions" && (
                 <div style={table}>
                   <div style={{ ...hdr, gridTemplateColumns: "75px 140px 36px 36px 65px 80px 65px 65px 100px 80px 130px" }}>
                     <div style={hdrCell}>Account</div>
@@ -975,6 +1037,15 @@ export default function PortfolioPanel() {
                     );
                   })}
                 </div>
+                )}
+
+                {/* Options Analysis Table */}
+                {positionsTab === "analysis" && (
+                  <OptionsAnalysisTable
+                    positions={accountState.positions}
+                    equityPrices={equityPrices}
+                  />
+                )}
               </section>
 
               {/* Cash */}

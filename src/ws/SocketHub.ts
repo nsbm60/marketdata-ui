@@ -10,15 +10,19 @@ import type { WireMessage, ControlAck, ControlRequest, TickEnvelope } from "./ws
 
 type MessageHandler = (msg: WireMessage) => void;
 type TickHandler = (tick: TickEnvelope) => void;
+type ConnectionHandler = () => void;
 
 class SocketHub {
   private socket: WebSocket | null = null;
   private connecting = false;
   private reconnectAttempts = 0;
   private sendQueue: string[] = [];
+  private wasConnected = false; // Track if we've ever connected (to detect reconnects)
 
   private messageHandlers = new Set<MessageHandler>();
   private tickHandlers = new Set<TickHandler>();
+  private connectHandlers = new Set<ConnectionHandler>();
+  private disconnectHandlers = new Set<ConnectionHandler>();
 
   // control.ack correlation by id
   private pendingAcks = new Map<
@@ -46,12 +50,30 @@ class SocketHub {
     this.socket = ws;
 
     ws.onopen = () => {
+      const isReconnect = this.wasConnected;
       this.connecting = false;
       this.reconnectAttempts = 0;
+      this.wasConnected = true;
+
+      if (isReconnect) {
+        console.log("[SocketHub] Reconnected to WebSocket");
+      } else {
+        console.log("[SocketHub] Connected to WebSocket");
+      }
+
       // flush queue
       while (this.sendQueue.length && ws.readyState === WebSocket.OPEN) {
         ws.send(this.sendQueue.shift()!);
       }
+
+      // Notify connect handlers (they can use this to refresh data)
+      this.connectHandlers.forEach((fn) => {
+        try {
+          fn();
+        } catch (e) {
+          console.error("[SocketHub] Connect handler error:", e);
+        }
+      });
     };
 
     ws.onmessage = (ev) => this.handleInbound(ev.data as string);
@@ -60,6 +82,19 @@ class SocketHub {
     };
     ws.onclose = () => {
       this.connecting = false;
+
+      if (this.wasConnected) {
+        console.log("[SocketHub] Disconnected from WebSocket, will reconnect...");
+        // Notify disconnect handlers
+        this.disconnectHandlers.forEach((fn) => {
+          try {
+            fn();
+          } catch (e) {
+            console.error("[SocketHub] Disconnect handler error:", e);
+          }
+        });
+      }
+
       this.scheduleReconnect();
     };
   }
@@ -78,6 +113,27 @@ class SocketHub {
   }
   public offTick(fn: TickHandler): void {
     this.tickHandlers.delete(fn);
+  }
+
+  /** Add/remove listeners for connection established (including reconnects). */
+  public onConnect(fn: ConnectionHandler): void {
+    this.connectHandlers.add(fn);
+  }
+  public offConnect(fn: ConnectionHandler): void {
+    this.connectHandlers.delete(fn);
+  }
+
+  /** Add/remove listeners for disconnection. */
+  public onDisconnect(fn: ConnectionHandler): void {
+    this.disconnectHandlers.add(fn);
+  }
+  public offDisconnect(fn: ConnectionHandler): void {
+    this.disconnectHandlers.delete(fn);
+  }
+
+  /** Check if currently connected. */
+  public isConnected(): boolean {
+    return this.socket?.readyState === WebSocket.OPEN;
   }
 
   /** Fire-and-forget send of a JSON-able object. */
