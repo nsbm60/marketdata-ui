@@ -1,5 +1,5 @@
 // src/PortfolioPanel.tsx
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
 import OptionTradeTicket from "./components/OptionTradeTicket";
@@ -21,8 +21,6 @@ import {
   IbOrderHistory,
   IbAccountState,
 } from "./types/portfolio";
-
-const DEBUG_MAX = 300;
 
 export default function PortfolioPanel() {
   const [loading, setLoading] = useState(true);
@@ -57,15 +55,6 @@ export default function PortfolioPanel() {
 
   // Order history (cancelled/filled orders)
   const [orderHistory, setOrderHistory] = useState<IbOrderHistory[]>([]);
-
-  // Debug — immortal + filtered + frozen
-  const [allDebugMsgs, setAllDebugMsgs] = useState<any[]>([]);
-  const [frozenDebug, setFrozenDebug] = useState<any[]>([]);
-  const [showControl, setShowControl] = useState(true);
-  const [showMdAll, setShowMdAll] = useState(false);
-  const [showIbAll, setShowIbAll] = useState(true);
-
-  const debugRef = useRef<HTMLDivElement>(null);
 
   // Market state for prevTradingDay and timeframes
   const marketState = useMarketState();
@@ -517,6 +506,19 @@ export default function PortfolioPanel() {
         if (!d) return;
         const exec = d.execution || d;
 
+        // Debug: log option executions to help diagnose position update issues
+        if (exec.secType === "OPT") {
+          console.log("[PortfolioPanel] Option execution received:", {
+            symbol: exec.symbol,
+            secType: exec.secType,
+            side: exec.side,
+            shares: exec.shares ?? exec.quantity,
+            strike: exec.strike,
+            expiry: exec.expiry,
+            right: exec.right,
+          });
+        }
+
         const sideRaw = String(exec.side ?? "").toUpperCase();
         const isBuy = sideRaw === "BOT" || sideRaw === "BUY";
 
@@ -544,14 +546,54 @@ export default function PortfolioPanel() {
 
           const newExecs = [newExec, ...prev.executions].slice(0, 50);
 
+          // Normalize right field for comparison ("Call" -> "C", "Put" -> "P")
+          const normalizeRight = (r: string | undefined): string | undefined => {
+            if (!r) return undefined;
+            if (r === "Call" || r === "C") return "C";
+            if (r === "Put" || r === "P") return "P";
+            return r;
+          };
+
+          // Normalize expiry for comparison (remove dashes for YYYYMMDD format)
+          const normalizeExpiry = (e: string | undefined): string | undefined => {
+            if (!e) return undefined;
+            return e.replace(/-/g, "");
+          };
+
           const positions = [...prev.positions];
+          const execRight = normalizeRight(newExec.right);
+          const execExpiry = normalizeExpiry(newExec.expiry);
+
           const idx = positions.findIndex(
             (p) =>
               p.account === newExec.account &&
               p.symbol === newExec.symbol &&
               p.secType === newExec.secType &&
-              p.currency === newExec.currency
+              p.currency === newExec.currency &&
+              // For options, also match on strike/expiry/right (normalized)
+              (newExec.secType !== "OPT" || (
+                p.strike === newExec.strike &&
+                normalizeExpiry(p.expiry) === execExpiry &&
+                normalizeRight(p.right) === execRight
+              ))
           );
+
+          // Debug: log position matching result for options
+          if (newExec.secType === "OPT") {
+            console.log("[PortfolioPanel] Option position match:", {
+              found: idx >= 0,
+              execFields: { strike: newExec.strike, expiry: newExec.expiry, right: newExec.right, execExpiry, execRight },
+              existingPositions: positions
+                .filter(p => p.secType === "OPT" && p.symbol === newExec.symbol)
+                .map(p => ({
+                  strike: p.strike,
+                  expiry: p.expiry,
+                  right: p.right,
+                  normalizedExpiry: normalizeExpiry(p.expiry),
+                  normalizedRight: normalizeRight(p.right),
+                })),
+            });
+          }
 
           const qtyDelta = isBuy ? newExec.quantity : -newExec.quantity;
 
@@ -561,8 +603,10 @@ export default function PortfolioPanel() {
             let newAvg = pos.avgCost;
 
             if (isBuy && qtyDelta > 0) {
+              // For options, execution price is per-share but avgCost is per-contract
+              const execCost = newExec.secType === "OPT" ? newExec.price * 100 : newExec.price;
               newAvg = newQty > 0
-                ? (pos.quantity * pos.avgCost + qtyDelta * newExec.price) / newQty
+                ? (pos.quantity * pos.avgCost + qtyDelta * execCost) / newQty
                 : 0;
             }
 
@@ -572,14 +616,21 @@ export default function PortfolioPanel() {
               positions[idx] = { ...pos, quantity: newQty, avgCost: newAvg, lastUpdated: newExec.ts };
             }
           } else if (isBuy) {
+            // For options, IB reports avgCost as cost per contract (price * 100)
+            // Execution price is per-share, so multiply by 100 for options
+            const avgCost = newExec.secType === "OPT" ? newExec.price * 100 : newExec.price;
             positions.push({
               account: newExec.account,
               symbol: newExec.symbol,
               secType: newExec.secType,
               currency: newExec.currency,
               quantity: newExec.quantity,
-              avgCost: newExec.price,
+              avgCost,
               lastUpdated: newExec.ts,
+              // Include option fields if present
+              strike: newExec.strike,
+              expiry: newExec.expiry,
+              right: newExec.right,
             });
           }
 
@@ -623,41 +674,6 @@ export default function PortfolioPanel() {
       socketHub.offTick(handler);
     };
   }, []);
-
-  // IMMORTAL DEBUG — freezes when all filters off
-  const anyFilterOn = showControl || showMdAll || showIbAll;
-
-  const filteredDebug = anyFilterOn
-    ? allDebugMsgs.filter(
-        (m) =>
-          (m?.type?.startsWith("control") && showControl) ||
-          (m?.topic?.startsWith("md.") && showMdAll) ||
-          (m?.topic?.startsWith("ib.") && showIbAll)
-      )
-    : frozenDebug;
-
-  // Update frozen state whenever filters are on
-  useEffect(() => {
-    if (anyFilterOn) {
-      const filtered = allDebugMsgs.filter(
-        (m) =>
-          (m?.type?.startsWith("control") && showControl) ||
-          (m?.topic?.startsWith("md.") && showMdAll) ||
-          (m?.topic?.startsWith("ib.") && showIbAll)
-      );
-      setFrozenDebug(filtered);
-    }
-  }, [allDebugMsgs, showControl, showMdAll, showIbAll, anyFilterOn]);
-
-useEffect(() => {
-  if (debugRef.current) {
-    const { scrollTop, scrollHeight, clientHeight } = debugRef.current;
-    const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10;
-    if (isAtBottom) {
-      debugRef.current.scrollTop = scrollHeight;
-    }
-  }
-}, [filteredDebug]);
 
   return (
     <div style={shell}>
@@ -776,10 +792,22 @@ useEffect(() => {
                   {accountState.positions
                     .slice()
                     .sort((a, b) => {
-                      // Sort by symbol, then by secType (STK before OPT), then by strike
+                      // Sort by symbol, then by secType (STK before OPT)
                       if (a.symbol !== b.symbol) return a.symbol.localeCompare(b.symbol);
                       if (a.secType !== b.secType) return a.secType === "STK" ? -1 : 1;
-                      if (a.strike !== b.strike) return (a.strike || 0) - (b.strike || 0);
+                      // For options: sort by expiry, then Call/Put (calls first), then strike
+                      if (a.secType === "OPT" && b.secType === "OPT") {
+                        // Expiry (YYYYMMDD format, so string comparison works)
+                        const expiryA = a.expiry || "";
+                        const expiryB = b.expiry || "";
+                        if (expiryA !== expiryB) return expiryA.localeCompare(expiryB);
+                        // Call before Put (C < P alphabetically, or normalize)
+                        const rightA = (a.right === "Call" || a.right === "C") ? "C" : "P";
+                        const rightB = (b.right === "Call" || b.right === "C") ? "C" : "P";
+                        if (rightA !== rightB) return rightA.localeCompare(rightB);
+                        // Then by strike
+                        if (a.strike !== b.strike) return (a.strike || 0) - (b.strike || 0);
+                      }
                       return 0;
                     })
                     .map((p, i) => {
@@ -962,8 +990,13 @@ useEffect(() => {
                 onCancel={(o) => setCancellingOrder(o)}
               />
 
-              {/* Order History (Fills + Cancellations) */}
-              <OrderHistoryTable orders={orderHistory} />
+              {/* Order History (Fills + Cancellations) - sorted newest first */}
+              <OrderHistoryTable orders={[...orderHistory].sort((a, b) => {
+                // Sort by timestamp descending (newest first)
+                const tsA = a.ts || "";
+                const tsB = b.ts || "";
+                return tsB.localeCompare(tsA);
+              })} />
               </div>
 
             </div>
@@ -1023,69 +1056,6 @@ useEffect(() => {
             onClose={() => setModifyingOrder(null)}
           />
         )}
-
-        {/* Debug — immortal + frozen */}
-        <section style={{ ...section, marginTop: 20 }}>
-          <div style={title}>
-            Debug ({filteredDebug.length}/{allDebugMsgs.length})
-            {!anyFilterOn && <span style={{ color: "#f59e0b", marginLeft: 8 }}>⏸ FROZEN</span>}
-          </div>
-          <div style={filters}>
-            <label><input type="checkbox" checked={showControl} onChange={e => setShowControl(e.target.checked)} /> control</label>
-            <label><input type="checkbox" checked={showMdAll} onChange={e => setShowMdAll(e.target.checked)} /> md.*</label>
-            <label><input type="checkbox" checked={showIbAll} onChange={e => setShowIbAll(e.target.checked)} /> ib.*</label>
-          </div>
-
-          {/* COPY LAST MESSAGE */}
-          <div style={{ padding: "8px 12px", background: "#111", borderTop: "1px solid #444", fontSize: 11, display: "flex", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => {
-                  const last = allDebugMsgs[allDebugMsgs.length - 1];
-                  if (last) {
-                    navigator.clipboard.writeText(JSON.stringify(last, null, 2));
-                    alert("Last message copied to clipboard!");
-                  }
-                }}
-                style={{
-                  padding: "6px 12px",
-                  background: "#333",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                }}
-              >
-                Copy Last Message
-              </button>
-              <button
-                onClick={() => {
-                  setAllDebugMsgs([]);
-                  setFrozenDebug([]);
-                }}
-                style={{
-                  padding: "6px 12px",
-                  background: "#dc2626",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                }}
-              >
-                Clear
-              </button>
-            </div>
-            <span style={{ color: "#888" }}>Stored: {allDebugMsgs.length}</span>
-          </div>
-
-          <div ref={debugRef} style={debugBox}>
-            {filteredDebug.map((m, i) => (
-              <pre key={i} style={{ margin: "2px 0", fontSize: 10 }}>
-                {JSON.stringify(m, null, 2)}
-              </pre>
-            ))}
-          </div>
-        </section>
       </div>
     </div>
   );
@@ -1141,26 +1111,11 @@ const cellBorder = { borderRight: "1px solid #eee", paddingRight: 4, paddingLeft
 const cellEllipsis = { ...cellBorder, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, monospace", fontSize: 10 };
 const right = { ...cellBorder, textAlign: "right" as const };
 const rightMono = { ...right, fontFamily: "ui-monospace, monospace" };
-const rightMonoBold = { ...rightMono, fontWeight: 600 };
 const center = { ...cellBorder, textAlign: "center" as const };
 const centerBold = { ...center, fontWeight: 600 };
-const bold = { fontWeight: 600 };
 const gray10 = { ...cellBorder, fontSize: 10, color: "#666" };
-const gray9 = { fontSize: 9, color: "#888" };
-
-const timeHeader = { ...center, fontSize: 10, color: "#374151" };
-const timeCell = {
-  ...center,
-  fontSize: 10,
-  color: "#555",
-  fontFeatureSettings: "'tnum'",
-  letterSpacing: "0.5px",
-};
 
 const empty = { padding: 40, textAlign: "center" as const, color: "#666", fontSize: 14 };
-const emptyRow = { padding: "8px 10px", color: "#888", fontSize: 12 };
-const filters = { display: "flex", gap: 16, padding: "6px 10px", fontSize: 12 };
-const debugBox = { height: 200, overflow: "auto", background: "#0d1117", color: "#c9d1d9", padding: "8px", fontFamily: "ui-monospace, monospace", fontSize: 11, borderTop: "1px solid #30363d" };
 
 const iconBtn = {
   padding: "4px 10px",
