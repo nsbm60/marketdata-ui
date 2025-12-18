@@ -16,7 +16,7 @@ type Props = {
 
 export default function TradeTicket({ symbol, account, defaultSide = "BUY", last: initialLast, bid: initialBid, ask: initialAsk, onClose }: Props) {
   const [side, setSide] = useState<"BUY" | "SELL">(defaultSide);
-  const [quantity, setQuantity] = useState("");
+  const [quantity, setQuantity] = useState("100");
   const [orderType, setOrderType] = useState<"MKT" | "LMT" | "STP" | "STPLMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
@@ -25,9 +25,14 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
   const [last, setLast] = useState(initialLast !== undefined ? initialLast.toFixed(4) : "—");
   const [bid, setBid] = useState(initialBid !== undefined ? initialBid.toFixed(4) : "—");
   const [ask, setAsk] = useState(initialAsk !== undefined ? initialAsk.toFixed(4) : "—");
+  const [mid, setMid] = useState(
+    initialBid !== undefined && initialAsk !== undefined
+      ? ((initialBid + initialAsk) / 2).toFixed(4)
+      : "—"
+  );
 
   // Throttling refs
-  const pendingRef = useRef<{ last?: string; bid?: string; ask?: string }>({});
+  const pendingRef = useRef<{ last?: string; bid?: string; ask?: string; mid?: string }>({});
   const lastFlushRef = useRef<number>(0);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -44,6 +49,7 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
       if (p.last !== undefined) setLast(p.last);
       if (p.bid !== undefined) setBid(p.bid);
       if (p.ask !== undefined) setAsk(p.ask);
+      if (p.mid !== undefined) setMid(p.mid);
       pendingRef.current = {};
       lastFlushRef.current = Date.now();
       timeoutRef.current = null;
@@ -72,6 +78,11 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
 
       if (d.bidPrice !== undefined) pendingRef.current.bid = d.bidPrice.toFixed(4);
       if (d.askPrice !== undefined) pendingRef.current.ask = d.askPrice.toFixed(4);
+
+      // Calculate mid if we have both bid and ask
+      if (d.bidPrice !== undefined && d.askPrice !== undefined) {
+        pendingRef.current.mid = ((d.bidPrice + d.askPrice) / 2).toFixed(4);
+      }
 
       // Throttle: flush if enough time passed, otherwise schedule
       const now = Date.now();
@@ -158,19 +169,32 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
         <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer" }}>×</button>
       </div>
 
-      {/* LIVE PRICES */}
+      {/* LIVE PRICES - click bid/mid/ask to populate limit price */}
       <div style={{
         padding: "10px 16px",
         background: "#f0fdf4",
         borderBottom: "1px solid #bbf7d0",
         fontSize: 13,
         display: "grid",
-        gridTemplateColumns: "1fr 1fr 1fr",
+        gridTemplateColumns: "1fr 1fr 1fr 1fr",
         textAlign: "center",
       }}>
         <div><strong>Last</strong><br />{last}</div>
-        <div><strong>Bid</strong><br />{bid}</div>
-        <div><strong>Ask</strong><br />{ask}</div>
+        <div
+          onClick={() => bid !== "—" && setLimitPrice(bid)}
+          style={{ cursor: bid !== "—" ? "pointer" : "default" }}
+          title="Click to use as limit price"
+        ><strong>Bid</strong><br />{bid}</div>
+        <div
+          onClick={() => mid !== "—" && setLimitPrice(mid)}
+          style={{ cursor: mid !== "—" ? "pointer" : "default" }}
+          title="Click to use as limit price"
+        ><strong>Mid</strong><br />{mid}</div>
+        <div
+          onClick={() => ask !== "—" && setLimitPrice(ask)}
+          style={{ cursor: ask !== "—" ? "pointer" : "default" }}
+          title="Click to use as limit price"
+        ><strong>Ask</strong><br />{ask}</div>
       </div>
 
       <div style={{ padding: 16 }}>

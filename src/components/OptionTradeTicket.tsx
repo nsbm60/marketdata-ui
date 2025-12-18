@@ -48,7 +48,7 @@ export default function OptionTradeTicket({
   onClose,
 }: Props) {
   const [side, setSide] = useState<"BUY" | "SELL">(defaultSide);
-  const [quantity, setQuantity] = useState("");
+  const [quantity, setQuantity] = useState("1");
   const [orderType, setOrderType] = useState<"MKT" | "LMT" | "STP" | "STPLMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
@@ -160,8 +160,10 @@ export default function OptionTradeTicket({
     };
 
     socketHub.onMessage(handler);
+    socketHub.onTick(handler);  // Option messages come through onTick
     return () => {
       socketHub.offMessage(handler);
+      socketHub.offTick(handler);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, [underlying, strike, expiry, right]);
@@ -246,7 +248,7 @@ export default function OptionTradeTicket({
         </div>
       </div>
 
-      {/* Live Prices */}
+      {/* Live Prices - click bid/mid/ask to populate limit price */}
       <div style={{
         padding: "10px 16px",
         background: "#f0fdf4",
@@ -258,9 +260,21 @@ export default function OptionTradeTicket({
         textAlign: "center",
       }}>
         <div><strong>Last</strong><br />{liveLast}</div>
-        <div><strong>Bid</strong><br />{liveBid}</div>
-        <div><strong>Mid</strong><br />{liveMid}</div>
-        <div><strong>Ask</strong><br />{liveAsk}</div>
+        <div
+          onClick={() => liveBid !== "—" && setLimitPrice(liveBid)}
+          style={{ cursor: liveBid !== "—" ? "pointer" : "default" }}
+          title="Click to use as limit price"
+        ><strong>Bid</strong><br />{liveBid}</div>
+        <div
+          onClick={() => liveMid !== "—" && setLimitPrice(liveMid)}
+          style={{ cursor: liveMid !== "—" ? "pointer" : "default" }}
+          title="Click to use as limit price"
+        ><strong>Mid</strong><br />{liveMid}</div>
+        <div
+          onClick={() => liveAsk !== "—" && setLimitPrice(liveAsk)}
+          style={{ cursor: liveAsk !== "—" ? "pointer" : "default" }}
+          title="Click to use as limit price"
+        ><strong>Ask</strong><br />{liveAsk}</div>
       </div>
 
       {/* Greeks (always shown, updates live) */}

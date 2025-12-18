@@ -35,7 +35,7 @@ export default function OrderHistoryTable({ orders }: Props) {
                 symbolDisplay = (
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 11 }}>
-                      {h.symbol} {h.strike.toFixed(0)} {rightLabel}
+                      {h.symbol} {h.strike % 1 === 0 ? h.strike.toFixed(0) : h.strike} {rightLabel}
                     </div>
                     <div style={{ fontSize: 9, color: "#666" }}>
                       {formattedExpiry}

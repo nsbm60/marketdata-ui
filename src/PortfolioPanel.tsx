@@ -116,7 +116,12 @@ export default function PortfolioPanel() {
 
   // Fetch close prices for option positions
   useEffect(() => {
-    if (!accountState?.positions || !marketState?.prevTradingDay) return;
+    if (!accountState?.positions || !marketState?.timeframes) return;
+
+    // Find the date for the selected timeframe
+    const tfInfo = marketState.timeframes.find(t => t.id === timeframe);
+    const closeDate = tfInfo?.date || marketState.prevTradingDay;
+    if (!closeDate) return;
 
     const optionPositions = accountState.positions.filter(p =>
       p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
@@ -129,10 +134,10 @@ export default function PortfolioPanel() {
       buildOsiSymbol(p.symbol, p.expiry!, p.right!, p.strike!)
     );
 
-    // Fetch option close prices
+    // Fetch option close prices for the selected timeframe
     socketHub.sendControl("option_close_prices", {
       symbols: osiSymbols,
-      prev_trading_day: marketState.prevTradingDay,
+      prev_trading_day: closeDate,
     }, { timeoutMs: 10000 }).then(ack => {
       if (ack.ok && ack.data) {
         const data = (ack.data as any).data || ack.data;
@@ -150,7 +155,7 @@ export default function PortfolioPanel() {
     }).catch(err => {
       console.error("[PortfolioPanel] Failed to fetch option close prices:", err);
     });
-  }, [accountState?.positions, marketState?.prevTradingDay]);
+  }, [accountState?.positions, marketState?.timeframes, timeframe]);
 
   const openTradeTicket = (
     symbol: string,
@@ -669,7 +674,53 @@ useEffect(() => {
         {accountState ? (
           <>
             <div style={summary}>
-              positions: {accountState.positions.length} · cash: {accountState.cash.length} · execs: {accountState.executions.length}
+              {(() => {
+                // Calculate total market value
+                let totalMktValue = 0;
+                accountState.positions.forEach((p) => {
+                  let priceKey = p.symbol.toUpperCase();
+                  let priceData;
+                  if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+                    priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
+                    priceData = getChannelPrices("option").get(priceKey);
+                  } else {
+                    priceData = equityPrices.get(priceKey);
+                  }
+                  const lastPrice = priceData?.last || 0;
+                  // Fallback to close prices if no live price
+                  let displayPrice = lastPrice;
+                  if (lastPrice === 0) {
+                    if (p.secType === "OPT") {
+                      const optPriceData = optionClosePrices.get(priceKey);
+                      if (optPriceData?.todayClose) displayPrice = optPriceData.todayClose;
+                    } else if (p.secType === "STK") {
+                      const equityCloseData = closePrices.get(p.symbol);
+                      if (equityCloseData?.todayClose) displayPrice = equityCloseData.todayClose;
+                    }
+                  }
+                  const contractMultiplier = p.secType === "OPT" ? 100 : 1;
+                  totalMktValue += p.quantity * displayPrice * contractMultiplier;
+                });
+                // Get total cash
+                const totalCash = accountState.cash.reduce((sum, c) => sum + c.amount, 0);
+                const totalPortfolio = totalMktValue + totalCash;
+                return (
+                  <>
+                    <span style={{ marginRight: 20, fontWeight: 700, fontSize: 13 }}>
+                      Portfolio: ${totalPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span style={{ marginRight: 16, fontWeight: 600 }}>
+                      Mkt Value: ${totalMktValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span style={{ marginRight: 16, fontWeight: 600 }}>
+                      Cash: ${totalCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span style={{ color: "#666", fontWeight: 500 }}>
+                      ({accountState.positions.length} positions)
+                    </span>
+                  </>
+                );
+              })()}
             </div>
 
             <div style={gridWrap}>
@@ -685,12 +736,15 @@ useEffect(() => {
                       value={timeframe}
                       onChange={(e) => setTimeframe(e.target.value)}
                       style={{
-                        padding: "2px 6px",
+                        padding: "4px 20px 4px 8px",
                         fontSize: 11,
+                        lineHeight: 1.2,
                         border: "1px solid #d1d5db",
                         borderRadius: 4,
-                        background: "white",
+                        background: "white url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23666' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E\") no-repeat right 6px center",
                         color: "#111",
+                        appearance: "none",
+                        cursor: "pointer",
                       }}
                     >
                       {(marketState?.timeframes ?? []).map((tf) => (
@@ -793,7 +847,7 @@ useEffect(() => {
                       symbolDisplay = (
                         <div>
                           <div style={{ fontWeight: 600, fontSize: 11 }}>
-                            {p.symbol} {p.strike.toFixed(0)} {rightLabel}
+                            {p.symbol} {p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike} {rightLabel}
                           </div>
                           <div style={{ fontSize: 9, color: "#666" }}>
                             {formattedExpiry}
@@ -852,7 +906,14 @@ useEffect(() => {
                               const freshPriceData = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
                                 ? getChannelPrices("option").get(buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike))
                                 : equityPrices.get(p.symbol.toUpperCase());
-                              openTradeTicket(p.symbol, p.account, "BUY", p.secType, optionDetails, freshPriceData);
+                              // Calculate mid if we have bid and ask
+                              const marketData = freshPriceData ? {
+                                ...freshPriceData,
+                                mid: (freshPriceData.bid !== undefined && freshPriceData.ask !== undefined)
+                                  ? (freshPriceData.bid + freshPriceData.ask) / 2
+                                  : undefined
+                              } : undefined;
+                              openTradeTicket(p.symbol, p.account, "BUY", p.secType, optionDetails, marketData);
                             }}
                             style={{ ...iconBtn, background: "#dcfce7", color: "#166534" }}
                           >
@@ -868,7 +929,14 @@ useEffect(() => {
                               const freshPriceData = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
                                 ? getChannelPrices("option").get(buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike))
                                 : equityPrices.get(p.symbol.toUpperCase());
-                              openTradeTicket(p.symbol, p.account, "SELL", p.secType, optionDetails, freshPriceData);
+                              // Calculate mid if we have bid and ask
+                              const marketData = freshPriceData ? {
+                                ...freshPriceData,
+                                mid: (freshPriceData.bid !== undefined && freshPriceData.ask !== undefined)
+                                  ? (freshPriceData.bid + freshPriceData.ask) / 2
+                                  : undefined
+                              } : undefined;
+                              openTradeTicket(p.symbol, p.account, "SELL", p.secType, optionDetails, marketData);
                             }}
                             style={{ ...iconBtn, background: "#fce7f3", color: "#831843" }}
                           >

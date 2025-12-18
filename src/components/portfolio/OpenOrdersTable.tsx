@@ -39,7 +39,7 @@ export default function OpenOrdersTable({ orders, onModify, onCancel }: Props) {
                 symbolDisplay = (
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 11 }}>
-                      {o.symbol} {o.strike.toFixed(0)} {rightLabel}
+                      {o.symbol} {o.strike % 1 === 0 ? o.strike.toFixed(0) : o.strike} {rightLabel}
                     </div>
                     <div style={{ fontSize: 9, color: "#666" }}>
                       {formattedExpiry}
