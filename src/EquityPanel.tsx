@@ -8,6 +8,7 @@ import { useMarketState, TimeframeOption } from "./services/marketState";
 import { useThrottledMarketPrices } from "./hooks/useMarketData";
 import { PriceData } from "./services/MarketDataBus";
 import { isNum, fmtPrice } from "./utils/formatters";
+import { useAppState } from "./state/useAppState";
 
 const LS_APPLIED = "wl.applied";
 const LS_INPUT = "wl.input";
@@ -66,18 +67,13 @@ export default function EquityPanel({
     fetchClosePrices(symbols, timeframe).then(setClosePrices);
   }, [symbols.join(","), timeframe]);
 
-  /* ---------------- WS status (simple) ---------------- */
-  const [wsStatus, setWsStatus] = useState<"idle"|"connecting"|"open"|"closed">("idle");
-
-  useEffect(() => {
-    socketHub.connect();
-    setWsStatus("connecting");
-    const onAny = () => {
-      if (wsStatus !== "open") setWsStatus("open");
-    };
-    socketHub.onMessage(onAny);
-    return () => socketHub.offMessage(onAny);
-  }, []);
+  /* ---------------- WS status from app state ---------------- */
+  const { state: appState } = useAppState();
+  const wsStatus = appState.connection.websocket === "connected"
+    ? "open"
+    : appState.connection.websocket === "connecting"
+      ? "connecting"
+      : "closed";
 
   /* ---------------- MARKET DATA via MarketDataBus ---------------- */
   // When paused, pass empty array to avoid subscriptions

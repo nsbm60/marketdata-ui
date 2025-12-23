@@ -1,31 +1,21 @@
 // src/TwoPane.tsx
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import EquityPanel from "./EquityPanel";
 import OptionPanel from "./OptionPanel";
 import PortfolioPanel from "./PortfolioPanel";
 import ConnectionStatus from "./components/shared/ConnectionStatus";
 import { socketHub } from "./ws/SocketHub";
+import { useAppState } from "./state/useAppState";
 
 type TabId = "market" | "portfolio";
 
 export default function TwoPane() {
   const [selected, setSelected] = useState<string>("");
   const [activeTab, setActiveTab] = useState<TabId>("market");
-  const [wsConnected, setWsConnected] = useState(() => socketHub.isConnected());
 
-  // Track WebSocket connection status
-  useEffect(() => {
-    const onConnect = () => setWsConnected(true);
-    const onDisconnect = () => setWsConnected(false);
-
-    socketHub.onConnect(onConnect);
-    socketHub.onDisconnect(onDisconnect);
-
-    return () => {
-      socketHub.offConnect(onConnect);
-      socketHub.offDisconnect(onDisconnect);
-    };
-  }, []);
+  // Get WebSocket connection status from app state
+  const { state } = useAppState();
+  const wsConnected = state.connection.websocket === "connected";
 
   const handleSelect = (symbol: string) => {
     const und = String(symbol || "").toUpperCase();

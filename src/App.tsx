@@ -2,6 +2,7 @@
 import { useEffect } from "react";
 import { socketHub } from "./ws/SocketHub";
 import { getMarketState } from "./services/marketState";
+import { AppStateProvider } from "./state/AppStateContext";
 import TwoPane from "./TwoPane";
 
 export default function App() {
@@ -14,9 +15,11 @@ export default function App() {
   }, []);
 
   return (
-    <div style={root as any}>
-      <TwoPane />
-    </div>
+    <AppStateProvider>
+      <div style={root as any}>
+        <TwoPane />
+      </div>
+    </AppStateProvider>
   );
 }
 
