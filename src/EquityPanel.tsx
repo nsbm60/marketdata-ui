@@ -147,9 +147,6 @@ export default function EquityPanel({
       <div style={header as any}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>Watchlist</div>
-          <span style={{ marginLeft: "auto", fontSize: 12, color: wsStatus === "open" ? "#137333" : "#666" }}>
-            WS: {wsStatus}
-          </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <input
@@ -168,12 +165,17 @@ export default function EquityPanel({
           <button onClick={actReplace} style={btn() as any}>Replace</button>
           <button onClick={actClear} style={btn({ variant: "secondary" }) as any}>Clear</button>
           <button onClick={actPurge} style={linkBtn() as any}>Purge saved</button>
-          <span style={{ marginLeft: "auto", fontSize: 12 }}>
-            Equity:
-            <button onClick={togglePaused} style={toggle(!paused) as any}>
-              {paused ? "Paused" : "Active"}
-            </button>
-          </span>
+          <button
+            onClick={togglePaused}
+            disabled={wsStatus !== "open"}
+            style={feedButton(wsStatus, paused) as any}
+            title={wsStatus !== "open" ? `WebSocket ${wsStatus}` : (paused ? "Click to resume" : "Click to pause")}
+          >
+            {wsStatus !== "open"
+              ? (wsStatus === "connecting" ? "Connecting…" : "Disconnected")
+              : (paused ? "Paused" : "Live")
+            }
+          </button>
         </div>
         {symbols.length > 0 && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -211,6 +213,7 @@ export default function EquityPanel({
                 borderRadius: 4,
                 background: "white",
                 color: "#111",
+                colorScheme: "light",
               }}
             >
               {(marketState?.timeframes ?? []).map((tf) => (
@@ -431,14 +434,32 @@ function linkBtn() {
     textDecoration: "underline",
   };
 }
-function toggle(on: boolean) {
+function feedButton(wsStatus: string, paused: boolean) {
+  const isConnected = wsStatus === "open";
+  const isConnecting = wsStatus === "connecting";
+
+  if (!isConnected) {
+    return {
+      fontSize: 11,
+      padding: "4px 10px",
+      borderRadius: 6,
+      border: "1px solid #ccc",
+      background: isConnecting ? "#fef3c7" : "#fee2e2",
+      color: isConnecting ? "#92400e" : "#991b1b",
+      cursor: "not-allowed",
+      opacity: 0.8,
+    };
+  }
+
   return {
     fontSize: 11,
-    padding: "4px 8px",
+    padding: "4px 10px",
     borderRadius: 6,
-    border: on ? "2px solid #1e90ff" : "1px solid #ccc",
-    background: on ? "#eef6ff" : "#fff",
+    border: paused ? "1px solid #d97706" : "2px solid #16a34a",
+    background: paused ? "#fef3c7" : "#dcfce7",
+    color: paused ? "#92400e" : "#166534",
     cursor: "pointer",
+    fontWeight: 500,
   };
 }
 function chip() {

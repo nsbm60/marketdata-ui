@@ -1,8 +1,9 @@
 // src/TwoPane.tsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import EquityPanel from "./EquityPanel";
 import OptionPanel from "./OptionPanel";
 import PortfolioPanel from "./PortfolioPanel";
+import ConnectionStatus from "./components/shared/ConnectionStatus";
 import { socketHub } from "./ws/SocketHub";
 
 type TabId = "market" | "portfolio";
@@ -10,6 +11,21 @@ type TabId = "market" | "portfolio";
 export default function TwoPane() {
   const [selected, setSelected] = useState<string>("");
   const [activeTab, setActiveTab] = useState<TabId>("market");
+  const [wsConnected, setWsConnected] = useState(() => socketHub.isConnected());
+
+  // Track WebSocket connection status
+  useEffect(() => {
+    const onConnect = () => setWsConnected(true);
+    const onDisconnect = () => setWsConnected(false);
+
+    socketHub.onConnect(onConnect);
+    socketHub.onDisconnect(onDisconnect);
+
+    return () => {
+      socketHub.offConnect(onConnect);
+      socketHub.offDisconnect(onDisconnect);
+    };
+  }, []);
 
   const handleSelect = (symbol: string) => {
     const und = String(symbol || "").toUpperCase();
@@ -35,20 +51,23 @@ export default function TwoPane() {
     <div style={root as any}>
       {/* Tab bar */}
       <div style={tabBar as any}>
-        <button
-          type="button"
-          onClick={() => setActiveTab("market")}
-          style={tabButton(activeTab === "market") as any}
-        >
-          Watchlist &amp; Options
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("portfolio")}
-          style={tabButton(activeTab === "portfolio") as any}
-        >
-          Portfolio
-        </button>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 4 }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab("market")}
+            style={tabButton(activeTab === "market") as any}
+          >
+            Watchlist &amp; Options
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("portfolio")}
+            style={tabButton(activeTab === "portfolio") as any}
+          >
+            Portfolio
+          </button>
+        </div>
+        <ConnectionStatus connected={wsConnected} label="WebSocket" />
       </div>
 
      {/* Tab content */}
@@ -95,8 +114,8 @@ const root = {
 
 const tabBar = {
   display: "flex",
-  alignItems: "flex-end",
-  gap: 4,
+  alignItems: "center",
+  justifyContent: "space-between",
   padding: "8px 12px 0 12px",
   borderBottom: "1px solid #e5e7eb",
   background: "#f9fafb",

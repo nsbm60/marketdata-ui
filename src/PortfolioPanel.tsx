@@ -11,6 +11,7 @@ import {
   ModifyOrderModal,
   OptionsAnalysisTable,
 } from "./components/portfolio";
+import ConnectionStatus from "./components/shared/ConnectionStatus";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, getPrevCloseDateFromCache, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState, TimeframeOption } from "./services/marketState";
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
@@ -28,6 +29,7 @@ export default function PortfolioPanel() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [accountState, setAccountState] = useState<IbAccountState | null>(null);
+  const [ibConnected, setIbConnected] = useState<boolean | null>(null);
 
   // Trade ticket
   const [showTradeTicket, setShowTradeTicket] = useState(false);
@@ -93,6 +95,13 @@ export default function PortfolioPanel() {
   // Subscribe to equity market data via MarketDataBus
   // Throttle to 250ms (4 updates/sec) for readability
   const equityPrices = useThrottledMarketPrices(equitySymbols, "equity", 250);
+
+  // Debug: log when equity symbols change
+  useEffect(() => {
+    if (equitySymbols.length > 0) {
+      console.log("[PortfolioPanel] Equity symbols for subscription:", equitySymbols);
+    }
+  }, [equitySymbols.join(",")]);
 
   // Listen to option channel updates (backend manages option subscriptions)
   // Throttle to 250ms for consistency
@@ -209,7 +218,9 @@ export default function PortfolioPanel() {
 
   // Tell backend to subscribe to portfolio option contracts AND register interest with UI bridge
   useEffect(() => {
+    console.log("[PortfolioPanel] optionOsiSymbols changed:", optionOsiSymbols.length, "symbols");
     if (optionOsiSymbols.length > 0) {
+      console.log("[PortfolioPanel] Subscribing to option contracts:", optionOsiSymbols);
       // 1. Register interest with UI bridge so it forwards option messages to this client
       socketHub.send({
         type: "subscribe",
@@ -229,6 +240,7 @@ export default function PortfolioPanel() {
     // Cleanup: unsubscribe when component unmounts or symbols change
     return () => {
       if (optionOsiSymbols.length > 0) {
+        console.log("[PortfolioPanel] Cleanup: unsubscribing from option contracts:", optionOsiSymbols);
         socketHub.send({
           type: "unsubscribe",
           channels: ["md.option.quote", "md.option.trade", "md.option.greeks"],
@@ -249,15 +261,26 @@ export default function PortfolioPanel() {
         snapshot = m;
       }
 
+      // Log all ib.* messages to trace what's arriving
+      if (snapshot?.topic?.startsWith("ib.")) {
+        console.log("[PortfolioPanel] IB message received:", snapshot.topic);
+      }
+
       // Initial snapshot
       if (snapshot.type === "control.ack" && snapshot.op === "account_state") {
         if (!snapshot.ok) {
           setError(snapshot.error || "Error");
+          setIbConnected(false);  // Mark as disconnected on error
           setLoading(false);
           return;
         }
 
         const raw = snapshot.data?.data || snapshot.data || {};
+
+        // Parse IB Gateway connection status
+        if (typeof raw.ib_connected === "boolean") {
+          setIbConnected(raw.ib_connected);
+        }
 
         const positions = (raw.positions_raw || []).map((p: any) => ({
           account: String(p.account ?? ""),
@@ -319,6 +342,12 @@ export default function PortfolioPanel() {
           // Only show active orders (Submitted/PreSubmitted)
           .filter((o: IbOpenOrder) => o.status === "Submitted" || o.status === "PreSubmitted");
 
+        console.log("[PortfolioPanel] account_state received:", {
+          positionCount: positions.length,
+          equityPositions: positions.filter((p: any) => p.secType === "STK").map((p: any) => p.symbol),
+          optionPositions: positions.filter((p: any) => p.secType === "OPT").length,
+          ibConnected: raw.ib_connected,
+        });
         setAccountState({ positions, cash, executions, openOrders });
 
         // Build a map of executions by permId for looking up fill data (orderId is 0 in completed orders)
@@ -385,6 +414,7 @@ export default function PortfolioPanel() {
 
       // Handle ib.openOrder messages
       if (snapshot?.topic === "ib.openOrder") {
+        console.log("[PortfolioPanel] Received ib.openOrder:", snapshot.data);
         const d = snapshot.data;
         if (!d || d.kind !== "open_order") return;
 
@@ -409,7 +439,35 @@ export default function PortfolioPanel() {
 
           // Only show Submitted/PreSubmitted orders
           if (order.status !== "Submitted" && order.status !== "PreSubmitted") {
-            // Remove from list if status changed to Filled/Cancelled
+            // Find the order before removing
+            const orderToMove = prev.openOrders.find(o => o.orderId === order.orderId);
+
+            // Add to history if found and status is terminal
+            if (orderToMove && (order.status === "Filled" || order.status === "Cancelled" || order.status === "Inactive")) {
+              console.log("[PortfolioPanel] openOrder terminal status, adding to history:", order.status, order.orderId);
+              const historyEntry: IbOrderHistory = {
+                orderId: orderToMove.orderId,
+                symbol: orderToMove.symbol,
+                secType: orderToMove.secType,
+                side: orderToMove.side,
+                quantity: orderToMove.quantity,
+                orderType: orderToMove.orderType,
+                lmtPrice: orderToMove.lmtPrice,
+                status: order.status,
+                ts: new Date().toISOString(),
+                strike: orderToMove.strike,
+                expiry: orderToMove.expiry,
+                right: orderToMove.right,
+              };
+              setOrderHistory(h => {
+                if (h.some(existing => existing.orderId === order.orderId)) {
+                  return h;
+                }
+                return [historyEntry, ...h].slice(0, 50);
+              });
+            }
+
+            // Remove from list
             return {
               ...prev,
               openOrders: prev.openOrders.filter(o => o.orderId !== order.orderId)
@@ -426,11 +484,20 @@ export default function PortfolioPanel() {
             return { ...prev, openOrders: [...prev.openOrders, order] };
           }
         });
+
+        // Auto-refresh on Filled status from openOrder (IB sometimes sends Filled here instead of orderStatus)
+        if (order.status === "Filled") {
+          console.log("[PortfolioPanel] openOrder Filled, triggering account state refresh...");
+          setTimeout(() => {
+            socketHub.send({ type: "control", target: "ibAccount", op: "account_state" });
+          }, 500);
+        }
         return;
       }
 
       // Handle ib.order (order status) messages - for cancel/fill updates
       if (snapshot?.topic === "ib.order") {
+        console.log("[PortfolioPanel] Received ib.order:", snapshot.data);
         const d = snapshot.data;
         if (!d || d.kind !== "order_status") return;
 
@@ -474,6 +541,14 @@ export default function PortfolioPanel() {
               openOrders: prev.openOrders.filter(o => o.orderId !== orderId)
             };
           });
+
+          // Auto-refresh account state on Filled to catch positions when execDetails wasn't called
+          if (status === "Filled") {
+            console.log("[PortfolioPanel] Order filled, triggering account state refresh...");
+            setTimeout(() => {
+              socketHub.send({ type: "control", target: "ibAccount", op: "account_state" });
+            }, 500); // Small delay to let IB settle
+          }
         }
         return;
       }
@@ -516,6 +591,7 @@ export default function PortfolioPanel() {
 
       // Live execution — updates positions
       if (snapshot?.topic === "ib.executions" || snapshot?.topic === "ib.execution") {
+        console.log("[PortfolioPanel] Received ib.executions:", snapshot.data);
         const d = snapshot.data;
         if (!d) return;
         const exec = d.execution || d;
@@ -653,27 +729,8 @@ export default function PortfolioPanel() {
         });
 
         // Also add to order history as "Filled"
-        setOrderHistory(h => {
-          // Deduplicate by execId (use orderId + symbol + ts as key since execId might not be unique display)
-          const key = `${newExec.orderId}-${newExec.execId}`;
-          if (h.some(existing => `${existing.orderId}-${existing.symbol}-${existing.ts}` === `${newExec.orderId}-${newExec.symbol}-${newExec.ts}`)) {
-            return h;
-          }
-          const historyEntry: IbOrderHistory = {
-            orderId: newExec.orderId,
-            symbol: newExec.symbol,
-            secType: newExec.secType,
-            side: newExec.side,
-            quantity: String(newExec.quantity),
-            price: newExec.price,
-            status: "Filled",
-            ts: newExec.ts,
-            strike: newExec.strike,
-            expiry: newExec.expiry,
-            right: newExec.right,
-          };
-          return [historyEntry, ...h].slice(0, 50);
-        });
+        // Note: Don't add here - the ib.order or ib.openOrder callback will add to history
+        // Adding from both execution AND orderStatus causes duplicates
 
         setLastUpdated(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
       }
@@ -687,6 +744,8 @@ export default function PortfolioPanel() {
     const onReconnect = () => {
       console.log("[PortfolioPanel] WebSocket reconnected, refreshing account state...");
       setLoading(true);
+      setError(null);  // Clear previous error
+      setIbConnected(null);  // Reset IB status until we get fresh data
       socketHub.send({ type: "control", target: "ibAccount", op: "account_state" });
     };
     socketHub.onConnect(onReconnect);
@@ -701,7 +760,13 @@ export default function PortfolioPanel() {
   return (
     <div style={shell}>
       <div style={header}>
-        <div style={{ fontWeight: 600, fontSize: 15 }}>Portfolio</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>Portfolio</div>
+          {/* IB Gateway Connection Status */}
+          {ibConnected !== null && (
+            <ConnectionStatus connected={ibConnected} label="IB Gateway" />
+          )}
+        </div>
         <div style={{ fontSize: 12, color: "#666" }}>
           {loading && !accountState && "Loading…"}
           {error && <span style={{ color: "#dc2626" }}>{error}</span>}

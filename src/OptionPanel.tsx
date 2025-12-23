@@ -69,6 +69,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
 
   const loadExpiries = (und: string, days: number) => {
     if (!und) return;
+    console.log("[OptionPanel] loadExpiries:", und, "days:", days);
     setLoadingExpiries(true);
     socketHub.send({
       type: "control",
@@ -82,6 +83,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
 
   const loadChain = (und: string, expiry: string, lim: number) => {
     if (!und || !expiry) return;
+    console.log("[OptionPanel] loadChain:", und, "expiry:", expiry, "limit:", lim);
     setLoadingChain(true);
     socketHub.send({
       type: "control",
@@ -99,6 +101,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
     const onMsg = (m: any) => {
       // Handle find_expiries response
       if (m?.type === "control.ack" && m?.op === "find_expiries") {
+        console.log("[OptionPanel] find_expiries response:", m.ok, m.data);
         setLoadingExpiries(false);
         if (m.ok) {
           const data = m.data?.data || m.data || {};
@@ -132,6 +135,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
 
       // Handle get_chain response
       if (m?.type === "control.ack" && m?.op === "get_chain") {
+        console.log("[OptionPanel] get_chain response:", m.ok, m.data?.underlying || m.data?.data?.underlying);
         setLoadingChain(false);
         if (m.ok) {
           const data = m.data?.data || m.data || {};

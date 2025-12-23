@@ -138,6 +138,11 @@ class SocketHub {
 
   /** Fire-and-forget send of a JSON-able object. */
   public send(obj: Record<string, unknown>): void {
+    // Log subscribe/unsubscribe for debugging
+    if (obj.type === "subscribe" || obj.type === "unsubscribe") {
+      console.log(`[SocketHub] ${obj.type}:`, obj.channels, obj.symbols);
+    }
+
     const s = JSON.stringify(obj);
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(s);

@@ -247,11 +247,16 @@ class MarketDataBus {
    * Called automatically on WebSocket reconnect.
    */
   private resubscribeAll(): void {
-    if (this.subscriptions.size === 0) return;
+    // Always log reconnect for debugging (not gated by debug flag)
+    console.log("[MarketDataBus] WebSocket reconnected - active subscriptions:", this.subscriptions.size);
 
-    this.log("[MarketDataBus] Reconnected - resubscribing to", this.subscriptions.size, "symbols");
+    if (this.subscriptions.size === 0) {
+      console.log("[MarketDataBus] No subscriptions to resubscribe");
+      return;
+    }
 
     this.subscriptions.forEach((sub) => {
+      console.log("[MarketDataBus] Resubscribing:", sub.channel, sub.symbol);
       this.wireSubscribe(sub.symbol, sub.channel);
     });
   }
