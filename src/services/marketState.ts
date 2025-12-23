@@ -97,20 +97,35 @@ function handleCalendarEvent(tick: TickEnvelope) {
 
   console.log("[MarketState] Calendar event:", topic, data);
 
-  if (topic === "cal.market.open") {
-    // Transition to RegularHours
-    if (currentState) {
-      currentState = { ...currentState, state: "RegularHours", lastUpdated: Date.now() };
-      console.log("[MarketState] Transition -> RegularHours");
+  if (topic === "cal.market.open" || topic === "cal.market.close") {
+    // Re-fetch full market_state to get updated timeframes
+    // (e.g., "0d" option appears when transitioning to after-hours)
+    refetchMarketState();
+  }
+}
+
+async function refetchMarketState() {
+  console.log("[MarketState] Re-fetching market state after session transition...");
+  try {
+    const ack = await socketHub.sendControl("market_state", {}, { timeoutMs: 5000 });
+    if (ack.ok && ack.data) {
+      const d = (ack.data as any).data || ack.data;
+      currentState = {
+        state: d.state as SessionState,
+        isTradingDay: d.isTradingDay ?? true,
+        prevTradingDay: d.prevTradingDay ?? "",
+        regularOpen: d.regularOpen,
+        regularClose: d.regularClose,
+        sessions: d.sessions ?? [],
+        timeframes: d.timeframes ?? [],
+        lastUpdated: Date.now(),
+      };
+      console.log("[MarketState] Updated:", currentState.state,
+        "timeframes:", currentState.timeframes.map((t: TimeframeOption) => `${t.id}=${t.date}`).join(", "));
       notify();
     }
-  } else if (topic === "cal.market.close") {
-    // Transition to AfterHours
-    if (currentState) {
-      currentState = { ...currentState, state: "AfterHours", lastUpdated: Date.now() };
-      console.log("[MarketState] Transition -> AfterHours");
-      notify();
-    }
+  } catch (err) {
+    console.error("[MarketState] Failed to re-fetch market_state:", err);
   }
 }
 
