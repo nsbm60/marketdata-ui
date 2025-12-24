@@ -20,10 +20,12 @@ async function fetchActiveWatchlist(): Promise<{ name: string; symbols: string[]
     target: "marketData",
   });
   if (!resp.ok) throw new Error(resp.error || "Failed to fetch watchlist");
+  // Response has nested data: resp.data.data contains the actual payload
+  const payload = resp.data?.data ?? resp.data;
   return {
-    name: resp.data.name,
-    symbols: resp.data.symbols || [],
-    lists: resp.data.lists || [],
+    name: payload.name,
+    symbols: payload.symbols || [],
+    lists: payload.lists || [],
   };
 }
 
@@ -42,7 +44,8 @@ async function setActiveWatchlist(name: string): Promise<string[]> {
     name,
   });
   if (!resp.ok) throw new Error(resp.error || "Failed to set active watchlist");
-  return resp.data.symbols || [];
+  const payload = resp.data?.data ?? resp.data;
+  return payload.symbols || [];
 }
 
 async function deleteWatchlist(name: string): Promise<void> {
@@ -63,16 +66,29 @@ export default function EquityPanel({
   /* ---------------- input + symbols ---------------- */
   const [input, setInput] = useState(() => localStorage.getItem(LS_INPUT) ?? "");
   const [symbols, setSymbols] = useState<string[]>([]);
-  const [watchlistName, setWatchlistName] = useState("default");
+  const [watchlistName, setWatchlistNameState] = useState("default");
   const [availableLists, setAvailableLists] = useState<string[]>([]);
   const [watchlistLoaded, setWatchlistLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const saveTimeoutRef = useRef<number | null>(null);
 
+  // Ref to always have the current watchlist name (avoids stale closure issues)
+  const watchlistNameRef = useRef(watchlistName);
+  const setWatchlistName = (name: string) => {
+    watchlistNameRef.current = name;
+    setWatchlistNameState(name);
+  };
+
   useEffect(() => { localStorage.setItem(LS_INPUT, input); }, [input]);
 
-  // Load active watchlist on mount
+  /* ---------------- WS status from app state ---------------- */
+  const { state: appState } = useAppState();
+  const wsConnected = appState.connection.websocket === "connected";
+
+  // Load active watchlist when WebSocket connects
   useEffect(() => {
+    if (!wsConnected) return;
+
     fetchActiveWatchlist()
       .then(({ name, symbols, lists }) => {
         setWatchlistName(name);
@@ -85,7 +101,7 @@ export default function EquityPanel({
         console.error("[EquityPanel] Failed to load watchlist:", err);
         setWatchlistLoaded(true); // Allow UI to render even if backend fails
       });
-  }, []);
+  }, [wsConnected]);
 
   /* ---------------- selection ---------------- */
   const [selectedSym, setSelectedSym] = useState<string | null>(null);
@@ -124,9 +140,8 @@ export default function EquityPanel({
     fetchClosePrices(symbols, timeframe).then(setClosePrices);
   }, [symbols.join(","), timeframe]);
 
-  /* ---------------- WS status from app state ---------------- */
-  const { state: appState } = useAppState();
-  const wsStatus = appState.connection.websocket === "connected"
+  /* ---------------- WS status for display ---------------- */
+  const wsStatus = wsConnected
     ? "open"
     : appState.connection.websocket === "connecting"
       ? "connecting"
@@ -164,8 +179,8 @@ export default function EquityPanel({
     if (selectedSym && !norm.includes(selectedSym)) {
       setSelectedSym(norm.length ? norm[0] : null);
     }
-    // Save to backend (debounced)
-    saveToBackend(watchlistName, norm);
+    // Save to backend (debounced) - use ref to get current name, not stale closure
+    saveToBackend(watchlistNameRef.current, norm);
   };
 
   const actAdd = () => {
@@ -257,26 +272,30 @@ export default function EquityPanel({
       <div style={header as any}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>Watchlist</div>
-          <select
-            value={watchlistName}
-            onChange={(e) => switchWatchlist(e.target.value)}
-            style={{
-              padding: "3px 8px",
-              fontSize: 12,
-              border: "1px solid #d1d5db",
-              borderRadius: 4,
-              background: "white",
-              color: "#111",
-              minWidth: 100,
-            }}
-            title="Select watchlist"
-          >
-            {availableLists.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
+          {availableLists.length > 0 ? (
+            <select
+              value={watchlistName}
+              onChange={(e) => switchWatchlist(e.target.value)}
+              style={{
+                padding: "3px 8px",
+                fontSize: 12,
+                border: "1px solid #d1d5db",
+                borderRadius: 4,
+                background: "white",
+                color: "#111",
+                minWidth: 100,
+              }}
+              title="Select watchlist"
+            >
+              {availableLists.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          ) : (
+            <span style={{ fontSize: 12, color: "#666", fontStyle: "italic" }}>None</span>
+          )}
           <button onClick={createNewWatchlist} style={linkBtn() as any} title="Create new watchlist">+ New</button>
-          {watchlistName !== "default" && (
+          {watchlistName && availableLists.length > 0 && (
             <button onClick={deleteCurrentWatchlist} style={{ ...linkBtn(), color: "#dc2626" } as any} title="Delete this watchlist">Delete</button>
           )}
           {saving && <span style={{ fontSize: 10, color: "#666" }}>Saving...</span>}

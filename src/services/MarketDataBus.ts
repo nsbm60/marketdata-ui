@@ -417,8 +417,16 @@ class MarketDataBus {
 
     socketHub.send({ type: "subscribe", channels, symbols: [symbol] });
 
-    // For options, also trigger backend subscription for Alpaca streaming
-    if (channel === "option") {
+    // Also trigger backend subscription for Alpaca streaming
+    if (channel === "equity") {
+      socketHub.send({
+        type: "control",
+        target: "marketData",
+        op: "subscribe",
+        kind: "equity",
+        symbols: [symbol],
+      });
+    } else if (channel === "option") {
       socketHub.send({
         type: "control",
         target: "marketData",
@@ -437,8 +445,16 @@ class MarketDataBus {
 
     socketHub.send({ type: "unsubscribe", channels, symbols: [symbol] });
 
-    // For options, also unsubscribe on backend
-    if (channel === "option") {
+    // Also unsubscribe on backend
+    if (channel === "equity") {
+      socketHub.send({
+        type: "control",
+        target: "marketData",
+        op: "unsubscribe",
+        kind: "equity",
+        symbols: [symbol],
+      });
+    } else if (channel === "option") {
       socketHub.send({
         type: "control",
         target: "marketData",
