@@ -5,7 +5,7 @@ import OptionTradeTicket from "./components/OptionTradeTicket";
 import TradeButton, { tradeButtonContainerCompact } from "./components/shared/TradeButton";
 import { useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 import { isNum, fmtPrice, fmtGreek } from "./utils/formatters";
-import { parseOptionSymbol, formatExpiryShort } from "./utils/options";
+import { parseOptionSymbol, formatExpiryWithDTE } from "./utils/options";
 
 /** ---------- Component ---------- */
 export default function OptionPanel({ ticker }: { ticker?: string }) {
@@ -312,7 +312,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                   ...(loadingChain && selectedExpiry === exp ? { opacity: 0.6 } : {}),
                 } as any}
               >
-                {formatExpiryShort(exp)}
+                {formatExpiryWithDTE(exp)}
               </button>
             ))}
           </div>

@@ -141,6 +141,23 @@ export function formatExpiryISO(expiry: string): string {
 }
 
 /**
+ * Calculate days to expiry from today.
+ * Returns 0 if expiry is today, negative if past.
+ */
+export function daysToExpiry(expiry: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expiry);
+  if (!m) return 0;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const expiryDate = new Date(y, mo - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffMs = expiryDate.getTime() - today.getTime();
+  return Math.round(diffMs / (1000 * 60 * 60 * 24));
+}
+
+/**
  * Format expiry from YYYY-MM-DD to short format for tabs.
  * "2025-12-19" -> "Dec 19"
  */
@@ -159,6 +176,16 @@ export function formatExpiryShort(expiry: string): string {
   } catch {
     return expiry;
   }
+}
+
+/**
+ * Format expiry with days to expiry.
+ * "2025-12-19" -> "Dec 19 (3d)"
+ */
+export function formatExpiryWithDTE(expiry: string): string {
+  const short = formatExpiryShort(expiry);
+  const dte = daysToExpiry(expiry);
+  return `${short} (${dte}d)`;
 }
 
 /**
