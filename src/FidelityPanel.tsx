@@ -94,10 +94,33 @@ export default function FidelityPanel() {
     return getChannelPrices("option");
   }, [optionVersion]);
 
-  // Group positions by underlying
-  const groupedPositions = useMemo(() => {
-    return groupPositionsByUnderlying(positions);
+  // Separate cash/pending from tradeable positions
+  const { cashPositions, pendingPositions, tradeablePositions } = useMemo(() => {
+    const cash: FidelityPosition[] = [];
+    const pending: FidelityPosition[] = [];
+    const tradeable: FidelityPosition[] = [];
+    for (const pos of positions) {
+      if (pos.type === "cash") cash.push(pos);
+      else if (pos.type === "pending") pending.push(pos);
+      else tradeable.push(pos);
+    }
+    return { cashPositions: cash, pendingPositions: pending, tradeablePositions: tradeable };
   }, [positions]);
+
+  // Group tradeable positions by underlying
+  const groupedPositions = useMemo(() => {
+    return groupPositionsByUnderlying(tradeablePositions);
+  }, [tradeablePositions]);
+
+  // Calculate total cash
+  const totalCash = useMemo(() => {
+    return cashPositions.reduce((sum, pos) => sum + (pos.currentValue ?? 0), 0);
+  }, [cashPositions]);
+
+  // Calculate total pending
+  const totalPending = useMemo(() => {
+    return pendingPositions.reduce((sum, pos) => sum + (pos.currentValue ?? 0), 0);
+  }, [pendingPositions]);
 
   // Handle file upload
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -138,7 +161,7 @@ export default function FidelityPanel() {
     let costBasis = 0;
     let dayChange = 0;
 
-    positions.forEach((pos) => {
+    tradeablePositions.forEach((pos) => {
       const qty = Math.abs(pos.quantity);
       const multiplier = pos.type === "option" ? 100 : 1;
 
@@ -174,8 +197,9 @@ export default function FidelityPanel() {
       costBasis,
       unrealizedPL: marketValue - costBasis,
       dayChange,
+      totalAccountValue: marketValue + totalCash + totalPending,
     };
-  }, [positions, equityPrices, optionPrices, closePrices]);
+  }, [tradeablePositions, equityPrices, optionPrices, closePrices, totalCash, totalPending]);
 
   return (
     <div style={container}>
@@ -229,13 +253,25 @@ export default function FidelityPanel() {
       {positions.length > 0 && (
         <div style={summaryRow}>
           <div>
-            <span style={{ color: "#666", fontSize: 11 }}>Market Value</span>
+            <span style={{ color: "#666", fontSize: 11 }}>Total Account</span>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>${totals.totalAccountValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          </div>
+          <div>
+            <span style={{ color: "#666", fontSize: 11 }}>Securities</span>
             <div style={{ fontWeight: 600 }}>${totals.marketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
           </div>
           <div>
-            <span style={{ color: "#666", fontSize: 11 }}>Cost Basis</span>
-            <div>${totals.costBasis.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <span style={{ color: "#666", fontSize: 11 }}>Cash</span>
+            <div>${totalCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
           </div>
+          {totalPending !== 0 && (
+            <div>
+              <span style={{ color: "#666", fontSize: 11 }}>Pending</span>
+              <div style={{ color: totalPending >= 0 ? "#16a34a" : "#dc2626" }}>
+                {totalPending >= 0 ? "+" : ""}${totalPending.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+            </div>
+          )}
           <div>
             <span style={{ color: "#666", fontSize: 11 }}>Unrealized P&L</span>
             <div style={{ color: totals.unrealizedPL >= 0 ? "#16a34a" : "#dc2626", fontWeight: 600 }}>
@@ -250,7 +286,7 @@ export default function FidelityPanel() {
           </div>
           <div>
             <span style={{ color: "#666", fontSize: 11 }}>Positions</span>
-            <div>{positions.length}</div>
+            <div>{tradeablePositions.length}</div>
           </div>
         </div>
       )}
@@ -265,16 +301,62 @@ export default function FidelityPanel() {
             </p>
           </div>
         ) : (
-          Array.from(groupedPositions.entries()).map(([underlying, group]) => (
-            <PositionGroup
-              key={underlying}
-              underlying={underlying}
-              positions={group}
-              equityPrices={equityPrices}
-              optionPrices={optionPrices}
-              closePrices={closePrices}
-            />
-          ))
+          <>
+            {/* Cash positions */}
+            {cashPositions.length > 0 && (
+              <div style={cashContainer}>
+                <div style={cashHeader}>
+                  <span style={{ fontWeight: 600 }}>Cash & Money Market</span>
+                  <span style={{ fontWeight: 600 }}>
+                    ${totalCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                {cashPositions.map((pos, idx) => (
+                  <div key={idx} style={cashRow}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontWeight: 500 }}>{pos.symbol}</span>
+                      <span style={{ marginLeft: 8, color: "#666", fontSize: 11 }}>{pos.description}</span>
+                    </div>
+                    <div>${(pos.currentValue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Pending activity */}
+            {pendingPositions.length > 0 && (
+              <div style={pendingContainer}>
+                <div style={pendingHeader}>
+                  <span style={{ fontWeight: 600 }}>Pending Activity</span>
+                  <span style={{ fontWeight: 600, color: totalPending >= 0 ? "#16a34a" : "#dc2626" }}>
+                    {totalPending >= 0 ? "+" : ""}${totalPending.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                {pendingPositions.map((pos, idx) => (
+                  <div key={idx} style={pendingRow}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ color: "#666", fontSize: 11 }}>{pos.description}</span>
+                    </div>
+                    <div style={{ color: (pos.currentValue ?? 0) >= 0 ? "#16a34a" : "#dc2626" }}>
+                      {(pos.currentValue ?? 0) >= 0 ? "+" : ""}${(pos.currentValue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Securities */}
+            {Array.from(groupedPositions.entries()).map(([underlying, group]) => (
+              <PositionGroup
+                key={underlying}
+                underlying={underlying}
+                positions={group}
+                equityPrices={equityPrices}
+                optionPrices={optionPrices}
+                closePrices={closePrices}
+              />
+            ))}
+          </>
         )}
       </div>
     </div>
@@ -537,4 +619,52 @@ const optionRow: React.CSSProperties = {
   padding: "4px 12px",
   fontSize: 11,
   borderBottom: "1px solid #f3f4f6",
+};
+
+const cashContainer: React.CSSProperties = {
+  marginBottom: 16,
+  border: "1px solid #d1fae5",
+  borderRadius: 6,
+  overflow: "hidden",
+  background: "#f0fdf4",
+};
+
+const cashHeader: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  padding: "8px 12px",
+  background: "#dcfce7",
+  borderBottom: "1px solid #d1fae5",
+};
+
+const cashRow: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  padding: "6px 12px",
+  fontSize: 12,
+  borderBottom: "1px solid #d1fae5",
+};
+
+const pendingContainer: React.CSSProperties = {
+  marginBottom: 16,
+  border: "1px solid #fde68a",
+  borderRadius: 6,
+  overflow: "hidden",
+  background: "#fffbeb",
+};
+
+const pendingHeader: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  padding: "8px 12px",
+  background: "#fef3c7",
+  borderBottom: "1px solid #fde68a",
+};
+
+const pendingRow: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  padding: "6px 12px",
+  fontSize: 12,
+  borderBottom: "1px solid #fde68a",
 };

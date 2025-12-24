@@ -10,9 +10,10 @@ export interface FidelityPosition {
   description: string;
   quantity: number;
   lastPrice: number | null;
+  currentValue: number | null; // Current market value
   costBasisTotal: number | null;
   avgCostBasis: number | null;
-  type: "equity" | "option" | "cash";
+  type: "equity" | "option" | "cash" | "pending";
   optionType?: "call" | "put";
   strike?: number;
   expiry?: string;          // YYYY-MM-DD format
@@ -21,7 +22,7 @@ export interface FidelityPosition {
 
 /**
  * Parse Fidelity CSV export into positions array.
- * Skips cash positions and the footer disclaimer.
+ * Includes cash positions and pending activity.
  */
 export function parseFidelityCSV(csvText: string): FidelityPosition[] {
   const lines = csvText.split("\n");
@@ -54,7 +55,7 @@ export function parseFidelityCSV(csvText: string): FidelityPosition[] {
       quantityStr,
       lastPriceStr,
       _lastPriceChange,
-      _currentValue,
+      currentValueStr,
       _todayGainDollar,
       _todayGainPercent,
       _totalGainDollar,
@@ -65,12 +66,50 @@ export function parseFidelityCSV(csvText: string): FidelityPosition[] {
       typeStr,
     ] = fields;
 
-    // Skip cash positions
-    if (typeStr === "Cash" || rawSymbol.includes("SPAXX") || rawSymbol === "Pending activity") {
+    const symbol = rawSymbol.trim();
+
+    // Handle pending activity
+    if (rawSymbol === "Pending activity") {
+      const currentValue = parseNumber(currentValueStr);
+      if (currentValue !== null && currentValue !== 0) {
+        positions.push({
+          accountNumber,
+          accountName,
+          symbol: "Pending Activity",
+          osiSymbol: null,
+          description: description || "Pending transactions",
+          quantity: 1,
+          lastPrice: null,
+          currentValue,
+          costBasisTotal: null,
+          avgCostBasis: null,
+          type: "pending",
+        });
+      }
       continue;
     }
 
-    const symbol = rawSymbol.trim();
+    // Handle cash positions (SPAXX, core cash, etc.)
+    if (typeStr === "Cash" || rawSymbol.includes("SPAXX") || rawSymbol.includes("FDRXX") || rawSymbol.includes("FCASH")) {
+      const currentValue = parseNumber(currentValueStr);
+      if (currentValue !== null) {
+        positions.push({
+          accountNumber,
+          accountName,
+          symbol: symbol || "Cash",
+          osiSymbol: null,
+          description: description || "Cash",
+          quantity: currentValue,
+          lastPrice: 1,
+          currentValue,
+          costBasisTotal: currentValue,
+          avgCostBasis: 1,
+          type: "cash",
+        });
+      }
+      continue;
+    }
+
     const isOption = symbol.startsWith("-") || symbol.startsWith(" -");
     const cleanSymbol = symbol.replace(/^[\s-]+/, "");
 
@@ -89,6 +128,7 @@ export function parseFidelityCSV(csvText: string): FidelityPosition[] {
       description,
       quantity,
       lastPrice: parseNumber(lastPriceStr),
+      currentValue: parseNumber(currentValueStr),
       costBasisTotal: parseNumber(costBasisTotalStr),
       avgCostBasis: parseNumber(avgCostBasisStr),
       type: isOption ? "option" : "equity",
