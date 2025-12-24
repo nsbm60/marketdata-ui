@@ -1,5 +1,5 @@
 // src/EquityPanel.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
 import TradeButton, { tradeButtonContainer } from "./components/shared/TradeButton";
@@ -10,10 +10,52 @@ import { PriceData } from "./services/MarketDataBus";
 import { isNum, fmtPrice } from "./utils/formatters";
 import { useAppState } from "./state/useAppState";
 
-const LS_APPLIED = "wl.applied";
 const LS_INPUT = "wl.input";
 const LS_TIMEFRAME = "wl.timeframe";
 const STALE_MS = 15_000;
+
+// Watchlist API helpers
+async function fetchActiveWatchlist(): Promise<{ name: string; symbols: string[]; lists: string[] }> {
+  const resp = await socketHub.sendControl({
+    target: "marketData",
+    op: "get_active_watchlist",
+  });
+  if (!resp.ok) throw new Error(resp.error || "Failed to fetch watchlist");
+  return {
+    name: resp.data.name,
+    symbols: resp.data.symbols || [],
+    lists: resp.data.lists || [],
+  };
+}
+
+async function saveWatchlist(name: string, symbols: string[]): Promise<void> {
+  const resp = await socketHub.sendControl({
+    target: "marketData",
+    op: "save_watchlist",
+    name,
+    symbols,
+  });
+  if (!resp.ok) throw new Error(resp.error || "Failed to save watchlist");
+}
+
+async function setActiveWatchlist(name: string): Promise<string[]> {
+  const resp = await socketHub.sendControl({
+    target: "marketData",
+    op: "set_active_watchlist",
+    name,
+  });
+  if (!resp.ok) throw new Error(resp.error || "Failed to set active watchlist");
+  return resp.data.symbols || [];
+}
+
+async function deleteWatchlist(name: string): Promise<void> {
+  const resp = await socketHub.sendControl({
+    target: "marketData",
+    op: "delete_watchlist",
+    name,
+  });
+  if (!resp.ok) throw new Error(resp.error || "Failed to delete watchlist");
+}
 
 export default function EquityPanel({
   onSelect,
@@ -24,11 +66,30 @@ export default function EquityPanel({
 }) {
   /* ---------------- input + symbols ---------------- */
   const [input, setInput] = useState(() => localStorage.getItem(LS_INPUT) ?? "");
-  const [symbols, setSymbols] = useState<string[]>(() => {
-    const saved = localStorage.getItem(LS_APPLIED);
-    return saved ? parseSymbols(saved) : [];
-  });
+  const [symbols, setSymbols] = useState<string[]>([]);
+  const [watchlistName, setWatchlistName] = useState("default");
+  const [availableLists, setAvailableLists] = useState<string[]>([]);
+  const [watchlistLoaded, setWatchlistLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const saveTimeoutRef = useRef<number | null>(null);
+
   useEffect(() => { localStorage.setItem(LS_INPUT, input); }, [input]);
+
+  // Load active watchlist on mount
+  useEffect(() => {
+    fetchActiveWatchlist()
+      .then(({ name, symbols, lists }) => {
+        setWatchlistName(name);
+        setSymbols(symbols);
+        setAvailableLists(lists);
+        setWatchlistLoaded(true);
+        console.log(`[EquityPanel] Loaded watchlist '${name}' with ${symbols.length} symbols`);
+      })
+      .catch((err) => {
+        console.error("[EquityPanel] Failed to load watchlist:", err);
+        setWatchlistLoaded(true); // Allow UI to render even if backend fails
+      });
+  }, []);
 
   /* ---------------- selection ---------------- */
   const [selectedSym, setSelectedSym] = useState<string | null>(null);
@@ -82,14 +143,33 @@ export default function EquityPanel({
   const prices = useThrottledMarketPrices(activeSymbols, "equity", 250);
 
   /* ---------------- actions ---------------- */
+  // Debounced save to backend
+  const saveToBackend = useCallback((name: string, syms: string[]) => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    setSaving(true);
+    saveTimeoutRef.current = window.setTimeout(() => {
+      saveWatchlist(name, syms)
+        .then(() => {
+          console.log(`[EquityPanel] Saved watchlist '${name}'`);
+          setSaving(false);
+        })
+        .catch((err) => {
+          console.error("[EquityPanel] Failed to save watchlist:", err);
+          setSaving(false);
+        });
+    }, 500); // Debounce 500ms
+  }, []);
+
   const applySymbols = (next: string[]) => {
     const norm = Array.from(new Set(next.map((s) => s.toUpperCase()))).sort();
     setSymbols(norm);
-    if (norm.length === 0) localStorage.removeItem(LS_APPLIED);
-    else localStorage.setItem(LS_APPLIED, norm.join(","));
     if (selectedSym && !norm.includes(selectedSym)) {
       setSelectedSym(norm.length ? norm[0] : null);
     }
+    // Save to backend (debounced)
+    saveToBackend(watchlistName, norm);
   };
 
   const actAdd = () => {
@@ -99,13 +179,48 @@ export default function EquityPanel({
   };
   const actReplace = () => { applySymbols(parseSymbols(input)); setInput(""); };
   const actClear = () => { applySymbols([]); setInput(""); onClear?.(); };
-  const actPurge = () => {
-    localStorage.removeItem(LS_APPLIED);
-    localStorage.removeItem(LS_INPUT);
-    setInput("");
-    applySymbols([]);
-    setSelectedSym(null);
+
+  const switchWatchlist = async (name: string) => {
+    try {
+      const syms = await setActiveWatchlist(name);
+      setWatchlistName(name);
+      setSymbols(syms);
+      console.log(`[EquityPanel] Switched to watchlist '${name}' with ${syms.length} symbols`);
+    } catch (err) {
+      console.error("[EquityPanel] Failed to switch watchlist:", err);
+    }
   };
+
+  const createNewWatchlist = async () => {
+    const name = prompt("Enter name for new watchlist:");
+    if (!name || name.trim() === "") return;
+    const trimmedName = name.trim();
+    try {
+      await saveWatchlist(trimmedName, []);
+      setAvailableLists((prev) => [...prev, trimmedName].sort());
+      await switchWatchlist(trimmedName);
+    } catch (err) {
+      console.error("[EquityPanel] Failed to create watchlist:", err);
+      alert("Failed to create watchlist");
+    }
+  };
+
+  const deleteCurrentWatchlist = async () => {
+    if (watchlistName === "default") {
+      alert("Cannot delete the default watchlist");
+      return;
+    }
+    if (!confirm(`Delete watchlist "${watchlistName}"?`)) return;
+    try {
+      await deleteWatchlist(watchlistName);
+      setAvailableLists((prev) => prev.filter((n) => n !== watchlistName));
+      await switchWatchlist("default");
+    } catch (err) {
+      console.error("[EquityPanel] Failed to delete watchlist:", err);
+      alert("Failed to delete watchlist");
+    }
+  };
+
   const togglePaused = () => setPaused((p) => !p);
   const removeOne = (sym: string) => {
     const target = String(sym).toUpperCase();
@@ -143,6 +258,29 @@ export default function EquityPanel({
       <div style={header as any}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>Watchlist</div>
+          <select
+            value={watchlistName}
+            onChange={(e) => switchWatchlist(e.target.value)}
+            style={{
+              padding: "3px 8px",
+              fontSize: 12,
+              border: "1px solid #d1d5db",
+              borderRadius: 4,
+              background: "white",
+              color: "#111",
+              minWidth: 100,
+            }}
+            title="Select watchlist"
+          >
+            {availableLists.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+          <button onClick={createNewWatchlist} style={linkBtn() as any} title="Create new watchlist">+ New</button>
+          {watchlistName !== "default" && (
+            <button onClick={deleteCurrentWatchlist} style={{ ...linkBtn(), color: "#dc2626" } as any} title="Delete this watchlist">Delete</button>
+          )}
+          {saving && <span style={{ fontSize: 10, color: "#666" }}>Saving...</span>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <input
@@ -160,7 +298,6 @@ export default function EquityPanel({
           <button onClick={actAdd} style={btn() as any}>Add</button>
           <button onClick={actReplace} style={btn() as any}>Replace</button>
           <button onClick={actClear} style={btn({ variant: "secondary" }) as any}>Clear</button>
-          <button onClick={actPurge} style={linkBtn() as any}>Purge saved</button>
           <button
             onClick={togglePaused}
             disabled={wsStatus !== "open"}
