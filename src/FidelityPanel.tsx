@@ -48,6 +48,43 @@ export default function FidelityPanel() {
   // Subscribe to option market data
   const optionVersion = useChannelUpdates("option", 250);
 
+  // Register equity subscriptions with backend
+  useEffect(() => {
+    if (subscriptionSymbols.equities.length > 0) {
+      // Register with UI bridge
+      socketHub.send({
+        type: "subscribe",
+        channels: ["md.equity.quote", "md.equity.trade"],
+        symbols: subscriptionSymbols.equities,
+      });
+
+      // Tell backend to subscribe
+      socketHub.send({
+        type: "control",
+        target: "marketData",
+        op: "subscribe",
+        symbols: subscriptionSymbols.equities,
+      });
+    }
+
+    return () => {
+      if (subscriptionSymbols.equities.length > 0) {
+        socketHub.send({
+          type: "unsubscribe",
+          channels: ["md.equity.quote", "md.equity.trade"],
+          symbols: subscriptionSymbols.equities,
+        });
+
+        socketHub.send({
+          type: "control",
+          target: "marketData",
+          op: "unsubscribe",
+          symbols: subscriptionSymbols.equities,
+        });
+      }
+    };
+  }, [subscriptionSymbols.equities.join(",")]);
+
   // Register option subscriptions with backend
   useEffect(() => {
     if (subscriptionSymbols.options.length > 0) {

@@ -90,7 +90,8 @@ export function parseFidelityCSV(csvText: string): FidelityPosition[] {
     }
 
     // Handle cash positions (SPAXX, core cash, etc.)
-    if (typeStr === "Cash" || rawSymbol.includes("SPAXX") || rawSymbol.includes("FDRXX") || rawSymbol.includes("FCASH")) {
+    const isCash = typeStr === "Cash" || rawSymbol.includes("SPAXX") || rawSymbol.includes("FDRXX") || rawSymbol.includes("FCASH");
+    if (isCash) {
       const currentValue = parseNumber(currentValueStr);
       if (currentValue !== null) {
         positions.push({
