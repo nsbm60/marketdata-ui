@@ -14,6 +14,7 @@
  * - ib.accountSummary (cash updates)
  * - ib.error (errors and warnings)
  * - ib.executions (fills)
+ * - ib.status (IB Gateway connection state changes)
  */
 
 import { useEffect, useState, useRef, useCallback } from "react";
@@ -158,6 +159,12 @@ export function usePortfolioData(): UsePortfolioDataResult {
       // Handle ib.error messages
       if (snapshot?.topic === "ib.error") {
         handleIbError(snapshot);
+        return;
+      }
+
+      // Handle ib.status messages (connection state changes)
+      if (snapshot?.topic === "ib.status") {
+        handleIbStatus(snapshot);
         return;
       }
 
@@ -486,6 +493,21 @@ export function usePortfolioData(): UsePortfolioDataResult {
 
       if (d.severity === "error") {
         setShowErrors(true);
+      }
+    }
+
+    function handleIbStatus(snapshot: any) {
+      console.log("[usePortfolioData] Received ib.status:", snapshot.data);
+      const d = snapshot.data;
+      if (!d || d.kind !== "status") return;
+
+      const connected = Boolean(d.connected);
+      setIbConnected(connected);
+
+      // If we just reconnected, refresh account state
+      if (connected) {
+        console.log("[usePortfolioData] IB Gateway reconnected, refreshing account state...");
+        refresh();
       }
     }
 
