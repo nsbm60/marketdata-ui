@@ -3,11 +3,12 @@ import { useState } from "react";
 import EquityPanel from "./EquityPanel";
 import OptionPanel from "./OptionPanel";
 import PortfolioPanel from "./PortfolioPanel";
+import FidelityPanel from "./FidelityPanel";
 import ConnectionStatus from "./components/shared/ConnectionStatus";
 import { socketHub } from "./ws/SocketHub";
 import { useAppState } from "./state/useAppState";
 
-type TabId = "market" | "portfolio";
+type TabId = "market" | "portfolio" | "fidelity";
 
 export default function TwoPane() {
   const [selected, setSelected] = useState<string>("");
@@ -54,7 +55,14 @@ export default function TwoPane() {
             onClick={() => setActiveTab("portfolio")}
             style={tabButton(activeTab === "portfolio") as any}
           >
-            Portfolio
+            IB Portfolio
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("fidelity")}
+            style={tabButton(activeTab === "fidelity") as any}
+          >
+            Fidelity
           </button>
         </div>
         <ConnectionStatus connected={wsConnected} label="WebSocket" />
@@ -86,6 +94,17 @@ export default function TwoPane() {
           } as any}
         >
           <PortfolioPanel />
+        </div>
+
+        {/* Fidelity tab content — also kept mounted */}
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: activeTab === "fidelity" ? "block" : "none",
+          } as any}
+        >
+          <FidelityPanel />
         </div>
       </div>
     </div>
