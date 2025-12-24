@@ -10,7 +10,7 @@ import {
   loadPositions,
   clearPositions,
 } from "./utils/fidelity";
-import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
+import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 import { fetchClosePrices, ClosePriceData } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { formatExpiryShort, daysToExpiry } from "./utils/options";
@@ -48,44 +48,7 @@ export default function FidelityPanel() {
   // Subscribe to option market data
   const optionVersion = useChannelUpdates("option", 250);
 
-  // Register equity subscriptions with backend
-  useEffect(() => {
-    if (subscriptionSymbols.equities.length > 0) {
-      // Register with UI bridge
-      socketHub.send({
-        type: "subscribe",
-        channels: ["md.equity.quote", "md.equity.trade"],
-        symbols: subscriptionSymbols.equities,
-      });
-
-      // Tell backend to subscribe
-      socketHub.send({
-        type: "control",
-        target: "marketData",
-        op: "subscribe",
-        symbols: subscriptionSymbols.equities,
-      });
-    }
-
-    return () => {
-      if (subscriptionSymbols.equities.length > 0) {
-        socketHub.send({
-          type: "unsubscribe",
-          channels: ["md.equity.quote", "md.equity.trade"],
-          symbols: subscriptionSymbols.equities,
-        });
-
-        socketHub.send({
-          type: "control",
-          target: "marketData",
-          op: "unsubscribe",
-          symbols: subscriptionSymbols.equities,
-        });
-      }
-    };
-  }, [subscriptionSymbols.equities.join(",")]);
-
-  // Register option subscriptions with backend
+  // Register option subscriptions with backend (equities are handled by useThrottledMarketPrices)
   useEffect(() => {
     if (subscriptionSymbols.options.length > 0) {
       // Register with UI bridge
@@ -205,9 +168,9 @@ export default function FidelityPanel() {
       // Get current price
       let currentPrice = pos.lastPrice;
       if (pos.type === "equity" && equityPrices.has(pos.symbol)) {
-        currentPrice = equityPrices.get(pos.symbol)?.price ?? currentPrice;
+        currentPrice = equityPrices.get(pos.symbol)?.last ?? currentPrice;
       } else if (pos.type === "option" && pos.osiSymbol && optionPrices.has(pos.osiSymbol)) {
-        currentPrice = optionPrices.get(pos.osiSymbol)?.price ?? currentPrice;
+        currentPrice = optionPrices.get(pos.osiSymbol)?.last ?? currentPrice;
       }
 
       if (currentPrice !== null) {
@@ -410,8 +373,8 @@ function PositionGroup({
 }: {
   underlying: string;
   positions: FidelityPosition[];
-  equityPrices: Map<string, { price: number; timestamp?: number }>;
-  optionPrices: Map<string, { price: number; bid?: number; ask?: number }>;
+  equityPrices: Map<string, PriceData>;
+  optionPrices: Map<string, PriceData>;
   closePrices: Map<string, ClosePriceData>;
 }) {
   // Separate equity and options
@@ -419,7 +382,7 @@ function PositionGroup({
   const optionPositions = positions.filter((p) => p.type === "option");
 
   // Get current price for underlying
-  const currentPrice = equityPrices.get(underlying)?.price;
+  const currentPrice = equityPrices.get(underlying)?.last;
   const closeData = closePrices.get(underlying);
 
   return (
@@ -480,7 +443,7 @@ function PositionGroup({
           </div>
           {optionPositions.map((pos, idx) => {
             const optPrice = pos.osiSymbol ? optionPrices.get(pos.osiSymbol) : null;
-            const price = optPrice?.price ?? pos.lastPrice;
+            const price = optPrice?.last ?? pos.lastPrice;
             const pl = calcPL(pos, price);
 
             return (
