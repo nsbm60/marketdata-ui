@@ -196,9 +196,12 @@ export default function EquityPanel({
     if (!name || name.trim() === "") return;
     const trimmedName = name.trim();
     try {
-      await saveWatchlist(trimmedName, []);
-      setAvailableLists((prev) => [...prev, trimmedName].sort());
+      // Just switch to the new list - set_active_watchlist handles new empty lists
       await switchWatchlist(trimmedName);
+      // Add to available lists if not already there
+      setAvailableLists((prev) =>
+        prev.includes(trimmedName) ? prev : [...prev, trimmedName].sort()
+      );
     } catch (err) {
       console.error("[EquityPanel] Failed to create watchlist:", err);
       alert("Failed to create watchlist");
