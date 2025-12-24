@@ -16,9 +16,8 @@ const STALE_MS = 15_000;
 
 // Watchlist API helpers
 async function fetchActiveWatchlist(): Promise<{ name: string; symbols: string[]; lists: string[] }> {
-  const resp = await socketHub.sendControl({
+  const resp = await socketHub.sendControl("get_active_watchlist", {
     target: "marketData",
-    op: "get_active_watchlist",
   });
   if (!resp.ok) throw new Error(resp.error || "Failed to fetch watchlist");
   return {
@@ -29,9 +28,8 @@ async function fetchActiveWatchlist(): Promise<{ name: string; symbols: string[]
 }
 
 async function saveWatchlist(name: string, symbols: string[]): Promise<void> {
-  const resp = await socketHub.sendControl({
+  const resp = await socketHub.sendControl("save_watchlist", {
     target: "marketData",
-    op: "save_watchlist",
     name,
     symbols,
   });
@@ -39,9 +37,8 @@ async function saveWatchlist(name: string, symbols: string[]): Promise<void> {
 }
 
 async function setActiveWatchlist(name: string): Promise<string[]> {
-  const resp = await socketHub.sendControl({
+  const resp = await socketHub.sendControl("set_active_watchlist", {
     target: "marketData",
-    op: "set_active_watchlist",
     name,
   });
   if (!resp.ok) throw new Error(resp.error || "Failed to set active watchlist");
@@ -49,9 +46,8 @@ async function setActiveWatchlist(name: string): Promise<string[]> {
 }
 
 async function deleteWatchlist(name: string): Promise<void> {
-  const resp = await socketHub.sendControl({
+  const resp = await socketHub.sendControl("delete_watchlist", {
     target: "marketData",
-    op: "delete_watchlist",
     name,
   });
   if (!resp.ok) throw new Error(resp.error || "Failed to delete watchlist");
