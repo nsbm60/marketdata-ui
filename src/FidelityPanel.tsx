@@ -14,6 +14,7 @@ import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, forma
 import { useMarketState } from "./services/marketState";
 import { formatExpiryShort, daysToExpiry } from "./utils/options";
 import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalysis";
+import Select from "./components/shared/Select";
 
 export default function FidelityPanel() {
   const [positions, setPositions] = useState<FidelityPosition[]>([]);
@@ -92,6 +93,41 @@ export default function FidelityPanel() {
       fetchClosePrices(subscriptionSymbols.equities, timeframe).then(setClosePrices);
     }
   }, [subscriptionSymbols.equities.join(","), timeframe]);
+
+  // Option close prices for % change display
+  type OptionPriceData = { prevClose: number; todayClose?: number };
+  const [optionClosePrices, setOptionClosePrices] = useState<Map<string, OptionPriceData>>(new Map());
+
+  // Fetch close prices for option positions
+  useEffect(() => {
+    if (subscriptionSymbols.options.length === 0 || !marketState?.timeframes) return;
+
+    // Find the date for the selected timeframe
+    const tfInfo = marketState.timeframes.find(t => t.id === timeframe);
+    const closeDate = tfInfo?.date || marketState.prevTradingDay;
+    if (!closeDate) return;
+
+    socketHub.sendControl("option_close_prices", {
+      symbols: subscriptionSymbols.options,
+      prev_trading_day: closeDate,
+    }, { timeoutMs: 10000 }).then(ack => {
+      if (ack.ok && ack.data) {
+        const data = (ack.data as any).data || ack.data;
+        const newMap = new Map<string, OptionPriceData>();
+        Object.entries(data).forEach(([symbol, prices]: [string, any]) => {
+          if (prices && typeof prices.prevClose === "number") {
+            newMap.set(symbol.toUpperCase(), {
+              prevClose: prices.prevClose,
+              todayClose: typeof prices.todayClose === "number" ? prices.todayClose : undefined,
+            });
+          }
+        });
+        setOptionClosePrices(newMap);
+      }
+    }).catch(err => {
+      console.error("[FidelityPanel] Failed to fetch option close prices:", err);
+    });
+  }, [subscriptionSymbols.options.join(","), marketState?.timeframes, timeframe]);
 
   // Option prices from channel
   const optionPrices = useMemo(() => {
@@ -308,17 +344,16 @@ export default function FidelityPanel() {
                 {activeTab === "positions" && marketState?.timeframes && (
                   <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
                     <span>vs:</span>
-                    <select
+                    <Select
                       value={timeframe}
                       onChange={(e) => setTimeframe(e.target.value)}
-                      style={selectStyle}
                     >
                       {marketState.timeframes.map((tf) => (
                         <option key={tf.id} value={tf.id}>
                           {formatCloseDateShort(tf.date)}{tf.label ? ` (${tf.label})` : ""}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </span>
                 )}
               </div>
@@ -357,19 +392,33 @@ export default function FidelityPanel() {
                     const mktValue = currentPrice !== null ? qty * currentPrice * multiplier : null;
 
                     // P&L calculation
+                    // For long positions: P&L = market value - cost paid
+                    // For short positions: P&L = premium received - cost to close
+                    //   costBasisTotal is premium received (positive), mktValue is negative (qty < 0)
+                    //   So: P&L = costBasisTotal + mktValue
                     let pl: number | null = null;
                     if (mktValue !== null && pos.costBasisTotal !== null) {
-                      pl = mktValue - pos.costBasisTotal;
+                      pl = qty < 0
+                        ? pos.costBasisTotal + mktValue
+                        : mktValue - pos.costBasisTotal;
                     }
 
                     // Change calculation
                     let pctChange: number | undefined;
                     let dollarChange: number | undefined;
-                    if (pos.type === "equity" && currentPrice !== null) {
-                      const closeData = closePrices.get(pos.symbol);
-                      if (closeData?.prevClose && closeData.prevClose > 0) {
-                        pctChange = calcPctChange(currentPrice, closeData.prevClose);
-                        dollarChange = currentPrice - closeData.prevClose;
+                    if (currentPrice !== null) {
+                      if (pos.type === "equity") {
+                        const closeData = closePrices.get(pos.symbol);
+                        if (closeData?.prevClose && closeData.prevClose > 0) {
+                          pctChange = calcPctChange(currentPrice, closeData.prevClose);
+                          dollarChange = currentPrice - closeData.prevClose;
+                        }
+                      } else if (pos.type === "option" && pos.osiSymbol) {
+                        const optCloseData = optionClosePrices.get(pos.osiSymbol.toUpperCase());
+                        if (optCloseData?.prevClose && optCloseData.prevClose > 0) {
+                          pctChange = calcPctChange(currentPrice, optCloseData.prevClose);
+                          dollarChange = currentPrice - optCloseData.prevClose;
+                        }
                       }
                     }
                     const changeColor = pctChange !== undefined
@@ -528,15 +577,6 @@ const tabButton = (active: boolean): React.CSSProperties => ({
   fontWeight: 500,
   cursor: "pointer",
 });
-
-const selectStyle: React.CSSProperties = {
-  padding: "4px 20px 4px 8px",
-  fontSize: 11,
-  border: "1px solid #d1d5db",
-  borderRadius: 4,
-  background: "white",
-  cursor: "pointer",
-};
 
 const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
 const gridCols = "180px 45px 70px 70px 55px 55px 100px 70px 100px";

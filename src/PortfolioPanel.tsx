@@ -18,6 +18,7 @@ import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from ".
 import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
 import { usePortfolioData } from "./hooks/usePortfolioData";
 import { useTradeTicket } from "./hooks/useTradeTicket";
+import Select from "./components/shared/Select";
 
 export default function PortfolioPanel() {
   // Portfolio data and IB connection state
@@ -400,27 +401,16 @@ export default function PortfolioPanel() {
                   {positionsTab === "positions" && (
                     <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, fontSize: 11 }}>
                       <span>vs:</span>
-                      <select
+                      <Select
                         value={timeframe}
                         onChange={(e) => setTimeframe(e.target.value)}
-                        style={{
-                          padding: "4px 20px 4px 8px",
-                          fontSize: 11,
-                          lineHeight: 1.2,
-                          border: "1px solid #d1d5db",
-                          borderRadius: 4,
-                          background: "white url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23666' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E\") no-repeat right 6px center",
-                          color: "#111",
-                          appearance: "none",
-                          cursor: "pointer",
-                        }}
                       >
                         {(marketState?.timeframes ?? []).map((tf) => (
                           <option key={tf.id} value={tf.id}>
                             {formatCloseDateShort(tf.date)}{tf.label ? ` (${tf.label})` : ""}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     </span>
                   )}
                 </div>

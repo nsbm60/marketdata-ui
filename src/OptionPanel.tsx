@@ -6,6 +6,7 @@ import TradeButton, { tradeButtonContainerCompact } from "./components/shared/Tr
 import { useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 import { isNum, fmtPrice, fmtGreek } from "./utils/formatters";
 import { parseOptionSymbol, formatExpiryWithDTE } from "./utils/options";
+import Select from "./components/shared/Select";
 
 /** ---------- Component ---------- */
 export default function OptionPanel({ ticker }: { ticker?: string }) {
@@ -260,7 +261,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <label style={{ fontSize: 11, color: "#666" }}>Limit:</label>
-                <select
+                <Select
                   value={limit}
                   onChange={(e) => {
                     const newLimit = Number(e.target.value);
@@ -269,13 +270,12 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                       loadChain(underlying, selectedExpiry, newLimit);
                     }
                   }}
-                  style={{ fontSize: 11, padding: "2px 4px", color: "#111", background: "white" }}
                 >
                   <option value={50}>50</option>
                   <option value={100}>100</option>
                   <option value={200}>200</option>
                   <option value={500}>500</option>
-                </select>
+                </Select>
               </div>
               {expiries.length > 0 && (
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

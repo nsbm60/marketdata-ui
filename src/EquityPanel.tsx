@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
 import TradeButton, { tradeButtonContainer } from "./components/shared/TradeButton";
+import Select from "./components/shared/Select";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, getPrevCloseDateFromCache, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState, TimeframeOption } from "./services/marketState";
 import { useThrottledMarketPrices } from "./hooks/useMarketData";
@@ -273,24 +274,17 @@ export default function EquityPanel({
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>Watchlist</div>
           {availableLists.length > 0 ? (
-            <select
+            <Select
               value={watchlistName}
               onChange={(e) => switchWatchlist(e.target.value)}
-              style={{
-                padding: "3px 8px",
-                fontSize: 12,
-                border: "1px solid #d1d5db",
-                borderRadius: 4,
-                background: "white",
-                color: "#111",
-                minWidth: 100,
-              }}
+              size="md"
+              style={{ minWidth: 100 }}
               title="Select watchlist"
             >
               {availableLists.map((name) => (
                 <option key={name} value={name}>{name}</option>
               ))}
-            </select>
+            </Select>
           ) : (
             <span style={{ fontSize: 12, color: "#666", fontStyle: "italic" }}>None</span>
           )}
@@ -354,25 +348,16 @@ export default function EquityPanel({
           {paused && <span style={{ color: "#b45309" }}>Paused — unsubscribed</span>}
           <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
             <b>vs:</b>
-            <select
+            <Select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
-              style={{
-                padding: "2px 6px",
-                fontSize: 11,
-                border: "1px solid #d1d5db",
-                borderRadius: 4,
-                background: "white",
-                color: "#111",
-                colorScheme: "light",
-              }}
             >
               {(marketState?.timeframes ?? []).map((tf) => (
                 <option key={tf.id} value={tf.id}>
                   {formatCloseDateShort(tf.date)}{tf.label ? ` (${tf.label})` : ""}
                 </option>
               ))}
-            </select>
+            </Select>
           </span>
         </div>
       </div>

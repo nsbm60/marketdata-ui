@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import { socketHub } from "../ws/SocketHub";
 import { formatExpiryWithWeekday } from "../utils/options";
+import Select from "./shared/Select";
 
 const THROTTLE_MS = 200; // 5 updates/sec for trade tickets
 
@@ -324,16 +325,17 @@ export default function OptionTradeTicket({
           style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: "1px solid #ccc" }} 
         />
 
-        <select 
-          value={orderType} 
-          onChange={e => setOrderType(e.target.value as any)} 
-          style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: "1px solid #ccc" }}
+        <Select
+          value={orderType}
+          onChange={e => setOrderType(e.target.value as any)}
+          size="form"
+          style={{ marginBottom: 10 }}
         >
           <option value="MKT">Market</option>
           <option value="LMT">Limit</option>
           <option value="STP">Stop</option>
           <option value="STPLMT">Stop Limit</option>
-        </select>
+        </Select>
 
         {(orderType === "LMT" || orderType === "STPLMT") && (
           <input 
