@@ -55,8 +55,8 @@ export default function PortfolioPanel() {
     setCancellingOrder,
   } = useTradeTicket();
 
-  // Tab for positions view: "positions" or "analysis"
-  const [positionsTab, setPositionsTab] = useState<"positions" | "analysis">("positions");
+  // Tab for positions view: "positions", "analysis", or "pnl"
+  const [positionsTab, setPositionsTab] = useState<"positions" | "analysis" | "pnl">("positions");
 
   // Market state for prevTradingDay and timeframes
   const marketState = useMarketState();
@@ -369,15 +369,6 @@ export default function PortfolioPanel() {
               </span>
             </div>
 
-            {/* P&L by Timeframe */}
-            <div style={{ marginBottom: 12 }}>
-              <PnLSummary
-                account={primaryAccount}
-                currentValue={totalPortfolio}
-                timeframes={marketState?.timeframes ?? []}
-              />
-            </div>
-
             <div style={gridWrap}>
               {/* Left Column: Positions + Cash */}
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -388,11 +379,12 @@ export default function PortfolioPanel() {
                     tabs={[
                       { id: "positions", label: "Positions" },
                       { id: "analysis", label: "Options Analysis" },
+                      { id: "pnl", label: "P&L" },
                     ]}
                     activeTab={positionsTab}
-                    onTabChange={(tab) => setPositionsTab(tab as "positions" | "analysis")}
+                    onTabChange={(tab) => setPositionsTab(tab as "positions" | "analysis" | "pnl")}
                   />
-                  {positionsTab === "positions" && (
+                  {(positionsTab === "positions" || positionsTab === "pnl") && (
                     <TimeframeSelector
                       value={timeframe}
                       onChange={setTimeframe}
@@ -602,6 +594,19 @@ export default function PortfolioPanel() {
                   <OptionsAnalysisTable
                     positions={accountState.positions}
                     equityPrices={equityPrices}
+                  />
+                )}
+
+                {/* P&L Table */}
+                {positionsTab === "pnl" && (
+                  <PnLSummary
+                    account={primaryAccount}
+                    positions={accountState.positions}
+                    equityPrices={equityPrices}
+                    optionClosePrices={optionClosePrices}
+                    closePrices={closePrices}
+                    timeframe={timeframe}
+                    timeframes={marketState?.timeframes ?? []}
                   />
                 )}
               </section>

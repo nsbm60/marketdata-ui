@@ -1,169 +1,238 @@
 // src/components/portfolio/PnLSummary.tsx
-import { useEffect, useState, useMemo } from "react";
-import { socketHub } from "../../ws/SocketHub";
+import { useMemo } from "react";
+import { IbPosition } from "../../types/portfolio";
+import { buildOsiSymbol, formatExpiryYYYYMMDD } from "../../utils/options";
+import { getChannelPrices } from "../../hooks/useMarketData";
+import { ClosePriceData, formatCloseDateShort } from "../../services/closePrices";
 import { TimeframeInfo } from "../../services/marketState";
 
-type PnLData = {
-  timeframe: string;
-  snapshot_date: string;
-  snapshot_value: number;
-  current_value: number;
-  pnl_dollar: number;
-  pnl_percent: number;
-};
+type OptionPriceData = { prevClose: number; todayClose?: number };
 
 type Props = {
   account: string;
-  currentValue: number;
+  positions: IbPosition[];
+  equityPrices: Map<string, { last?: number; bid?: number; ask?: number }>;
+  optionClosePrices: Map<string, OptionPriceData>;
+  closePrices: Map<string, ClosePriceData>;
+  timeframe: string;
   timeframes: TimeframeInfo[];
 };
 
-export default function PnLSummary({ account, currentValue, timeframes }: Props) {
-  const [pnlData, setPnlData] = useState<Map<string, PnLData>>(new Map());
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+type PositionPnL = {
+  symbol: string;
+  displaySymbol: React.ReactNode;
+  secType: string;
+  quantity: number;
+  currentPrice: number;
+  prevClose: number;
+  currentValue: number;
+  prevValue: number;
+  pnlDollar: number;
+  pnlPercent: number;
+};
 
-  // Timeframes to fetch P&L for
-  const timeframeIds = useMemo(() =>
-    timeframes.map(t => t.id).filter(id => ["1d", "1w", "1m", "3m", "ytd"].includes(id)),
-    [timeframes]
-  );
+export default function PnLSummary({
+  positions,
+  equityPrices,
+  optionClosePrices,
+  closePrices,
+  timeframe,
+  timeframes,
+}: Props) {
+  // Get current timeframe info for display
+  const currentTimeframeInfo = useMemo(() => {
+    return timeframes.find(t => t.id === timeframe);
+  }, [timeframes, timeframe]);
 
-  // Fetch P&L data when account, currentValue, or timeframes change
-  useEffect(() => {
-    if (!account || currentValue <= 0 || timeframeIds.length === 0) return;
+  // Calculate P&L for each position
+  const positionPnLs = useMemo(() => {
+    const results: PositionPnL[] = [];
 
-    setLoading(true);
-    setError(null);
+    positions.forEach((p) => {
+      let priceKey = p.symbol.toUpperCase();
+      let priceData;
+      let prevClosePrice = 0;
 
-    const fetchPnL = async () => {
-      const results = new Map<string, PnLData>();
+      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+        priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
+        priceData = getChannelPrices("option").get(priceKey);
+        const optPriceData = optionClosePrices.get(priceKey);
+        prevClosePrice = optPriceData?.prevClose || 0;
+      } else {
+        priceData = equityPrices.get(priceKey);
+        const equityCloseData = closePrices.get(p.symbol);
+        prevClosePrice = equityCloseData?.prevClose || 0;
+      }
 
-      for (const tf of timeframeIds) {
-        try {
-          const ack = await socketHub.sendControl("pnl_by_timeframe", {
-            account,
-            timeframe: tf.toUpperCase(),
-            current_value: currentValue,
-          }, { target: "calc", timeoutMs: 5000 });
-
-          if (ack.ok && ack.data) {
-            const data = (ack.data as any).data || ack.data;
-            results.set(tf, {
-              timeframe: tf,
-              snapshot_date: data.snapshot_date,
-              snapshot_value: data.snapshot_value,
-              current_value: data.current_value,
-              pnl_dollar: data.pnl_dollar,
-              pnl_percent: data.pnl_percent,
-            });
-          }
-        } catch (err) {
-          console.warn(`[PnLSummary] Failed to fetch P&L for ${tf}:`, err);
+      // Get current price
+      let currentPrice = priceData?.last || 0;
+      if (currentPrice === 0) {
+        if (p.secType === "OPT") {
+          const optPriceData = optionClosePrices.get(priceKey);
+          if (optPriceData?.todayClose) currentPrice = optPriceData.todayClose;
+        } else if (p.secType === "STK") {
+          const equityCloseData = closePrices.get(p.symbol);
+          if (equityCloseData?.todayClose) currentPrice = equityCloseData.todayClose;
         }
       }
 
-      setPnlData(results);
-      setLoading(false);
-    };
+      // Skip if no price data
+      if (currentPrice === 0 && prevClosePrice === 0) return;
 
-    fetchPnL();
-  }, [account, currentValue, timeframeIds.join(",")]);
+      const contractMultiplier = p.secType === "OPT" ? 100 : 1;
+      const currentValue = p.quantity * currentPrice * contractMultiplier;
+      const prevValue = p.quantity * prevClosePrice * contractMultiplier;
+      const pnlDollar = currentValue - prevValue;
+      const pnlPercent = prevClosePrice !== 0 ? ((currentPrice - prevClosePrice) / prevClosePrice) * 100 : 0;
 
-  if (!account) {
-    return null;
-  }
+      // Format symbol display
+      let displaySymbol: React.ReactNode;
+      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+        const rightLabel = p.right === "C" || p.right === "Call" ? "Call" : "Put";
+        const formattedExpiry = formatExpiryYYYYMMDD(p.expiry);
+        displaySymbol = (
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 11 }}>
+              {p.symbol} {p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike} {rightLabel}
+            </div>
+            <div style={{ fontSize: 9, color: "#666" }}>{formattedExpiry}</div>
+          </div>
+        );
+      } else {
+        displaySymbol = <div style={{ fontWeight: 600 }}>{p.symbol}</div>;
+      }
+
+      results.push({
+        symbol: p.symbol,
+        displaySymbol,
+        secType: p.secType,
+        quantity: p.quantity,
+        currentPrice,
+        prevClose: prevClosePrice,
+        currentValue,
+        prevValue,
+        pnlDollar,
+        pnlPercent,
+      });
+    });
+
+    // Sort by absolute P&L (biggest movers first)
+    results.sort((a, b) => Math.abs(b.pnlDollar) - Math.abs(a.pnlDollar));
+
+    return results;
+  }, [positions, equityPrices, optionClosePrices, closePrices]);
+
+  // Calculate totals
+  const totals = useMemo(() => {
+    const totalCurrentValue = positionPnLs.reduce((sum, p) => sum + p.currentValue, 0);
+    const totalPrevValue = positionPnLs.reduce((sum, p) => sum + p.prevValue, 0);
+    const totalPnlDollar = positionPnLs.reduce((sum, p) => sum + p.pnlDollar, 0);
+    const totalPnlPercent = totalPrevValue !== 0 ? ((totalCurrentValue - totalPrevValue) / totalPrevValue) * 100 : 0;
+    return { totalCurrentValue, totalPrevValue, totalPnlDollar, totalPnlPercent };
+  }, [positionPnLs]);
+
+  const formatPrice = (value: number) => value.toFixed(4);
+  const formatValue = (value: number) => {
+    if (value < 0) {
+      return `(${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+    }
+    return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const formatPnL = (value: number) => {
+    const prefix = value >= 0 ? "+" : "";
+    return `${prefix}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+  const formatPnLPercent = (value: number) => {
+    const prefix = value >= 0 ? "+" : "";
+    return `${prefix}${value.toFixed(2)}%`;
+  };
+
+  const getPnLColor = (value: number) => (value >= 0 ? "#16a34a" : "#dc2626");
 
   return (
-    <div style={container}>
-      <div style={header}>
-        <span style={{ fontWeight: 600, fontSize: 12 }}>P&L by Timeframe</span>
-        {loading && <span style={{ fontSize: 10, color: "#666" }}>Loading...</span>}
-        {error && <span style={{ fontSize: 10, color: "#dc2626" }}>{error}</span>}
+    <div style={table}>
+      {/* Header */}
+      <div style={{ ...hdr, gridTemplateColumns: "140px 36px 65px 80px 80px 100px 100px 80px 80px" }}>
+        <div style={hdrCell}>Symbol</div>
+        <div style={hdrCell}>Type</div>
+        <div style={hdrCellRight}>Qty</div>
+        <div style={hdrCellRight}>Last</div>
+        <div style={hdrCellRight}>
+          {currentTimeframeInfo ? `${formatCloseDateShort(currentTimeframeInfo.date)}` : "Prev Close"}
+        </div>
+        <div style={hdrCellRight}>Mkt Value</div>
+        <div style={hdrCellRight}>
+          {currentTimeframeInfo ? `${currentTimeframeInfo.label} Value` : "Prev Value"}
+        </div>
+        <div style={hdrCellRight}>P&L $</div>
+        <div style={hdrCellRight}>P&L %</div>
       </div>
-      <div style={grid}>
-        {timeframeIds.map(tf => {
-          const data = pnlData.get(tf);
-          const tfInfo = timeframes.find(t => t.id === tf);
-          const label = tfInfo?.label || tf.toUpperCase();
 
-          if (!data) {
-            return (
-              <div key={tf} style={card}>
-                <div style={cardLabel}>{label}</div>
-                <div style={cardValue}>—</div>
-                <div style={cardSubtext}>No data</div>
-              </div>
-            );
-          }
+      {/* Position Rows */}
+      {positionPnLs.map((p, i) => (
+        <div
+          key={i}
+          style={{ ...row, gridTemplateColumns: "140px 36px 65px 80px 80px 100px 100px 80px 80px" }}
+        >
+          <div>{p.displaySymbol}</div>
+          <div style={gray10}>{p.secType}</div>
+          <div style={rightMono}>{p.quantity.toLocaleString()}</div>
+          <div style={rightMono}>{p.currentPrice > 0 ? formatPrice(p.currentPrice) : "—"}</div>
+          <div style={rightMono}>{p.prevClose > 0 ? formatPrice(p.prevClose) : "—"}</div>
+          <div style={rightMono}>{formatValue(p.currentValue)}</div>
+          <div style={rightMono}>{p.prevValue !== 0 ? formatValue(p.prevValue) : "—"}</div>
+          <div style={{ ...rightMono, color: getPnLColor(p.pnlDollar), fontWeight: 600 }}>
+            {p.prevValue !== 0 ? formatPnL(p.pnlDollar) : "—"}
+          </div>
+          <div style={{ ...rightMono, color: getPnLColor(p.pnlPercent), fontWeight: 600 }}>
+            {p.prevClose !== 0 ? formatPnLPercent(p.pnlPercent) : "—"}
+          </div>
+        </div>
+      ))}
 
-          const isPositive = data.pnl_dollar >= 0;
-          const color = isPositive ? "#16a34a" : "#dc2626";
-
-          return (
-            <div key={tf} style={card}>
-              <div style={cardLabel}>{label}</div>
-              <div style={{ ...cardValue, color }}>
-                {isPositive ? "+" : ""}{data.pnl_percent.toFixed(2)}%
-              </div>
-              <div style={{ ...cardSubtext, color }}>
-                {isPositive ? "+" : ""}${data.pnl_dollar.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2
-                })}
-              </div>
-            </div>
-          );
-        })}
+      {/* Totals Row */}
+      <div style={{ ...row, gridTemplateColumns: "140px 36px 65px 80px 80px 100px 100px 80px 80px", background: "#f8fafc", fontWeight: 600 }}>
+        <div>Total</div>
+        <div></div>
+        <div></div>
+        <div></div>
+        <div></div>
+        <div style={rightMono}>{formatValue(totals.totalCurrentValue)}</div>
+        <div style={rightMono}>{totals.totalPrevValue !== 0 ? formatValue(totals.totalPrevValue) : "—"}</div>
+        <div style={{ ...rightMono, color: getPnLColor(totals.totalPnlDollar) }}>
+          {totals.totalPrevValue !== 0 ? formatPnL(totals.totalPnlDollar) : "—"}
+        </div>
+        <div style={{ ...rightMono, color: getPnLColor(totals.totalPnlPercent) }}>
+          {totals.totalPrevValue !== 0 ? formatPnLPercent(totals.totalPnlPercent) : "—"}
+        </div>
       </div>
     </div>
   );
 }
 
-const container: React.CSSProperties = {
-  background: "#fff",
-  border: "1px solid #e5e7eb",
-  borderRadius: 8,
-  overflow: "hidden",
-};
-
-const header: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
+// Styles
+const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
+const hdr: React.CSSProperties = {
+  display: "grid",
+  fontWeight: 600,
+  fontSize: 10.5,
+  color: "#374151",
+  padding: "0 10px",
+  background: "#f8fafc",
+  height: 26,
   alignItems: "center",
-  padding: "8px 12px",
-  background: "#f1f5f9",
   borderBottom: "1px solid #e5e7eb",
 };
-
-const grid: React.CSSProperties = {
+const hdrCell: React.CSSProperties = { borderRight: "1px solid #ddd", paddingRight: 4 };
+const hdrCellRight: React.CSSProperties = { ...hdrCell, textAlign: "right" };
+const row: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(5, 1fr)",
-  gap: 1,
-  background: "#e5e7eb",
-};
-
-const card: React.CSSProperties = {
-  background: "#fff",
-  padding: "10px 12px",
-  textAlign: "center",
-};
-
-const cardLabel: React.CSSProperties = {
-  fontSize: 10,
-  color: "#666",
-  fontWeight: 600,
-  marginBottom: 4,
-};
-
-const cardValue: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 700,
-  fontFamily: "ui-monospace, monospace",
-};
-
-const cardSubtext: React.CSSProperties = {
   fontSize: 11,
-  fontFamily: "ui-monospace, monospace",
-  marginTop: 2,
+  minHeight: 32,
+  alignItems: "center",
+  padding: "0 10px",
+  borderBottom: "1px solid #f3f4f6",
 };
+const cellBorder: React.CSSProperties = { borderRight: "1px solid #eee", paddingRight: 4, paddingLeft: 2 };
+const rightMono: React.CSSProperties = { ...cellBorder, textAlign: "right", fontFamily: "ui-monospace, monospace" };
+const gray10: React.CSSProperties = { ...cellBorder, fontSize: 10, color: "#666" };
