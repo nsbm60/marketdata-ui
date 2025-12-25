@@ -1,19 +1,21 @@
 // src/components/portfolio/PnLSummary.tsx
-import { useMemo } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { IbPosition } from "../../types/portfolio";
 import { buildOsiSymbol, formatExpiryYYYYMMDD } from "../../utils/options";
 import { getChannelPrices } from "../../hooks/useMarketData";
-import { ClosePriceData, formatCloseDateShort } from "../../services/closePrices";
+import { formatCloseDateShort } from "../../services/closePrices";
 import { TimeframeInfo } from "../../services/marketState";
-
-type OptionPriceData = { prevClose: number; todayClose?: number };
+import {
+  fetchPositionSnapshots,
+  PositionSnapshot,
+  PositionSnapshotResponse,
+  buildPositionKey,
+} from "../../services/positionSnapshots";
 
 type Props = {
   account: string;
   positions: IbPosition[];
   equityPrices: Map<string, { last?: number; bid?: number; ask?: number }>;
-  optionClosePrices: Map<string, OptionPriceData>;
-  closePrices: Map<string, ClosePriceData>;
   timeframe: string;
   timeframes: TimeframeInfo[];
 };
@@ -22,113 +24,167 @@ type PositionPnL = {
   symbol: string;
   displaySymbol: React.ReactNode;
   secType: string;
-  quantity: number;
+  currentQty: number;
+  snapshotQty: number;
   currentPrice: number;
-  prevClose: number;
+  snapshotPrice: number;
   currentValue: number;
-  prevValue: number;
+  snapshotValue: number;
   pnlDollar: number;
   pnlPercent: number;
+  status: "existing" | "new" | "closed";
 };
 
 export default function PnLSummary({
+  account,
   positions,
   equityPrices,
-  optionClosePrices,
-  closePrices,
   timeframe,
   timeframes,
 }: Props) {
+  // State for snapshot data from CalcServer
+  const [snapshot, setSnapshot] = useState<PositionSnapshotResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch snapshots when account or timeframe changes
+  useEffect(() => {
+    if (!account || !timeframe) return;
+
+    // Map timeframe ID to CalcServer format
+    const calcTimeframe = mapTimeframe(timeframe);
+    if (!calcTimeframe) return;
+
+    setLoading(true);
+    setError(null);
+
+    fetchPositionSnapshots(account, calcTimeframe)
+      .then((data) => {
+        setSnapshot(data);
+        if (!data) {
+          setError("No snapshot data available");
+        }
+      })
+      .catch((err) => {
+        console.error("[PnLSummary] Error fetching snapshots:", err);
+        setError("Failed to fetch snapshot data");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [account, timeframe]);
+
   // Get current timeframe info for display
   const currentTimeframeInfo = useMemo(() => {
-    return timeframes.find(t => t.id === timeframe);
+    return timeframes.find((t) => t.id === timeframe);
   }, [timeframes, timeframe]);
+
+  // Build snapshot lookup map
+  const snapshotMap = useMemo(() => {
+    const map = new Map<string, PositionSnapshot>();
+    if (snapshot?.positions) {
+      snapshot.positions.forEach((p) => {
+        const key = buildPositionKey(p.symbol, p.sec_type, p.strike, p.expiry, p.right);
+        map.set(key, p);
+      });
+    }
+    return map;
+  }, [snapshot]);
 
   // Calculate P&L for each position
   const positionPnLs = useMemo(() => {
     const results: PositionPnL[] = [];
+    const processedKeys = new Set<string>();
 
+    // Process current positions
     positions.forEach((p) => {
-      let priceKey = p.symbol.toUpperCase();
-      let priceData;
-      let prevClosePrice = 0;
-
-      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
-        priceData = getChannelPrices("option").get(priceKey);
-        const optPriceData = optionClosePrices.get(priceKey);
-        prevClosePrice = optPriceData?.prevClose || 0;
-      } else {
-        priceData = equityPrices.get(priceKey);
-        const equityCloseData = closePrices.get(p.symbol);
-        prevClosePrice = equityCloseData?.prevClose || 0;
-      }
+      const posKey = buildPositionKey(
+        p.symbol,
+        p.secType,
+        p.strike,
+        p.expiry ? formatExpiryForKey(p.expiry) : undefined,
+        p.right
+      );
+      processedKeys.add(posKey);
 
       // Get current price
-      let currentPrice = priceData?.last || 0;
-      if (currentPrice === 0) {
-        if (p.secType === "OPT") {
-          const optPriceData = optionClosePrices.get(priceKey);
-          if (optPriceData?.todayClose) currentPrice = optPriceData.todayClose;
-        } else if (p.secType === "STK") {
-          const equityCloseData = closePrices.get(p.symbol);
-          if (equityCloseData?.todayClose) currentPrice = equityCloseData.todayClose;
-        }
+      let currentPrice = 0;
+      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+        const osiSymbol = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
+        const priceData = getChannelPrices("option").get(osiSymbol);
+        currentPrice = priceData?.last || 0;
+      } else {
+        const priceData = equityPrices.get(p.symbol.toUpperCase());
+        currentPrice = priceData?.last || 0;
       }
-
-      // Skip if no price data
-      if (currentPrice === 0 && prevClosePrice === 0) return;
 
       const contractMultiplier = p.secType === "OPT" ? 100 : 1;
       const currentValue = p.quantity * currentPrice * contractMultiplier;
-      const prevValue = p.quantity * prevClosePrice * contractMultiplier;
-      const pnlDollar = currentValue - prevValue;
-      const pnlPercent = prevClosePrice !== 0 ? ((currentPrice - prevClosePrice) / prevClosePrice) * 100 : 0;
+
+      // Get snapshot data
+      const snapshotPos = snapshotMap.get(posKey);
+      const snapshotValue = snapshotPos?.market_value ?? 0;
+      const snapshotPrice = snapshotPos?.close_price ?? 0;
+      const snapshotQty = snapshotPos?.quantity ?? 0;
+
+      const pnlDollar = currentValue - snapshotValue;
+      const pnlPercent = snapshotValue !== 0 ? (pnlDollar / Math.abs(snapshotValue)) * 100 : 0;
 
       // Format symbol display
-      let displaySymbol: React.ReactNode;
-      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        const rightLabel = p.right === "C" || p.right === "Call" ? "Call" : "Put";
-        const formattedExpiry = formatExpiryYYYYMMDD(p.expiry);
-        displaySymbol = (
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 11 }}>
-              {p.symbol} {p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike} {rightLabel}
-            </div>
-            <div style={{ fontSize: 9, color: "#666" }}>{formattedExpiry}</div>
-          </div>
-        );
-      } else {
-        displaySymbol = <div style={{ fontWeight: 600 }}>{p.symbol}</div>;
-      }
+      const displaySymbol = formatDisplaySymbol(p);
 
       results.push({
         symbol: p.symbol,
         displaySymbol,
         secType: p.secType,
-        quantity: p.quantity,
+        currentQty: p.quantity,
+        snapshotQty,
         currentPrice,
-        prevClose: prevClosePrice,
+        snapshotPrice,
         currentValue,
-        prevValue,
+        snapshotValue,
         pnlDollar,
         pnlPercent,
+        status: snapshotPos ? "existing" : "new",
       });
+    });
+
+    // Process closed positions (in snapshot but not in current)
+    snapshotMap.forEach((snapshotPos, key) => {
+      if (!processedKeys.has(key)) {
+        const displaySymbol = formatDisplaySymbolFromSnapshot(snapshotPos);
+
+        results.push({
+          symbol: snapshotPos.symbol,
+          displaySymbol,
+          secType: snapshotPos.sec_type,
+          currentQty: 0,
+          snapshotQty: snapshotPos.quantity,
+          currentPrice: 0,
+          snapshotPrice: snapshotPos.close_price,
+          currentValue: 0,
+          snapshotValue: snapshotPos.market_value,
+          pnlDollar: -snapshotPos.market_value,
+          pnlPercent: -100,
+          status: "closed",
+        });
+      }
     });
 
     // Sort by absolute P&L (biggest movers first)
     results.sort((a, b) => Math.abs(b.pnlDollar) - Math.abs(a.pnlDollar));
 
     return results;
-  }, [positions, equityPrices, optionClosePrices, closePrices]);
+  }, [positions, equityPrices, snapshotMap]);
 
   // Calculate totals
   const totals = useMemo(() => {
     const totalCurrentValue = positionPnLs.reduce((sum, p) => sum + p.currentValue, 0);
-    const totalPrevValue = positionPnLs.reduce((sum, p) => sum + p.prevValue, 0);
+    const totalSnapshotValue = positionPnLs.reduce((sum, p) => sum + p.snapshotValue, 0);
     const totalPnlDollar = positionPnLs.reduce((sum, p) => sum + p.pnlDollar, 0);
-    const totalPnlPercent = totalPrevValue !== 0 ? ((totalCurrentValue - totalPrevValue) / totalPrevValue) * 100 : 0;
-    return { totalCurrentValue, totalPrevValue, totalPnlDollar, totalPnlPercent };
+    const totalPnlPercent =
+      totalSnapshotValue !== 0 ? (totalPnlDollar / Math.abs(totalSnapshotValue)) * 100 : 0;
+    return { totalCurrentValue, totalSnapshotValue, totalPnlDollar, totalPnlPercent };
   }, [positionPnLs]);
 
   const formatPrice = (value: number) => value.toFixed(4);
@@ -148,21 +204,36 @@ export default function PnLSummary({
   };
 
   const getPnLColor = (value: number) => (value >= 0 ? "#16a34a" : "#dc2626");
+  const getStatusBadge = (status: "existing" | "new" | "closed") => {
+    if (status === "new") return <span style={newBadge}>NEW</span>;
+    if (status === "closed") return <span style={closedBadge}>CLOSED</span>;
+    return null;
+  };
+
+  // Show loading/error states
+  if (loading) {
+    return <div style={{ padding: 20, color: "#666" }}>Loading snapshot data...</div>;
+  }
+
+  if (error && positionPnLs.length === 0) {
+    return <div style={{ padding: 20, color: "#666" }}>{error}</div>;
+  }
 
   return (
     <div style={table}>
       {/* Header */}
-      <div style={{ ...hdr, gridTemplateColumns: "140px 36px 65px 80px 80px 100px 100px 80px 80px" }}>
+      <div style={{ ...hdr, gridTemplateColumns: "150px 36px 55px 55px 70px 70px 90px 90px 80px 70px" }}>
         <div style={hdrCell}>Symbol</div>
         <div style={hdrCell}>Type</div>
         <div style={hdrCellRight}>Qty</div>
+        <div style={hdrCellRight}>Snap Qty</div>
         <div style={hdrCellRight}>Last</div>
         <div style={hdrCellRight}>
-          {currentTimeframeInfo ? `${formatCloseDateShort(currentTimeframeInfo.date)}` : "Prev Close"}
+          {snapshot?.snapshot_date ? formatCloseDateShort(snapshot.snapshot_date) : "Snap"}
         </div>
         <div style={hdrCellRight}>Mkt Value</div>
         <div style={hdrCellRight}>
-          {currentTimeframeInfo ? `${currentTimeframeInfo.label} Value` : "Prev Value"}
+          {currentTimeframeInfo ? `${currentTimeframeInfo.label} Val` : "Snap Val"}
         </div>
         <div style={hdrCellRight}>P&L $</div>
         <div style={hdrCellRight}>P&L %</div>
@@ -172,45 +243,125 @@ export default function PnLSummary({
       {positionPnLs.map((p, i) => (
         <div
           key={i}
-          style={{ ...row, gridTemplateColumns: "140px 36px 65px 80px 80px 100px 100px 80px 80px" }}
+          style={{
+            ...row,
+            gridTemplateColumns: "150px 36px 55px 55px 70px 70px 90px 90px 80px 70px",
+            opacity: p.status === "closed" ? 0.6 : 1,
+          }}
         >
-          <div>{p.displaySymbol}</div>
+          <div>
+            {p.displaySymbol}
+            {getStatusBadge(p.status)}
+          </div>
           <div style={gray10}>{p.secType}</div>
-          <div style={rightMono}>{p.quantity.toLocaleString()}</div>
+          <div style={rightMono}>{p.currentQty !== 0 ? p.currentQty.toLocaleString() : "—"}</div>
+          <div style={rightMono}>{p.snapshotQty !== 0 ? p.snapshotQty.toLocaleString() : "—"}</div>
           <div style={rightMono}>{p.currentPrice > 0 ? formatPrice(p.currentPrice) : "—"}</div>
-          <div style={rightMono}>{p.prevClose > 0 ? formatPrice(p.prevClose) : "—"}</div>
-          <div style={rightMono}>{formatValue(p.currentValue)}</div>
-          <div style={rightMono}>{p.prevValue !== 0 ? formatValue(p.prevValue) : "—"}</div>
+          <div style={rightMono}>{p.snapshotPrice > 0 ? formatPrice(p.snapshotPrice) : "—"}</div>
+          <div style={rightMono}>{p.currentValue !== 0 ? formatValue(p.currentValue) : "—"}</div>
+          <div style={rightMono}>{p.snapshotValue !== 0 ? formatValue(p.snapshotValue) : "—"}</div>
           <div style={{ ...rightMono, color: getPnLColor(p.pnlDollar), fontWeight: 600 }}>
-            {p.prevValue !== 0 ? formatPnL(p.pnlDollar) : "—"}
+            {formatPnL(p.pnlDollar)}
           </div>
           <div style={{ ...rightMono, color: getPnLColor(p.pnlPercent), fontWeight: 600 }}>
-            {p.prevClose !== 0 ? formatPnLPercent(p.pnlPercent) : "—"}
+            {p.snapshotValue !== 0 ? formatPnLPercent(p.pnlPercent) : "—"}
           </div>
         </div>
       ))}
 
       {/* Totals Row */}
-      <div style={{ ...row, gridTemplateColumns: "140px 36px 65px 80px 80px 100px 100px 80px 80px", background: "#f8fafc", fontWeight: 600 }}>
+      <div
+        style={{
+          ...row,
+          gridTemplateColumns: "150px 36px 55px 55px 70px 70px 90px 90px 80px 70px",
+          background: "#f8fafc",
+          fontWeight: 600,
+        }}
+      >
         <div>Total</div>
         <div></div>
         <div></div>
         <div></div>
         <div></div>
+        <div></div>
         <div style={rightMono}>{formatValue(totals.totalCurrentValue)}</div>
-        <div style={rightMono}>{totals.totalPrevValue !== 0 ? formatValue(totals.totalPrevValue) : "—"}</div>
+        <div style={rightMono}>
+          {totals.totalSnapshotValue !== 0 ? formatValue(totals.totalSnapshotValue) : "—"}
+        </div>
         <div style={{ ...rightMono, color: getPnLColor(totals.totalPnlDollar) }}>
-          {totals.totalPrevValue !== 0 ? formatPnL(totals.totalPnlDollar) : "—"}
+          {formatPnL(totals.totalPnlDollar)}
         </div>
         <div style={{ ...rightMono, color: getPnLColor(totals.totalPnlPercent) }}>
-          {totals.totalPrevValue !== 0 ? formatPnLPercent(totals.totalPnlPercent) : "—"}
+          {totals.totalSnapshotValue !== 0 ? formatPnLPercent(totals.totalPnlPercent) : "—"}
         </div>
       </div>
+
+      {/* Snapshot info footer */}
+      {snapshot?.snapshot_date && (
+        <div style={{ padding: "8px 10px", fontSize: 10, color: "#666", borderTop: "1px solid #e5e7eb" }}>
+          Comparing to snapshot from {snapshot.snapshot_date}
+        </div>
+      )}
     </div>
   );
 }
 
-// Styles
+// ---- Helpers ----
+
+function mapTimeframe(timeframe: string): string | null {
+  // Map UI timeframe IDs to CalcServer format
+  const mapping: Record<string, string> = {
+    "1d": "1D",
+    "2d": "1D", // Use 1D for 2d as well for now
+    "1w": "1W",
+    "1m": "1M",
+    "3m": "3M",
+    "ytd": "YTD",
+  };
+  return mapping[timeframe.toLowerCase()] ?? timeframe.toUpperCase();
+}
+
+function formatExpiryForKey(expiry: string): string {
+  // Convert YYYYMMDD to YYYY-MM-DD for matching
+  if (expiry.length === 8 && !expiry.includes("-")) {
+    return `${expiry.slice(0, 4)}-${expiry.slice(4, 6)}-${expiry.slice(6, 8)}`;
+  }
+  return expiry;
+}
+
+function formatDisplaySymbol(p: IbPosition): React.ReactNode {
+  if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+    const rightLabel = p.right === "C" || p.right === "Call" ? "Call" : "Put";
+    const formattedExpiry = formatExpiryYYYYMMDD(p.expiry);
+    return (
+      <div>
+        <div style={{ fontWeight: 600, fontSize: 11 }}>
+          {p.symbol} {p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike} {rightLabel}
+        </div>
+        <div style={{ fontSize: 9, color: "#666" }}>{formattedExpiry}</div>
+      </div>
+    );
+  }
+  return <div style={{ fontWeight: 600 }}>{p.symbol}</div>;
+}
+
+function formatDisplaySymbolFromSnapshot(p: PositionSnapshot): React.ReactNode {
+  if (p.sec_type === "OPT" && p.strike && p.expiry && p.right) {
+    const rightLabel = p.right === "C" ? "Call" : "Put";
+    return (
+      <div>
+        <div style={{ fontWeight: 600, fontSize: 11 }}>
+          {p.symbol} {p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike} {rightLabel}
+        </div>
+        <div style={{ fontSize: 9, color: "#666" }}>{p.expiry}</div>
+      </div>
+    );
+  }
+  return <div style={{ fontWeight: 600 }}>{p.symbol}</div>;
+}
+
+// ---- Styles ----
+
 const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
 const hdr: React.CSSProperties = {
   display: "grid",
@@ -236,3 +387,21 @@ const row: React.CSSProperties = {
 const cellBorder: React.CSSProperties = { borderRight: "1px solid #eee", paddingRight: 4, paddingLeft: 2 };
 const rightMono: React.CSSProperties = { ...cellBorder, textAlign: "right", fontFamily: "ui-monospace, monospace" };
 const gray10: React.CSSProperties = { ...cellBorder, fontSize: 10, color: "#666" };
+const newBadge: React.CSSProperties = {
+  marginLeft: 4,
+  padding: "1px 4px",
+  fontSize: 8,
+  fontWeight: 600,
+  background: "#dbeafe",
+  color: "#1d4ed8",
+  borderRadius: 2,
+};
+const closedBadge: React.CSSProperties = {
+  marginLeft: 4,
+  padding: "1px 4px",
+  fontSize: 8,
+  fontWeight: 600,
+  background: "#fee2e2",
+  color: "#dc2626",
+  borderRadius: 2,
+};

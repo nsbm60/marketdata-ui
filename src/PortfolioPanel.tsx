@@ -603,8 +603,6 @@ export default function PortfolioPanel() {
                     account={primaryAccount}
                     positions={accountState.positions}
                     equityPrices={equityPrices}
-                    optionClosePrices={optionClosePrices}
-                    closePrices={closePrices}
                     timeframe={timeframe}
                     timeframes={marketState?.timeframes ?? []}
                   />
