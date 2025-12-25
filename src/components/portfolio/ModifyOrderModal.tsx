@@ -4,6 +4,7 @@ import { IbOpenOrder } from "../../types/portfolio";
 import { socketHub } from "../../ws/SocketHub";
 import { modalOverlay, modalContent } from "./styles";
 import { buildOsiSymbol } from "../../utils/options";
+import Select from "../shared/Select";
 
 const THROTTLE_MS = 200;
 
@@ -28,6 +29,10 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
   const [theta, setTheta] = useState("—");
   const [vega, setVega] = useState("—");
   const [iv, setIv] = useState("—");
+
+  // Adaptive algo
+  const [useAdaptive, setUseAdaptive] = useState(false);
+  const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">("Normal");
 
   // Throttling refs
   interface PendingUpdates {
@@ -205,6 +210,12 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
       payload.right = (rightVal === "Call" || rightVal === "C") ? "C" : "P";
     }
 
+    // Add adaptive algo if enabled (only for limit orders)
+    if (useAdaptive && order.orderType !== "MKT") {
+      payload.algoStrategy = "Adaptive";
+      payload.algoPriority = algoPriority;
+    }
+
     socketHub.send(payload);
     onClose();
   };
@@ -318,6 +329,39 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
                 boxSizing: "border-box",
               }}
             />
+          </div>
+        )}
+
+        {/* Adaptive Algo - only show for non-market orders */}
+        {order.orderType !== "MKT" && (
+          <div style={{
+            marginBottom: 10,
+            padding: "8px 10px",
+            background: "#f8fafc",
+            borderRadius: 6,
+            border: "1px solid #e2e8f0"
+          }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={useAdaptive}
+                onChange={e => setUseAdaptive(e.target.checked)}
+                style={{ width: 14, height: 14 }}
+              />
+              <span style={{ fontSize: 12, fontWeight: 500 }}>Use Adaptive Algo</span>
+            </label>
+            {useAdaptive && (
+              <Select
+                value={algoPriority}
+                onChange={e => setAlgoPriority(e.target.value as any)}
+                size="sm"
+                style={{ marginTop: 6, width: "100%" }}
+              >
+                <option value="Patient">Patient - Max price improvement</option>
+                <option value="Normal">Normal - Balanced</option>
+                <option value="Urgent">Urgent - Fast fill</option>
+              </Select>
+            )}
           </div>
         )}
 

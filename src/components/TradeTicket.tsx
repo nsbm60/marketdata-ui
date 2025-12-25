@@ -22,6 +22,8 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
   const [session, setSession] = useState<"REGULAR" | "PREMARKET" | "AFTERHOURS">("REGULAR");
+  const [useAdaptive, setUseAdaptive] = useState(false);
+  const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">("Normal");
 
   const [last, setLast] = useState(initialLast !== undefined ? initialLast.toFixed(4) : "—");
   const [bid, setBid] = useState(initialBid !== undefined ? initialBid.toFixed(4) : "—");
@@ -139,6 +141,12 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
       }
     }
 
+    // Add adaptive algo if enabled (only for limit orders)
+    if (useAdaptive && orderType !== "MKT") {
+      data.algoStrategy = "Adaptive";
+      data.algoPriority = algoPriority;
+    }
+
     socketHub.send({
       type: "control",
       target: "ibAccount",
@@ -232,6 +240,39 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
           <option value="PREMARKET">Pre-Market (4:00 AM - 9:30 AM ET)</option>
           <option value="AFTERHOURS">After-Hours (4:00 PM - 8:00 PM ET)</option>
         </Select>
+
+        {/* Adaptive Algo - only show for non-market orders */}
+        {orderType !== "MKT" && (
+          <div style={{
+            marginBottom: 10,
+            padding: "8px 10px",
+            background: "#f8fafc",
+            borderRadius: 8,
+            border: "1px solid #e2e8f0"
+          }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={useAdaptive}
+                onChange={e => setUseAdaptive(e.target.checked)}
+                style={{ width: 16, height: 16 }}
+              />
+              <span style={{ fontSize: 13, fontWeight: 500 }}>Use Adaptive Algo</span>
+            </label>
+            {useAdaptive && (
+              <Select
+                value={algoPriority}
+                onChange={e => setAlgoPriority(e.target.value as any)}
+                size="sm"
+                style={{ marginTop: 8, width: "100%" }}
+              >
+                <option value="Patient">Patient - Max price improvement</option>
+                <option value="Normal">Normal - Balanced</option>
+                <option value="Urgent">Urgent - Fast fill</option>
+              </Select>
+            )}
+          </div>
+        )}
 
         {(orderType === "LMT" || orderType === "STPLMT") && (
           <input placeholder="Limit Price" value={limitPrice} onChange={e => setLimitPrice(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: "1px solid #ccc" }} />

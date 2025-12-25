@@ -53,6 +53,8 @@ export default function OptionTradeTicket({
   const [orderType, setOrderType] = useState<"MKT" | "LMT" | "STP" | "STPLMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
+  const [useAdaptive, setUseAdaptive] = useState(false);
+  const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">("Normal");
 
   // Live market data updates (prices)
   const [liveLast, setLiveLast] = useState(last?.toFixed(4) || "—");
@@ -202,6 +204,12 @@ export default function OptionTradeTicket({
       }
     }
 
+    // Add adaptive algo if enabled (only for limit orders)
+    if (useAdaptive && orderType !== "MKT") {
+      data.algoStrategy = "Adaptive";
+      data.algoPriority = algoPriority;
+    }
+
     socketHub.send({
       type: "control",
       target: "ibAccount",
@@ -336,6 +344,39 @@ export default function OptionTradeTicket({
           <option value="STP">Stop</option>
           <option value="STPLMT">Stop Limit</option>
         </Select>
+
+        {/* Adaptive Algo - only show for non-market orders */}
+        {orderType !== "MKT" && (
+          <div style={{
+            marginBottom: 10,
+            padding: "8px 10px",
+            background: "#f8fafc",
+            borderRadius: 8,
+            border: "1px solid #e2e8f0"
+          }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={useAdaptive}
+                onChange={e => setUseAdaptive(e.target.checked)}
+                style={{ width: 16, height: 16 }}
+              />
+              <span style={{ fontSize: 13, fontWeight: 500 }}>Use Adaptive Algo</span>
+            </label>
+            {useAdaptive && (
+              <Select
+                value={algoPriority}
+                onChange={e => setAlgoPriority(e.target.value as any)}
+                size="sm"
+                style={{ marginTop: 8, width: "100%" }}
+              >
+                <option value="Patient">Patient - Max price improvement</option>
+                <option value="Normal">Normal - Balanced</option>
+                <option value="Urgent">Urgent - Fast fill</option>
+              </Select>
+            )}
+          </div>
+        )}
 
         {(orderType === "LMT" || orderType === "STPLMT") && (
           <input 
