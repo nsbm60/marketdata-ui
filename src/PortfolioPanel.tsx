@@ -10,6 +10,7 @@ import {
   CancelOrderModal,
   ModifyOrderModal,
   OptionsAnalysisTable,
+  PnLSummary,
 } from "./components/portfolio";
 import ConnectionStatus from "./components/shared/ConnectionStatus";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
@@ -206,6 +207,50 @@ export default function PortfolioPanel() {
     };
   }, [optionOsiSymbols]);
 
+  // Memoize portfolio totals for P&L summary
+  const { totalMktValue, totalCash, totalPortfolio, primaryAccount } = useMemo(() => {
+    if (!accountState?.positions) {
+      return { totalMktValue: 0, totalCash: 0, totalPortfolio: 0, primaryAccount: "" };
+    }
+
+    let mktValue = 0;
+    accountState.positions.forEach((p) => {
+      let priceKey = p.symbol.toUpperCase();
+      let priceData;
+      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+        priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
+        priceData = getChannelPrices("option").get(priceKey);
+      } else {
+        priceData = equityPrices.get(priceKey);
+      }
+      const lastPrice = priceData?.last || 0;
+      let displayPrice = lastPrice;
+      if (lastPrice === 0) {
+        if (p.secType === "OPT") {
+          const optPriceData = optionClosePrices.get(priceKey);
+          if (optPriceData?.todayClose) displayPrice = optPriceData.todayClose;
+        } else if (p.secType === "STK") {
+          const equityCloseData = closePrices.get(p.symbol);
+          if (equityCloseData?.todayClose) displayPrice = equityCloseData.todayClose;
+        }
+      }
+      const contractMultiplier = p.secType === "OPT" ? 100 : 1;
+      mktValue += p.quantity * displayPrice * contractMultiplier;
+    });
+
+    const cash = accountState.cash.reduce((sum, c) => sum + c.amount, 0);
+
+    // Get primary account (first account seen)
+    const account = accountState.positions[0]?.account || accountState.cash[0]?.account || "";
+
+    return {
+      totalMktValue: mktValue,
+      totalCash: cash,
+      totalPortfolio: mktValue + cash,
+      primaryAccount: account,
+    };
+  }, [accountState, equityPrices, optionClosePrices, closePrices]);
+
   return (
     <div style={shell}>
       <div style={header}>
@@ -310,53 +355,27 @@ export default function PortfolioPanel() {
         {accountState ? (
           <>
             <div style={summary}>
-              {(() => {
-                // Calculate total market value
-                let totalMktValue = 0;
-                accountState.positions.forEach((p) => {
-                  let priceKey = p.symbol.toUpperCase();
-                  let priceData;
-                  if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-                    priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
-                    priceData = getChannelPrices("option").get(priceKey);
-                  } else {
-                    priceData = equityPrices.get(priceKey);
-                  }
-                  const lastPrice = priceData?.last || 0;
-                  // Fallback to close prices if no live price
-                  let displayPrice = lastPrice;
-                  if (lastPrice === 0) {
-                    if (p.secType === "OPT") {
-                      const optPriceData = optionClosePrices.get(priceKey);
-                      if (optPriceData?.todayClose) displayPrice = optPriceData.todayClose;
-                    } else if (p.secType === "STK") {
-                      const equityCloseData = closePrices.get(p.symbol);
-                      if (equityCloseData?.todayClose) displayPrice = equityCloseData.todayClose;
-                    }
-                  }
-                  const contractMultiplier = p.secType === "OPT" ? 100 : 1;
-                  totalMktValue += p.quantity * displayPrice * contractMultiplier;
-                });
-                // Get total cash
-                const totalCash = accountState.cash.reduce((sum, c) => sum + c.amount, 0);
-                const totalPortfolio = totalMktValue + totalCash;
-                return (
-                  <>
-                    <span style={{ marginRight: 20, fontWeight: 700, fontSize: 13 }}>
-                      Portfolio: ${totalPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                    <span style={{ marginRight: 16, fontWeight: 600 }}>
-                      Mkt Value: ${totalMktValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                    <span style={{ marginRight: 16, fontWeight: 600 }}>
-                      Cash: ${totalCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                    <span style={{ color: "#666", fontWeight: 500 }}>
-                      ({accountState.positions.length} positions)
-                    </span>
-                  </>
-                );
-              })()}
+              <span style={{ marginRight: 20, fontWeight: 700, fontSize: 13 }}>
+                Portfolio: ${totalPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+              <span style={{ marginRight: 16, fontWeight: 600 }}>
+                Mkt Value: ${totalMktValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+              <span style={{ marginRight: 16, fontWeight: 600 }}>
+                Cash: ${totalCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+              <span style={{ color: "#666", fontWeight: 500 }}>
+                ({accountState.positions.length} positions)
+              </span>
+            </div>
+
+            {/* P&L by Timeframe */}
+            <div style={{ marginBottom: 12 }}>
+              <PnLSummary
+                account={primaryAccount}
+                currentValue={totalPortfolio}
+                timeframes={marketState?.timeframes ?? []}
+              />
             </div>
 
             <div style={gridWrap}>
