@@ -30,9 +30,11 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
   const [vega, setVega] = useState("—");
   const [iv, setIv] = useState("—");
 
-  // Adaptive algo
-  const [useAdaptive, setUseAdaptive] = useState(false);
-  const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">("Normal");
+  // Adaptive algo - initialize from order's current settings
+  const [useAdaptive, setUseAdaptive] = useState(order.algoStrategy === "Adaptive");
+  const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">(
+    (order.algoPriority as "Patient" | "Normal" | "Urgent") || "Normal"
+  );
 
   // Throttling refs
   interface PendingUpdates {

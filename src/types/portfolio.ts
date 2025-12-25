@@ -55,6 +55,9 @@ export type IbOpenOrder = {
   strike?: number;
   expiry?: string;
   right?: string;
+  // Algo fields
+  algoStrategy?: string;  // e.g., "Adaptive"
+  algoPriority?: string;  // e.g., "Patient", "Normal", "Urgent"
 };
 
 export type IbOrderHistory = {
