@@ -12,13 +12,15 @@ import {
   OptionsAnalysisTable,
 } from "./components/portfolio";
 import ConnectionStatus from "./components/shared/ConnectionStatus";
-import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, formatCloseDateShort } from "./services/closePrices";
+import TimeframeSelector from "./components/shared/TimeframeSelector";
+import TabButtonGroup from "./components/shared/TabButtonGroup";
+import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
+import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
 import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
 import { usePortfolioData } from "./hooks/usePortfolioData";
 import { useTradeTicket } from "./hooks/useTradeTicket";
-import Select from "./components/shared/Select";
 
 export default function PortfolioPanel() {
   // Portfolio data and IB connection state
@@ -363,55 +365,20 @@ export default function PortfolioPanel() {
               {/* Positions with BUY/SELL buttons */}
               <section style={section}>
                 <div style={{ ...title, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  {/* Tabs */}
-                  <div style={{ display: "flex", gap: 0 }}>
-                    <button
-                      onClick={() => setPositionsTab("positions")}
-                      style={{
-                        padding: "4px 12px",
-                        border: "1px solid #d1d5db",
-                        borderRight: "none",
-                        borderRadius: "4px 0 0 4px",
-                        background: positionsTab === "positions" ? "#2563eb" : "white",
-                        color: positionsTab === "positions" ? "white" : "#374151",
-                        fontSize: 11,
-                        fontWeight: 500,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Positions
-                    </button>
-                    <button
-                      onClick={() => setPositionsTab("analysis")}
-                      style={{
-                        padding: "4px 12px",
-                        border: "1px solid #d1d5db",
-                        borderRadius: "0 4px 4px 0",
-                        background: positionsTab === "analysis" ? "#2563eb" : "white",
-                        color: positionsTab === "analysis" ? "white" : "#374151",
-                        fontSize: 11,
-                        fontWeight: 500,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Options Analysis
-                    </button>
-                  </div>
-                  {/* Timeframe selector - only show for positions tab */}
+                  <TabButtonGroup
+                    tabs={[
+                      { id: "positions", label: "Positions" },
+                      { id: "analysis", label: "Options Analysis" },
+                    ]}
+                    activeTab={positionsTab}
+                    onTabChange={(tab) => setPositionsTab(tab as "positions" | "analysis")}
+                  />
                   {positionsTab === "positions" && (
-                    <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, fontSize: 11 }}>
-                      <span>vs:</span>
-                      <Select
-                        value={timeframe}
-                        onChange={(e) => setTimeframe(e.target.value)}
-                      >
-                        {(marketState?.timeframes ?? []).map((tf) => (
-                          <option key={tf.id} value={tf.id}>
-                            {formatCloseDateShort(tf.date)}{tf.label ? ` (${tf.label})` : ""}
-                          </option>
-                        ))}
-                      </Select>
-                    </span>
+                    <TimeframeSelector
+                      value={timeframe}
+                      onChange={setTimeframe}
+                      timeframes={marketState?.timeframes ?? []}
+                    />
                   )}
                 </div>
 
@@ -508,10 +475,6 @@ export default function PortfolioPanel() {
                         dollarChange = displayPrice - optPriceData.prevClose;
                       }
                     }
-                    const changeColor = pctChange !== undefined
-                      ? (pctChange >= 0 ? "#16a34a" : "#dc2626")
-                      : undefined;
-
                     // Format symbol display based on secType
                     let symbolDisplay: React.ReactNode;
                     if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
@@ -552,18 +515,10 @@ export default function PortfolioPanel() {
                           {displayPrice > 0 ? displayPrice.toFixed(4) : "—"}
                         </div>
                         <div style={rightMono}>
-                          {pctChange !== undefined ? (
-                            <span style={{ color: changeColor, fontWeight: 600 }}>
-                              {pctChange >= 0 ? "▲" : "▼"} {formatPctChange(pctChange)}
-                            </span>
-                          ) : "—"}
+                          <PriceChangePercent value={pctChange} />
                         </div>
                         <div style={rightMono}>
-                          {dollarChange !== undefined ? (
-                            <span style={{ color: changeColor, fontWeight: 600 }}>
-                              {dollarChange >= 0 ? "+" : ""}{dollarChange.toFixed(2)}
-                            </span>
-                          ) : "—"}
+                          <PriceChangeDollar value={dollarChange} />
                         </div>
                         <div style={rightMono}>
                           {mktValueDisplay}

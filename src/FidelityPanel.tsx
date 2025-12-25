@@ -10,11 +10,13 @@ import {
   clearPositions,
 } from "./utils/fidelity";
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
-import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, formatCloseDateShort } from "./services/closePrices";
+import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { formatExpiryShort, daysToExpiry } from "./utils/options";
 import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalysis";
-import Select from "./components/shared/Select";
+import TimeframeSelector from "./components/shared/TimeframeSelector";
+import TabButtonGroup from "./components/shared/TabButtonGroup";
+import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
 
 export default function FidelityPanel() {
   const [positions, setPositions] = useState<FidelityPosition[]>([]);
@@ -326,35 +328,20 @@ export default function FidelityPanel() {
             <div style={section}>
               {/* Tab bar */}
               <div style={tabBar}>
-                <div style={{ display: "flex", gap: 0 }}>
-                  <button
-                    onClick={() => setActiveTab("positions")}
-                    style={tabButton(activeTab === "positions")}
-                  >
-                    Positions
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("analysis")}
-                    style={tabButton(activeTab === "analysis")}
-                  >
-                    Options Analysis
-                  </button>
-                </div>
-                {/* Timeframe selector - only for positions tab */}
+                <TabButtonGroup
+                  tabs={[
+                    { id: "positions", label: "Positions" },
+                    { id: "analysis", label: "Options Analysis" },
+                  ]}
+                  activeTab={activeTab}
+                  onTabChange={(tab) => setActiveTab(tab as "positions" | "analysis")}
+                />
                 {activeTab === "positions" && marketState?.timeframes && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-                    <span>vs:</span>
-                    <Select
-                      value={timeframe}
-                      onChange={(e) => setTimeframe(e.target.value)}
-                    >
-                      {marketState.timeframes.map((tf) => (
-                        <option key={tf.id} value={tf.id}>
-                          {formatCloseDateShort(tf.date)}{tf.label ? ` (${tf.label})` : ""}
-                        </option>
-                      ))}
-                    </Select>
-                  </span>
+                  <TimeframeSelector
+                    value={timeframe}
+                    onChange={setTimeframe}
+                    timeframes={marketState.timeframes}
+                  />
                 )}
               </div>
 
@@ -421,10 +408,6 @@ export default function FidelityPanel() {
                         }
                       }
                     }
-                    const changeColor = pctChange !== undefined
-                      ? (pctChange >= 0 ? "#16a34a" : "#dc2626")
-                      : undefined;
-
                     // Symbol display
                     let symbolDisplay: React.ReactNode;
                     if (pos.type === "option" && pos.strike !== undefined && pos.expiry !== undefined) {
@@ -454,18 +437,10 @@ export default function FidelityPanel() {
                           {currentPrice !== null ? `$${currentPrice.toFixed(2)}` : "—"}
                         </div>
                         <div style={rightMono}>
-                          {pctChange !== undefined ? (
-                            <span style={{ color: changeColor, fontWeight: 600 }}>
-                              {pctChange >= 0 ? "▲" : "▼"} {formatPctChange(pctChange)}
-                            </span>
-                          ) : "—"}
+                          <PriceChangePercent value={pctChange} />
                         </div>
                         <div style={rightMono}>
-                          {dollarChange !== undefined ? (
-                            <span style={{ color: changeColor, fontWeight: 600 }}>
-                              {dollarChange >= 0 ? "+" : ""}{dollarChange.toFixed(2)}
-                            </span>
-                          ) : "—"}
+                          <PriceChangeDollar value={dollarChange} />
                         </div>
                         <div style={rightMono}>
                           {mktValue !== null
@@ -565,18 +540,6 @@ const body: React.CSSProperties = { flex: 1, overflow: "auto", padding: "12px 14
 const summary: React.CSSProperties = { fontSize: 11, color: "#4b5563", marginBottom: 10 };
 const section: React.CSSProperties = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" };
 const tabBar: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#f1f5f9", borderBottom: "1px solid #e5e7eb" };
-
-const tabButton = (active: boolean): React.CSSProperties => ({
-  padding: "4px 12px",
-  border: "1px solid #d1d5db",
-  borderRadius: active ? "4px 0 0 4px" : "0 4px 4px 0",
-  borderLeft: active ? "1px solid #d1d5db" : "none",
-  background: active ? "#2563eb" : "white",
-  color: active ? "white" : "#374151",
-  fontSize: 11,
-  fontWeight: 500,
-  cursor: "pointer",
-});
 
 const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
 const gridCols = "180px 45px 70px 70px 55px 55px 100px 70px 100px";

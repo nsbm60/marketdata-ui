@@ -4,7 +4,9 @@ import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
 import TradeButton, { tradeButtonContainer } from "./components/shared/TradeButton";
 import Select from "./components/shared/Select";
-import { fetchClosePrices, ClosePriceData, calcPctChange, formatPctChange, getPrevCloseDateFromCache, formatCloseDateShort } from "./services/closePrices";
+import TimeframeSelector from "./components/shared/TimeframeSelector";
+import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
+import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState, TimeframeOption } from "./services/marketState";
 import { useThrottledMarketPrices } from "./hooks/useMarketData";
 import { PriceData } from "./services/MarketDataBus";
@@ -346,19 +348,12 @@ export default function EquityPanel({
           <span><b>quotes:</b> {stats.withQuote}</span>
           <span><b>trades:</b> {stats.withTrade}</span>
           {paused && <span style={{ color: "#b45309" }}>Paused — unsubscribed</span>}
-          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-            <b>vs:</b>
-            <Select
-              value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value)}
-            >
-              {(marketState?.timeframes ?? []).map((tf) => (
-                <option key={tf.id} value={tf.id}>
-                  {formatCloseDateShort(tf.date)}{tf.label ? ` (${tf.label})` : ""}
-                </option>
-              ))}
-            </Select>
-          </span>
+          <TimeframeSelector
+            value={timeframe}
+            onChange={setTimeframe}
+            timeframes={marketState?.timeframes ?? []}
+            alignRight
+          />
         </div>
       </div>
 
@@ -419,10 +414,6 @@ export default function EquityPanel({
                 const dollarChange = (closeData && isNum(lastVal))
                   ? lastVal! - closeData.prevClose
                   : undefined;
-                const changeColor = pctChange !== undefined
-                  ? (pctChange >= 0 ? "#16a34a" : "#dc2626")
-                  : undefined;
-
                 return (
                   <tr
                     key={r.symbol}
@@ -434,18 +425,10 @@ export default function EquityPanel({
                     <Td mono strong={isSelected} selected={isSelected} first>{r.symbol}</Td>
                     <Td num strong={isSelected} selected={isSelected}>{fmtPrice(lastVal)}</Td>
                     <Td num selected={isSelected}>
-                      {pctChange !== undefined ? (
-                        <span style={{ color: changeColor, fontWeight: 600 }}>
-                          {pctChange >= 0 ? "▲" : "▼"} {formatPctChange(pctChange)}
-                        </span>
-                      ) : "—"}
+                      <PriceChangePercent value={pctChange} />
                     </Td>
                     <Td num selected={isSelected}>
-                      {dollarChange !== undefined ? (
-                        <span style={{ color: changeColor, fontWeight: 600 }}>
-                          {dollarChange >= 0 ? "+" : ""}{dollarChange.toFixed(2)}
-                        </span>
-                      ) : "—"}
+                      <PriceChangeDollar value={dollarChange} />
                     </Td>
                     <Td num selected={isSelected}>{fmtPrice(r.bid)}</Td>
                     <Td num selected={isSelected}>{fmtPrice(r.ask)}</Td>
