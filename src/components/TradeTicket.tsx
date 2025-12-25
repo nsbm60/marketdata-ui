@@ -22,7 +22,7 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
   const [session, setSession] = useState<"REGULAR" | "PREMARKET" | "AFTERHOURS">("REGULAR");
-  const [useAdaptive, setUseAdaptive] = useState(false);
+  const [useAdaptive, setUseAdaptive] = useState(true);
   const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">("Normal");
 
   const [last, setLast] = useState(initialLast !== undefined ? initialLast.toFixed(4) : "—");

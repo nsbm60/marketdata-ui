@@ -53,7 +53,7 @@ export default function OptionTradeTicket({
   const [orderType, setOrderType] = useState<"MKT" | "LMT" | "STP" | "STPLMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
-  const [useAdaptive, setUseAdaptive] = useState(false);
+  const [useAdaptive, setUseAdaptive] = useState(true);
   const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">("Normal");
 
   // Live market data updates (prices)
