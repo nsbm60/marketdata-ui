@@ -80,6 +80,8 @@ export async function fetchPositionSnapshots(
 
 async function doFetch(account: string, timeframe: string): Promise<PositionSnapshotResponse | null> {
   try {
+    console.log(`[PositionSnapshots] Fetching for account=${account}, timeframe=${timeframe}`);
+
     const ack = await socketHub.sendControl(
       "position_snapshots",
       {
@@ -90,8 +92,11 @@ async function doFetch(account: string, timeframe: string): Promise<PositionSnap
       { timeoutMs: 10000 }
     );
 
+    console.log(`[PositionSnapshots] Response:`, JSON.stringify(ack, null, 2));
+
     if (ack.ok && ack.data) {
-      const data = ack.data as PositionSnapshotResponse;
+      // UiSocket nests the response under ack.data.data
+      const data = ((ack.data as any).data || ack.data) as PositionSnapshotResponse;
       console.log(`[PositionSnapshots] Fetched ${data.positions?.length ?? 0} positions for ${account} @ ${timeframe} (date: ${data.snapshot_date})`);
       return data;
     } else {

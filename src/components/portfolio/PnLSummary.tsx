@@ -171,8 +171,16 @@ export default function PnLSummary({
       }
     });
 
-    // Sort by absolute P&L (biggest movers first)
-    results.sort((a, b) => Math.abs(b.pnlDollar) - Math.abs(a.pnlDollar));
+    // Sort by symbol, then STK before OPT, for stable ordering
+    results.sort((a, b) => {
+      // First by symbol
+      const symCmp = a.symbol.localeCompare(b.symbol);
+      if (symCmp !== 0) return symCmp;
+      // STK before OPT
+      if (a.secType !== b.secType) return a.secType === "STK" ? -1 : 1;
+      // For same symbol+type, maintain insertion order (stable)
+      return 0;
+    });
 
     return results;
   }, [positions, equityPrices, snapshotMap]);
@@ -215,9 +223,13 @@ export default function PnLSummary({
     return <div style={{ padding: 20, color: "#666" }}>Loading snapshot data...</div>;
   }
 
-  if (error && positionPnLs.length === 0) {
-    return <div style={{ padding: 20, color: "#666" }}>{error}</div>;
-  }
+  // Show message if no snapshot data
+  const hasSnapshotData = snapshot?.positions && snapshot.positions.length > 0;
+  const noSnapshotMessage = !snapshot
+    ? "Could not fetch snapshot data from CalcServer. Check console for details."
+    : !snapshot.positions || snapshot.positions.length === 0
+      ? `No position snapshots found for ${snapshot.snapshot_date}. Run the position snapshot batch job to populate historical data.`
+      : null;
 
   return (
     <div style={table}>
@@ -300,6 +312,14 @@ export default function PnLSummary({
       {snapshot?.snapshot_date && (
         <div style={{ padding: "8px 10px", fontSize: 10, color: "#666", borderTop: "1px solid #e5e7eb" }}>
           Comparing to snapshot from {snapshot.snapshot_date}
+          {!hasSnapshotData && " (no positions in snapshot)"}
+        </div>
+      )}
+
+      {/* Warning if no snapshot data */}
+      {noSnapshotMessage && (
+        <div style={{ padding: "12px 10px", fontSize: 11, color: "#b45309", background: "#fef3c7", borderTop: "1px solid #fcd34d" }}>
+          {noSnapshotMessage}
         </div>
       )}
     </div>
