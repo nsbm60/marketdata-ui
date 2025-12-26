@@ -397,7 +397,7 @@ export default function PortfolioPanel() {
                 {positionsTab === "positions" && (
                 <div style={{ maxHeight: 750, overflow: "auto" }}>
                 <div style={table}>
-                  <div style={{ ...hdr, gridTemplateColumns: "75px 140px 36px 36px 65px 80px 65px 65px 100px 80px 130px" }}>
+                  <div style={{ ...hdr, gridTemplateColumns: "75px 140px 36px 36px 65px 80px 75px 65px 100px 80px 120px" }}>
                     <div style={hdrCell}>Account</div>
                     <div style={hdrCell}>Symbol</div>
                     <div style={hdrCell}>Type</div>
@@ -411,7 +411,7 @@ export default function PortfolioPanel() {
                     </div>
                     <div style={hdrCellRight}>Mkt Value</div>
                     <div style={hdrCellRight}>Avg Cost</div>
-                    <div style={{ textAlign: "right" as const }}>Trade</div>
+                    <div style={hdrCellRight}>Trade</div>
                   </div>
 
                   {accountState.positions
@@ -513,11 +513,11 @@ export default function PortfolioPanel() {
                         key={i}
                         style={{
                           ...rowStyle,
-                          gridTemplateColumns: "75px 140px 36px 36px 65px 80px 65px 65px 100px 80px 130px",
+                          gridTemplateColumns: "75px 140px 36px 36px 65px 80px 75px 65px 100px 80px 120px",
                         }}
                       >
                         <div style={cellEllipsis}>{p.account}</div>
-                        <div>{symbolDisplay}</div>
+                        <div style={cellBorder}>{symbolDisplay}</div>
                         <div style={gray10}>{p.secType}</div>
                         <div style={centerBold}>{p.currency}</div>
                         <div style={rightMono}>
@@ -536,7 +536,7 @@ export default function PortfolioPanel() {
                           {mktValueDisplay}
                         </div>
                         <div style={rightMono}>{displayAvgCost.toFixed(4)}</div>
-                        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingRight: 12 }}>
+                        <div style={{ ...cellBorder, display: "flex", justifyContent: "flex-end", gap: 8, paddingRight: 12 }}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

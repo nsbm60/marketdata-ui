@@ -61,7 +61,7 @@ export const rowStyle: CSSProperties = {
 };
 
 // Base cell style with right border for column dividers
-const cellBorder: CSSProperties = {
+export const cellBorder: CSSProperties = {
   borderRight: "1px solid #eee",
   paddingRight: 4,
   paddingLeft: 2

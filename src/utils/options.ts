@@ -210,3 +210,66 @@ export function formatExpiryWithWeekday(expiry: string): string {
     return expiry;
   }
 }
+
+// ─────────────────────────────────────────────────────────────
+// Option Sorting
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Normalized option fields for sorting.
+ */
+export interface OptionSortFields {
+  expiry: string;       // Any format (YYYYMMDD or YYYY-MM-DD)
+  right: string;        // "C", "P", "Call", "Put", "call", or "put"
+  strike: number;
+}
+
+/**
+ * Normalize right/optionType to single char for comparison.
+ * "C" < "P" so calls sort before puts.
+ */
+function normalizeRight(right: string): string {
+  const r = right.toUpperCase();
+  if (r === "C" || r === "CALL") return "C";
+  if (r === "P" || r === "PUT") return "P";
+  return r;
+}
+
+/**
+ * Normalize expiry to comparable string (YYYYMMDD).
+ * Handles both YYYYMMDD and YYYY-MM-DD formats.
+ */
+function normalizeExpiry(expiry: string): string {
+  if (!expiry) return "";
+  // If already YYYYMMDD, return as-is
+  if (/^\d{8}$/.test(expiry)) return expiry;
+  // If YYYY-MM-DD, convert to YYYYMMDD
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expiry);
+  if (m) return `${m[1]}${m[2]}${m[3]}`;
+  return expiry;
+}
+
+/**
+ * Compare two options for sorting.
+ * Sort order: expiry (asc), call before put, strike (asc)
+ *
+ * @example
+ * options.sort((a, b) => compareOptions(
+ *   { expiry: a.expiry, right: a.right, strike: a.strike },
+ *   { expiry: b.expiry, right: b.right, strike: b.strike }
+ * ));
+ */
+export function compareOptions(a: OptionSortFields, b: OptionSortFields): number {
+  // 1. Compare by expiry (ascending)
+  const expA = normalizeExpiry(a.expiry);
+  const expB = normalizeExpiry(b.expiry);
+  if (expA !== expB) return expA.localeCompare(expB);
+
+  // 2. Compare by right (calls before puts: C < P)
+  const rightA = normalizeRight(a.right);
+  const rightB = normalizeRight(b.right);
+  if (rightA !== rightB) return rightA.localeCompare(rightB);
+
+  // 3. Compare by strike (ascending)
+  return (a.strike ?? 0) - (b.strike ?? 0);
+}

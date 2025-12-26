@@ -127,7 +127,7 @@ export function clearCache(): void {
 /**
  * Build a lookup key for a position (for matching current positions to snapshots).
  * For stocks: just the symbol
- * For options: symbol + strike + expiry + right
+ * For options: symbol + strike + expiry + right (normalized)
  */
 export function buildPositionKey(
   symbol: string,
@@ -137,7 +137,9 @@ export function buildPositionKey(
   right?: string
 ): string {
   if (secType === "OPT" && strike !== undefined && expiry && right) {
-    return `${symbol}:${strike}:${expiry}:${right}`;
+    // Normalize right to single char (C/P)
+    const normalizedRight = right === "Call" || right === "C" ? "C" : right === "Put" || right === "P" ? "P" : right;
+    return `${symbol.toUpperCase()}:${strike}:${expiry}:${normalizedRight}`;
   }
-  return symbol;
+  return symbol.toUpperCase();
 }

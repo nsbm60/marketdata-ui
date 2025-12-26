@@ -26,7 +26,7 @@ export function PriceChangePercent({ value, showArrow = true }: PriceChangePerce
   const arrow = value >= 0 ? "▲" : "▼";
 
   return (
-    <span style={{ color, fontWeight: 600 }}>
+    <span style={{ color, fontWeight: 600, whiteSpace: "nowrap" }}>
       {showArrow && `${arrow} `}
       {formatPctChange(value)}
     </span>
@@ -49,7 +49,7 @@ export function PriceChangeDollar({ value, decimals = 2 }: PriceChangeDollarProp
   const sign = value >= 0 ? "+" : "";
 
   return (
-    <span style={{ color, fontWeight: 600 }}>
+    <span style={{ color, fontWeight: 600, whiteSpace: "nowrap" }}>
       {sign}
       {value.toFixed(decimals)}
     </span>

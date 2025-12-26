@@ -1,7 +1,7 @@
 // src/components/portfolio/PnLSummary.tsx
 import { useMemo, useEffect, useState } from "react";
 import { IbPosition } from "../../types/portfolio";
-import { buildOsiSymbol, formatExpiryYYYYMMDD } from "../../utils/options";
+import { buildOsiSymbol, formatExpiryYYYYMMDD, compareOptions } from "../../utils/options";
 import { getChannelPrices } from "../../hooks/useMarketData";
 import { formatCloseDateShort } from "../../services/closePrices";
 import { TimeframeInfo } from "../../services/marketState";
@@ -33,6 +33,10 @@ type PositionPnL = {
   pnlDollar: number;
   pnlPercent: number;
   status: "existing" | "new" | "closed";
+  // Option fields for sorting
+  expiry?: string;
+  strike?: number;
+  right?: string;
 };
 
 export default function PnLSummary({
@@ -87,6 +91,7 @@ export default function PnLSummary({
         const key = buildPositionKey(p.symbol, p.sec_type, p.strike, p.expiry, p.right);
         map.set(key, p);
       });
+      console.log("[PnLSummary] Snapshot keys:", Array.from(map.keys()));
     }
     return map;
   }, [snapshot]);
@@ -106,6 +111,7 @@ export default function PnLSummary({
         p.right
       );
       processedKeys.add(posKey);
+      console.log(`[PnLSummary] Current position key: ${posKey}, matched: ${snapshotMap.has(posKey)}`);
 
       // Get current price
       let currentPrice = 0;
@@ -146,6 +152,10 @@ export default function PnLSummary({
         pnlDollar,
         pnlPercent,
         status: snapshotPos ? "existing" : "new",
+        // Option fields for sorting
+        expiry: p.expiry,
+        strike: p.strike,
+        right: p.right,
       });
     });
 
@@ -167,18 +177,28 @@ export default function PnLSummary({
           pnlDollar: -snapshotPos.market_value,
           pnlPercent: -100,
           status: "closed",
+          // Option fields for sorting
+          expiry: snapshotPos.expiry,
+          strike: snapshotPos.strike,
+          right: snapshotPos.right,
         });
       }
     });
 
-    // Sort by symbol, then STK before OPT, for stable ordering
+    // Sort by symbol, then STK before OPT, then by option fields (expiry, call/put, strike)
     results.sort((a, b) => {
       // First by symbol
       const symCmp = a.symbol.localeCompare(b.symbol);
       if (symCmp !== 0) return symCmp;
       // STK before OPT
       if (a.secType !== b.secType) return a.secType === "STK" ? -1 : 1;
-      // For same symbol+type, maintain insertion order (stable)
+      // For options, sort by expiry, call/put (calls first), strike
+      if (a.secType === "OPT" && b.secType === "OPT") {
+        return compareOptions(
+          { expiry: a.expiry || "", right: a.right || "", strike: a.strike || 0 },
+          { expiry: b.expiry || "", right: b.right || "", strike: b.strike || 0 }
+        );
+      }
       return 0;
     });
 
@@ -261,7 +281,7 @@ export default function PnLSummary({
             opacity: p.status === "closed" ? 0.6 : 1,
           }}
         >
-          <div>
+          <div style={cellBorder}>
             {p.displaySymbol}
             {getStatusBadge(p.status)}
           </div>
@@ -290,12 +310,12 @@ export default function PnLSummary({
           fontWeight: 600,
         }}
       >
-        <div>Total</div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
+        <div style={cellBorder}>Total</div>
+        <div style={cellBorder}></div>
+        <div style={cellBorder}></div>
+        <div style={cellBorder}></div>
+        <div style={cellBorder}></div>
+        <div style={cellBorder}></div>
         <div style={rightMono}>{formatValue(totals.totalCurrentValue)}</div>
         <div style={rightMono}>
           {totals.totalSnapshotValue !== 0 ? formatValue(totals.totalSnapshotValue) : "—"}

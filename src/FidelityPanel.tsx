@@ -546,7 +546,7 @@ const section: React.CSSProperties = { background: "#fff", border: "1px solid #e
 const tabBar: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#f1f5f9", borderBottom: "1px solid #e5e7eb" };
 
 const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
-const gridCols = "180px 45px 70px 70px 55px 55px 100px 70px 100px";
+const gridCols = "180px 45px 70px 70px 70px 65px 100px 70px 75px";
 const hdr: React.CSSProperties = { display: "grid", gridTemplateColumns: gridCols, fontWeight: 600, fontSize: 10.5, color: "#374151", padding: "0 10px", background: "#f8fafc", height: 26, alignItems: "center", borderBottom: "1px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1 };
 const hdrCell: React.CSSProperties = { borderRight: "1px solid #ddd", paddingRight: 4 };
 const hdrCellRight: React.CSSProperties = { ...hdrCell, textAlign: "right" };

@@ -75,6 +75,15 @@ async function initialize() {
     }
   });
 
+  // Periodic refresh every 5 minutes to catch session transitions
+  // (backup in case cal.market.* events are missed)
+  setInterval(() => {
+    if (initialized) {
+      console.log("[MarketState] Periodic refresh...");
+      refetchMarketState();
+    }
+  }, 5 * 60 * 1000);
+
   // Query current state
   try {
     const ack = await socketHub.sendControl("market_state", {}, { timeoutMs: 5000 });

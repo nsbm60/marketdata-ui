@@ -2,7 +2,7 @@
 import { useMemo } from "react";
 import { FidelityPosition } from "../../utils/fidelity";
 import { PriceData } from "../../hooks/useMarketData";
-import { formatExpiryShort, daysToExpiry } from "../../utils/options";
+import { formatExpiryShort, daysToExpiry, compareOptions } from "../../utils/options";
 
 type Props = {
   positions: FidelityPosition[];
@@ -130,16 +130,11 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
         });
       });
 
-      // Sort options by expiry, then call/put, then strike
-      optionMetrics.sort((a, b) => {
-        const expA = a.position.expiry || "";
-        const expB = b.position.expiry || "";
-        if (expA !== expB) return expA.localeCompare(expB);
-        const rightA = a.position.optionType === "call" ? "C" : "P";
-        const rightB = b.position.optionType === "call" ? "C" : "P";
-        if (rightA !== rightB) return rightA.localeCompare(rightB);
-        return (a.position.strike || 0) - (b.position.strike || 0);
-      });
+      // Sort options by expiry, then call/put (calls first), then strike
+      optionMetrics.sort((a, b) => compareOptions(
+        { expiry: a.position.expiry || "", right: a.position.optionType || "", strike: a.position.strike || 0 },
+        { expiry: b.position.expiry || "", right: b.position.optionType || "", strike: b.position.strike || 0 }
+      ));
 
       // Calculate subtotals
       let totalEffectiveEquiv = 0;
@@ -396,11 +391,15 @@ const cellLeft: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+  borderRight: "1px solid #eee",
+  paddingRight: 4,
 };
 
 const cellRight: React.CSSProperties = {
   textAlign: "right",
   fontFamily: "ui-monospace, monospace",
+  borderRight: "1px solid #eee",
+  paddingRight: 4,
 };
 
 const emptyStyle: React.CSSProperties = {

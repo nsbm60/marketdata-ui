@@ -2,7 +2,7 @@
 import { IbOrderHistory } from "../../types/portfolio";
 import { formatExpiryYYYYMMDD } from "../../utils/options";
 import {
-  section, title, table, hdr, rowStyle,
+  section, title, table, hdr, rowStyle, hdrCell, hdrCellRight, hdrCellCenter, cellBorder,
   timeHeader, timeCell, centerBold, right, rightMonoBold, emptyRow
 } from "./styles";
 
@@ -20,11 +20,11 @@ export default function OrderHistoryTable({ orders }: Props) {
         <div style={table}>
           <div style={{ ...hdr, gridTemplateColumns: "70px 130px 46px 50px 80px 80px", gap: 8 }}>
             <div style={timeHeader}>Time</div>
-            <div>Symbol</div>
-            <div>Side</div>
-            <div style={right}>Qty</div>
-            <div style={right}>Price</div>
-            <div>Status</div>
+            <div style={hdrCell}>Symbol</div>
+            <div style={hdrCellCenter}>Side</div>
+            <div style={hdrCellRight}>Qty</div>
+            <div style={hdrCellRight}>Price</div>
+            <div style={hdrCell}>Status</div>
           </div>
           <div style={{ maxHeight: 200, overflowY: "auto" }}>
             {orders.map((h, idx) => {
@@ -60,7 +60,7 @@ export default function OrderHistoryTable({ orders }: Props) {
                   <div style={timeCell}>
                     {new Date(h.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </div>
-                  <div>{symbolDisplay}</div>
+                  <div style={cellBorder}>{symbolDisplay}</div>
                   <div style={{ ...centerBold, color: h.side === "BUY" ? "#166534" : "#991b1b" }}>
                     {h.side}
                   </div>
@@ -68,7 +68,7 @@ export default function OrderHistoryTable({ orders }: Props) {
                   <div style={rightMonoBold}>
                     {displayPrice !== undefined ? `$${displayPrice.toFixed(2)}` : (isMktOrder ? "MKT" : "—")}
                   </div>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: statusColor }}>{h.status}</div>
+                  <div style={{ ...cellBorder, fontSize: 10, fontWeight: 600, color: statusColor }}>{h.status}</div>
                 </div>
               );
             })}

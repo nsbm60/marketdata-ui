@@ -2,8 +2,8 @@
 import { IbOpenOrder } from "../../types/portfolio";
 import { formatExpiryYYYYMMDD } from "../../utils/options";
 import {
-  section, title, table, hdr, rowStyle,
-  timeHeader, timeCell, centerBold, right, rightMonoBold, center, emptyRow
+  section, title, table, hdr, rowStyle, hdrCell, hdrCellRight, hdrCellCenter, cellBorder,
+  timeHeader, timeCell, centerBold, right, rightMonoBold, center, gray10, emptyRow
 } from "./styles";
 
 type Props = {
@@ -22,13 +22,13 @@ export default function OpenOrdersTable({ orders, onModify, onCancel }: Props) {
         <div style={table}>
           <div style={{ ...hdr, gridTemplateColumns: "70px 130px 46px 50px 46px 80px 80px 65px", gap: 8 }}>
             <div style={timeHeader}>Time</div>
-            <div>Symbol</div>
-            <div>Side</div>
-            <div style={right}>Qty</div>
-            <div>Type</div>
-            <div style={right}>Price</div>
-            <div>Status</div>
-            <div style={center}>Action</div>
+            <div style={hdrCell}>Symbol</div>
+            <div style={hdrCellCenter}>Side</div>
+            <div style={hdrCellRight}>Qty</div>
+            <div style={hdrCell}>Type</div>
+            <div style={hdrCellRight}>Price</div>
+            <div style={hdrCell}>Status</div>
+            <div style={hdrCellCenter}>Action</div>
           </div>
           <div style={{ maxHeight: 200, overflowY: "auto" }}>
             {orders.map((o) => {
@@ -55,17 +55,17 @@ export default function OpenOrdersTable({ orders, onModify, onCancel }: Props) {
                   <div style={timeCell}>
                     {new Date(o.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </div>
-                  <div>{symbolDisplay}</div>
+                  <div style={cellBorder}>{symbolDisplay}</div>
                   <div style={{ ...centerBold, color: o.side === "BUY" ? "#166534" : "#991b1b" }}>
                     {o.side}
                   </div>
                   <div style={{ ...right, fontWeight: 600 }}>{o.quantity}</div>
-                  <div style={{ fontSize: 11 }}>{o.orderType}</div>
+                  <div style={gray10}>{o.orderType}</div>
                   <div style={rightMonoBold}>
                     {o.lmtPrice !== undefined ? `$${o.lmtPrice.toFixed(2)}` : "—"}
                   </div>
-                  <div style={{ fontSize: 10, color: "#666" }}>{o.status}</div>
-                  <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
+                  <div style={gray10}>{o.status}</div>
+                  <div style={{ ...cellBorder, display: "flex", justifyContent: "center", gap: 4 }}>
                     {o.orderType !== "MKT" && (
                       <button
                         onClick={() => onModify(o)}
