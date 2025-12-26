@@ -347,6 +347,7 @@ export default function FidelityPanel() {
 
               {/* Positions Table */}
               {activeTab === "positions" && (
+                <div style={{ maxHeight: 750, overflow: "auto" }}>
                 <div style={table}>
                   {/* Header */}
                   <div style={hdr}>
@@ -515,15 +516,18 @@ export default function FidelityPanel() {
                     </div>
                   )}
                 </div>
+                </div>
               )}
 
               {/* Options Analysis Tab */}
               {activeTab === "analysis" && (
-                <FidelityOptionsAnalysis
-                  positions={tradeablePositions}
-                  equityPrices={equityPrices}
-                  optionPrices={optionPrices}
-                />
+                <div style={{ maxHeight: 750, overflow: "auto" }}>
+                  <FidelityOptionsAnalysis
+                    positions={tradeablePositions}
+                    equityPrices={equityPrices}
+                    optionPrices={optionPrices}
+                  />
+                </div>
               )}
             </div>
           </>
@@ -543,7 +547,7 @@ const tabBar: React.CSSProperties = { display: "flex", justifyContent: "space-be
 
 const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
 const gridCols = "180px 45px 70px 70px 55px 55px 100px 70px 100px";
-const hdr: React.CSSProperties = { display: "grid", gridTemplateColumns: gridCols, fontWeight: 600, fontSize: 10.5, color: "#374151", padding: "0 10px", background: "#f8fafc", height: 26, alignItems: "center", borderBottom: "1px solid #e5e7eb" };
+const hdr: React.CSSProperties = { display: "grid", gridTemplateColumns: gridCols, fontWeight: 600, fontSize: 10.5, color: "#374151", padding: "0 10px", background: "#f8fafc", height: 26, alignItems: "center", borderBottom: "1px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1 };
 const hdrCell: React.CSSProperties = { borderRight: "1px solid #ddd", paddingRight: 4 };
 const hdrCellRight: React.CSSProperties = { ...hdrCell, textAlign: "right" };
 const hdrCellCenter: React.CSSProperties = { ...hdrCell, textAlign: "center" };
