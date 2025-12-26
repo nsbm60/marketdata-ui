@@ -599,7 +599,7 @@ export default function PortfolioPanel() {
 
                 {/* P&L Table */}
                 {positionsTab === "pnl" && (
-                  <div style={{ maxHeight: 500, overflow: "auto" }}>
+                  <div style={{ maxHeight: 750, overflow: "auto" }}>
                     <PnLSummary
                       account={primaryAccount}
                       positions={accountState.positions}
