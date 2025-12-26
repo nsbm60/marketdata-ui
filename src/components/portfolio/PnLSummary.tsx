@@ -382,7 +382,7 @@ function formatDisplaySymbolFromSnapshot(p: PositionSnapshot): React.ReactNode {
 
 // ---- Styles ----
 
-const table: React.CSSProperties = { display: "flex", flexDirection: "column", maxHeight: "100%", overflow: "auto" };
+const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
 const hdr: React.CSSProperties = {
   display: "grid",
   fontWeight: 600,

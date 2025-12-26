@@ -599,13 +599,15 @@ export default function PortfolioPanel() {
 
                 {/* P&L Table */}
                 {positionsTab === "pnl" && (
-                  <PnLSummary
-                    account={primaryAccount}
-                    positions={accountState.positions}
-                    equityPrices={equityPrices}
-                    timeframe={timeframe}
-                    timeframes={marketState?.timeframes ?? []}
-                  />
+                  <div style={{ maxHeight: 500, overflow: "auto" }}>
+                    <PnLSummary
+                      account={primaryAccount}
+                      positions={accountState.positions}
+                      equityPrices={equityPrices}
+                      timeframe={timeframe}
+                      timeframes={marketState?.timeframes ?? []}
+                    />
+                  </div>
                 )}
               </section>
 
