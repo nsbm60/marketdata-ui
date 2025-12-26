@@ -382,7 +382,7 @@ function formatDisplaySymbolFromSnapshot(p: PositionSnapshot): React.ReactNode {
 
 // ---- Styles ----
 
-const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
+const table: React.CSSProperties = { display: "flex", flexDirection: "column", maxHeight: "100%", overflow: "auto" };
 const hdr: React.CSSProperties = {
   display: "grid",
   fontWeight: 600,
@@ -393,6 +393,9 @@ const hdr: React.CSSProperties = {
   height: 26,
   alignItems: "center",
   borderBottom: "1px solid #e5e7eb",
+  position: "sticky",
+  top: 0,
+  zIndex: 1,
 };
 const hdrCell: React.CSSProperties = { borderRight: "1px solid #ddd", paddingRight: 4 };
 const hdrCellRight: React.CSSProperties = { ...hdrCell, textAlign: "right" };
