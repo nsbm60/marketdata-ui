@@ -383,6 +383,9 @@ const headerRow: React.CSSProperties = {
   background: "#f1f5f9",
   fontWeight: 600,
   borderBottom: "1px solid #e5e7eb",
+  position: "sticky",
+  top: 0,
+  zIndex: 1,
 };
 
 const equityRow: React.CSSProperties = {

@@ -395,6 +395,7 @@ export default function PortfolioPanel() {
 
                 {/* Positions Table */}
                 {positionsTab === "positions" && (
+                <div style={{ maxHeight: 750, overflow: "auto" }}>
                 <div style={table}>
                   <div style={{ ...hdr, gridTemplateColumns: "75px 140px 36px 36px 65px 80px 65px 65px 100px 80px 130px" }}>
                     <div style={hdrCell}>Account</div>
@@ -587,14 +588,17 @@ export default function PortfolioPanel() {
                     );
                   })}
                 </div>
+                </div>
                 )}
 
                 {/* Options Analysis Table */}
                 {positionsTab === "analysis" && (
-                  <OptionsAnalysisTable
-                    positions={accountState.positions}
-                    equityPrices={equityPrices}
-                  />
+                  <div style={{ maxHeight: 750, overflow: "auto" }}>
+                    <OptionsAnalysisTable
+                      positions={accountState.positions}
+                      equityPrices={equityPrices}
+                    />
+                  </div>
                 )}
 
                 {/* P&L Table */}
@@ -704,7 +708,7 @@ const gridWrap = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 };
 const section = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" };
 const title = { fontSize: 12, fontWeight: 600, padding: "8px 10px", background: "#f1f5f9", borderBottom: "1px solid #e5e7eb" };
 const table = { display: "flex", flexDirection: "column" as const };
-const hdr = { display: "grid", fontWeight: 600, fontSize: 10.5, color: "#374151", padding: "0 10px", background: "#f8fafc", height: 26, alignItems: "center", borderBottom: "1px solid #e5e7eb" };
+const hdr = { display: "grid", fontWeight: 600, fontSize: 10.5, color: "#374151", padding: "0 10px", background: "#f8fafc", height: 26, alignItems: "center", borderBottom: "1px solid #e5e7eb", position: "sticky" as const, top: 0, zIndex: 1 };
 const hdrCell = { borderRight: "1px solid #ddd", paddingRight: 4 };
 const hdrCellRight = { ...hdrCell, textAlign: "right" as const };
 const hdrCellCenter = { ...hdrCell, textAlign: "center" as const };
