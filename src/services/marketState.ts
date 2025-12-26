@@ -61,6 +61,20 @@ async function initialize() {
   // Listen for calendar events (cal.market.open, cal.market.close)
   socketHub.onTick(handleCalendarEvent);
 
+  // Refresh on WebSocket reconnect
+  socketHub.onConnect(() => {
+    console.log("[MarketState] WebSocket reconnected, refreshing...");
+    refetchMarketState();
+  });
+
+  // Refresh when page becomes visible (e.g., after sleeping overnight)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && initialized) {
+      console.log("[MarketState] Page visible, refreshing...");
+      refetchMarketState();
+    }
+  });
+
   // Query current state
   try {
     const ack = await socketHub.sendControl("market_state", {}, { timeoutMs: 5000 });
@@ -180,4 +194,9 @@ export function isExtendedHours(): boolean {
 /** Get the previous trading day (for close price lookups). */
 export function getPrevTradingDay(): string | null {
   return currentState?.prevTradingDay ?? null;
+}
+
+/** Force refresh market state from server. */
+export function refreshMarketState(): void {
+  refetchMarketState();
 }
