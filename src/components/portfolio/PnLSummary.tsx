@@ -351,6 +351,7 @@ export default function PnLSummary({
 function mapTimeframe(timeframe: string): string | null {
   // Map UI timeframe IDs to CalcServer format
   const mapping: Record<string, string> = {
+    "0d": "0D",  // Today (after-hours)
     "1d": "1D",
     "2d": "1D", // Use 1D for 2d as well for now
     "1w": "1W",
