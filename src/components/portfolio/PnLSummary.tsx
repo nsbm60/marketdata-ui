@@ -32,7 +32,7 @@ type PositionPnL = {
   snapshotValue: number;
   pnlDollar: number;
   pnlPercent: number;
-  status: "existing" | "new" | "closed";
+  status: "existing" | "new";
   // Option fields for sorting
   expiry?: string;
   strike?: number;
@@ -159,31 +159,8 @@ export default function PnLSummary({
       });
     });
 
-    // Process closed positions (in snapshot but not in current)
-    snapshotMap.forEach((snapshotPos, key) => {
-      if (!processedKeys.has(key)) {
-        const displaySymbol = formatDisplaySymbolFromSnapshot(snapshotPos);
-
-        results.push({
-          symbol: snapshotPos.symbol,
-          displaySymbol,
-          secType: snapshotPos.sec_type,
-          currentQty: 0,
-          snapshotQty: snapshotPos.quantity,
-          currentPrice: 0,
-          snapshotPrice: snapshotPos.close_price,
-          currentValue: 0,
-          snapshotValue: snapshotPos.market_value,
-          pnlDollar: -snapshotPos.market_value,
-          pnlPercent: -100,
-          status: "closed",
-          // Option fields for sorting
-          expiry: snapshotPos.expiry,
-          strike: snapshotPos.strike,
-          right: snapshotPos.right,
-        });
-      }
-    });
+    // Note: Closed positions (in snapshot but not current) are not shown
+    // since we can't calculate meaningful open P&L for them
 
     // Sort by symbol, then STK before OPT, then by option fields (expiry, call/put, strike)
     results.sort((a, b) => {
@@ -232,9 +209,8 @@ export default function PnLSummary({
   };
 
   const getPnLColor = (value: number) => (value >= 0 ? "#16a34a" : "#dc2626");
-  const getStatusBadge = (status: "existing" | "new" | "closed") => {
+  const getStatusBadge = (status: "existing" | "new") => {
     if (status === "new") return <span style={newBadge}>NEW</span>;
-    if (status === "closed") return <span style={closedBadge}>CLOSED</span>;
     return null;
   };
 
@@ -267,8 +243,8 @@ export default function PnLSummary({
         <div style={hdrCellRight}>
           {currentTimeframeInfo ? `${currentTimeframeInfo.label} Val` : "Snap Val"}
         </div>
-        <div style={hdrCellRight}>P&L $</div>
-        <div style={hdrCellRight}>P&L %</div>
+        <div style={hdrCellRight}>Open P&L</div>
+        <div style={hdrCellRight}>Open %</div>
       </div>
 
       {/* Position Rows */}
@@ -278,7 +254,6 @@ export default function PnLSummary({
           style={{
             ...row,
             gridTemplateColumns: "150px 36px 55px 55px 70px 70px 90px 90px 80px 70px",
-            opacity: p.status === "closed" ? 0.6 : 1,
           }}
         >
           <div style={cellBorder}>
@@ -386,21 +361,6 @@ function formatDisplaySymbol(p: IbPosition): React.ReactNode {
   return <div style={{ fontWeight: 600 }}>{p.symbol}</div>;
 }
 
-function formatDisplaySymbolFromSnapshot(p: PositionSnapshot): React.ReactNode {
-  if (p.sec_type === "OPT" && p.strike && p.expiry && p.right) {
-    const rightLabel = p.right === "C" ? "Call" : "Put";
-    return (
-      <div>
-        <div style={{ fontWeight: 600, fontSize: 11 }}>
-          {p.symbol} {p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike} {rightLabel}
-        </div>
-        <div style={{ fontSize: 9, color: "#666" }}>{p.expiry}</div>
-      </div>
-    );
-  }
-  return <div style={{ fontWeight: 600 }}>{p.symbol}</div>;
-}
-
 // ---- Styles ----
 
 const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
@@ -438,14 +398,5 @@ const newBadge: React.CSSProperties = {
   fontWeight: 600,
   background: "#dbeafe",
   color: "#1d4ed8",
-  borderRadius: 2,
-};
-const closedBadge: React.CSSProperties = {
-  marginLeft: 4,
-  padding: "1px 4px",
-  fontSize: 8,
-  fontWeight: 600,
-  background: "#fee2e2",
-  color: "#dc2626",
   borderRadius: 2,
 };
