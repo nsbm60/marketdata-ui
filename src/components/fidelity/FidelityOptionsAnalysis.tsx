@@ -13,6 +13,8 @@ type Props = {
 interface OptionMetrics {
   position: FidelityPosition;
   delta: number | null;
+  theta: number | null;
+  thetaDollar: number | null;     // theta * quantity * 100 (daily $ decay)
   effectiveEquiv: number | null;
   intrinsicValue: number;
   timeValue: number;
@@ -32,8 +34,16 @@ interface UnderlyingGroup {
   totalEffectiveEquiv: number;
   totalIntrinsicValue: number;
   totalTimeValue: number;
+  totalThetaDollar: number;
   totalExerciseShares: number;
   totalExerciseCash: number;
+  // Call/Put subtotals
+  callIntrinsicValue: number;
+  callTimeValue: number;
+  callThetaDollar: number;
+  putIntrinsicValue: number;
+  putTimeValue: number;
+  putThetaDollar: number;
 }
 
 export default function FidelityOptionsAnalysis({ positions, equityPrices, optionPrices }: Props) {
@@ -64,8 +74,10 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
         const priceData = osiSymbol ? optionPrices.get(osiSymbol) : null;
         const optionPrice = priceData?.last ?? opt.lastPrice;
         const delta = (priceData as any)?.delta ?? null;
+        const theta = (priceData as any)?.theta ?? null;
 
         const effectiveEquiv = delta !== null ? opt.quantity * 100 * delta : null;
+        const thetaDollar = theta !== null ? theta * opt.quantity * 100 : null;
 
         // Intrinsic value
         let intrinsicPerShare = 0;
@@ -121,6 +133,8 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
         optionMetrics.push({
           position: opt,
           delta,
+          theta,
+          thetaDollar,
           effectiveEquiv,
           intrinsicValue,
           timeValue,
@@ -136,19 +150,38 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
         { expiry: b.position.expiry || "", right: b.position.optionType || "", strike: b.position.strike || 0 }
       ));
 
-      // Calculate subtotals
+      // Calculate subtotals (overall and by call/put)
       let totalEffectiveEquiv = 0;
       let totalIntrinsicValue = 0;
       let totalTimeValue = 0;
+      let totalThetaDollar = 0;
       let totalExerciseShares = 0;
       let totalExerciseCash = 0;
+      let callIntrinsicValue = 0;
+      let callTimeValue = 0;
+      let callThetaDollar = 0;
+      let putIntrinsicValue = 0;
+      let putTimeValue = 0;
+      let putThetaDollar = 0;
 
       optionMetrics.forEach(m => {
+        const isCall = m.position.optionType === "call";
         if (m.effectiveEquiv !== null) totalEffectiveEquiv += m.effectiveEquiv;
         totalIntrinsicValue += m.intrinsicValue;
         totalTimeValue += m.timeValue;
+        if (m.thetaDollar !== null) totalThetaDollar += m.thetaDollar;
         totalExerciseShares += m.exerciseEffect.shares;
         totalExerciseCash += m.exerciseEffect.cashEffect;
+
+        if (isCall) {
+          callIntrinsicValue += m.intrinsicValue;
+          callTimeValue += m.timeValue;
+          if (m.thetaDollar !== null) callThetaDollar += m.thetaDollar;
+        } else {
+          putIntrinsicValue += m.intrinsicValue;
+          putTimeValue += m.timeValue;
+          if (m.thetaDollar !== null) putThetaDollar += m.thetaDollar;
+        }
       });
 
       // Only include groups that have options
@@ -161,8 +194,15 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
           totalEffectiveEquiv,
           totalIntrinsicValue,
           totalTimeValue,
+          totalThetaDollar,
           totalExerciseShares,
           totalExerciseCash,
+          callIntrinsicValue,
+          callTimeValue,
+          callThetaDollar,
+          putIntrinsicValue,
+          putTimeValue,
+          putThetaDollar,
         });
       }
     });
@@ -217,11 +257,13 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
               <div style={cellRight}>DTE</div>
               <div style={cellRight}>Qty</div>
               <div style={cellRight}>Delta</div>
+              <div style={cellRight}>Theta</div>
               <div style={cellRight}>Eff. Equiv</div>
               <div style={cellRight}>Intrinsic $</div>
               <div style={cellRight}>Time $</div>
-              <div style={cellRight}>Exercise → Shares</div>
-              <div style={cellRight}>Exercise → Cash</div>
+              <div style={cellRight}>Theta $</div>
+              <div style={cellRight}>Exer → Shrs</div>
+              <div style={cellRight}>Exer → Cash</div>
             </div>
 
             {/* Equity row */}
@@ -230,7 +272,9 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
               <div style={cellRight}>—</div>
               <div style={cellRight}>{fmtShares(group.equityShares)}</div>
               <div style={cellRight}>1.0000</div>
+              <div style={cellRight}>—</div>
               <div style={cellRight}>{fmtShares(group.equityShares)}</div>
+              <div style={cellRight}>—</div>
               <div style={cellRight}>—</div>
               <div style={cellRight}>—</div>
               <div style={cellRight}>—</div>
@@ -256,6 +300,7 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                   <div style={cellRight}>{dte}</div>
                   <div style={cellRight}>{fmtShares(p.quantity)}</div>
                   <div style={cellRight}>{fmtDelta(opt.delta)}</div>
+                  <div style={cellRight}>{opt.theta !== null ? opt.theta.toFixed(4) : "—"}</div>
                   <div style={cellRight}>
                     {opt.effectiveEquiv !== null ? fmtShares(Math.round(opt.effectiveEquiv)) : "—"}
                   </div>
@@ -265,22 +310,79 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                   <div style={{ ...cellRight, color: opt.timeValue < 0 ? "#dc2626" : opt.timeValue > 0 ? "#16a34a" : undefined }}>
                     ${fmt(opt.timeValue, 0)}
                   </div>
+                  <div style={{ ...cellRight, color: opt.thetaDollar !== null && opt.thetaDollar > 0 ? "#16a34a" : opt.thetaDollar !== null && opt.thetaDollar < 0 ? "#dc2626" : undefined }}>
+                    {opt.thetaDollar !== null ? `$${fmt(opt.thetaDollar, 0)}` : "—"}
+                  </div>
                   <div style={cellRight}>{fmtShares(opt.exerciseEffect.shares)}</div>
                   <div style={cellRight}>{fmtCash(opt.exerciseEffect.cashEffect)}</div>
                 </div>
               );
             })}
 
-            {/* Subtotal row */}
+            {/* Call subtotal row */}
+            {group.options.some(o => o.position.optionType === "call") && (
+              <div style={callSubtotalRow}>
+                <div style={cellLeft}>Calls Subtotal</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={{ ...cellRight, color: group.callIntrinsicValue > 0 ? "#16a34a" : undefined }}>
+                  ${fmt(group.callIntrinsicValue, 0)}
+                </div>
+                <div style={{ ...cellRight, color: group.callTimeValue < 0 ? "#dc2626" : group.callTimeValue > 0 ? "#16a34a" : undefined }}>
+                  ${fmt(group.callTimeValue, 0)}
+                </div>
+                <div style={{ ...cellRight, color: group.callThetaDollar > 0 ? "#16a34a" : group.callThetaDollar < 0 ? "#dc2626" : undefined }}>
+                  ${fmt(group.callThetaDollar, 0)}
+                </div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+              </div>
+            )}
+
+            {/* Put subtotal row */}
+            {group.options.some(o => o.position.optionType === "put") && (
+              <div style={putSubtotalRow}>
+                <div style={cellLeft}>Puts Subtotal</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={{ ...cellRight, color: group.putIntrinsicValue > 0 ? "#16a34a" : undefined }}>
+                  ${fmt(group.putIntrinsicValue, 0)}
+                </div>
+                <div style={{ ...cellRight, color: group.putTimeValue < 0 ? "#dc2626" : group.putTimeValue > 0 ? "#16a34a" : undefined }}>
+                  ${fmt(group.putTimeValue, 0)}
+                </div>
+                <div style={{ ...cellRight, color: group.putThetaDollar > 0 ? "#16a34a" : group.putThetaDollar < 0 ? "#dc2626" : undefined }}>
+                  ${fmt(group.putThetaDollar, 0)}
+                </div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+              </div>
+            )}
+
+            {/* Total subtotal row */}
             {group.options.length > 0 && (
               <div style={subtotalRow}>
-                <div style={cellLeft}>Subtotals</div>
+                <div style={cellLeft}>Total</div>
+                <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>{fmtShares(Math.round(group.totalEffectiveEquiv))}</div>
-                <div style={cellRight}>${fmt(group.totalIntrinsicValue, 0)}</div>
-                <div style={cellRight}>${fmt(group.totalTimeValue, 0)}</div>
+                <div style={{ ...cellRight, color: group.totalIntrinsicValue > 0 ? "#16a34a" : undefined }}>
+                  ${fmt(group.totalIntrinsicValue, 0)}
+                </div>
+                <div style={{ ...cellRight, color: group.totalTimeValue < 0 ? "#dc2626" : group.totalTimeValue > 0 ? "#16a34a" : undefined }}>
+                  ${fmt(group.totalTimeValue, 0)}
+                </div>
+                <div style={{ ...cellRight, color: group.totalThetaDollar > 0 ? "#16a34a" : group.totalThetaDollar < 0 ? "#dc2626" : undefined }}>
+                  ${fmt(group.totalThetaDollar, 0)}
+                </div>
                 <div style={cellRight}>{fmtShares(group.totalExerciseShares)}</div>
                 <div style={cellRight}>{fmtCash(group.totalExerciseCash)}</div>
               </div>
@@ -293,9 +395,11 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
                 <div style={cellRight}>
                   {fmtShares(group.equityShares + Math.round(group.totalEffectiveEquiv))}
                 </div>
+                <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={{ ...cellRight, fontWeight: 600 }}>
@@ -340,7 +444,7 @@ const table: React.CSSProperties = {
   fontSize: 11,
 };
 
-const gridCols = "180px 40px 50px 70px 80px 80px 80px 100px 100px";
+const gridCols = "180px 40px 50px 60px 60px 70px 80px 80px 70px 90px 90px";
 
 const headerRow: React.CSSProperties = {
   display: "grid",
@@ -367,6 +471,26 @@ const optionRow: React.CSSProperties = {
   gridTemplateColumns: gridCols,
   padding: "6px 12px",
   borderBottom: "1px solid #f3f4f6",
+};
+
+const callSubtotalRow: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: gridCols,
+  padding: "6px 12px",
+  background: "#dcfce7",
+  fontWeight: 500,
+  fontSize: 10,
+  borderBottom: "1px solid #e5e7eb",
+};
+
+const putSubtotalRow: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: gridCols,
+  padding: "6px 12px",
+  background: "#fce7f3",
+  fontWeight: 500,
+  fontSize: 10,
+  borderBottom: "1px solid #e5e7eb",
 };
 
 const subtotalRow: React.CSSProperties = {
