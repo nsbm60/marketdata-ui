@@ -26,6 +26,9 @@ export interface TimeframeOption {
   label: string;  // "" (for 1d), "-1d", "-1w", "-1m"
 }
 
+// Alias for backwards compatibility
+export type TimeframeInfo = TimeframeOption;
+
 export interface MarketState {
   state: SessionState;
   isTradingDay: boolean;
