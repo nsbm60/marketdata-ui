@@ -22,6 +22,14 @@ import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from ".
 import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
 import { usePortfolioData } from "./hooks/usePortfolioData";
 import { useTradeTicket } from "./hooks/useTradeTicket";
+import type { TimeframeOption } from "./services/marketState";
+
+// Default timeframes used when marketState hasn't loaded yet
+const defaultTimeframes: TimeframeOption[] = [
+  { id: "1d", date: "", label: "" },
+  { id: "1w", date: "", label: "-1w" },
+  { id: "1m", date: "", label: "-1m" },
+];
 
 export default function PortfolioPanel() {
   // Portfolio data and IB connection state
@@ -388,7 +396,7 @@ export default function PortfolioPanel() {
                     <TimeframeSelector
                       value={timeframe}
                       onChange={setTimeframe}
-                      timeframes={marketState?.timeframes ?? []}
+                      timeframes={marketState?.timeframes?.length ? marketState.timeframes : defaultTimeframes}
                     />
                   )}
                 </div>

@@ -248,7 +248,7 @@ export default function PnLSummary({
   const noSnapshotMessage = !snapshot
     ? "Could not fetch snapshot data from CalcServer. Check console for details."
     : !snapshot.positions || snapshot.positions.length === 0
-      ? `No position snapshots found for ${snapshot.snapshot_date}. Run the position snapshot batch job to populate historical data.`
+      ? `No snapshot data for ${snapshot.snapshot_date}. The position snapshot job may not have run for this date yet.`
       : null;
 
   return (
