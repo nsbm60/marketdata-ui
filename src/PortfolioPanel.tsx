@@ -73,6 +73,17 @@ export default function PortfolioPanel() {
   // Persist timeframe selection
   useEffect(() => { localStorage.setItem("portfolio.timeframe", timeframe); }, [timeframe]);
 
+  // Reset timeframe if cached value is not in available options (e.g., "0d" on a weekend)
+  useEffect(() => {
+    if (marketState?.timeframes?.length) {
+      const isValid = marketState.timeframes.some(t => t.id === timeframe);
+      if (!isValid) {
+        console.log(`[PortfolioPanel] Timeframe "${timeframe}" not available, resetting to "1d"`);
+        setTimeframe("1d");
+      }
+    }
+  }, [marketState?.timeframes, timeframe]);
+
   // Get current timeframe info for display
   const currentTimeframeInfo = useMemo(() => {
     return marketState?.timeframes?.find(t => t.id === timeframe);
