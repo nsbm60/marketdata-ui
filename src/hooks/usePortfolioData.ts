@@ -246,6 +246,8 @@ export function usePortfolioData(): UsePortfolioDataResult {
           strike: o.strike !== undefined ? Number(o.strike) : undefined,
           expiry: o.expiry !== undefined ? String(o.expiry) : undefined,
           right: o.right !== undefined ? String(o.right) : undefined,
+          algoStrategy: o.algoStrategy !== undefined ? String(o.algoStrategy) : undefined,
+          algoPriority: o.algoPriority !== undefined ? String(o.algoPriority) : undefined,
         }))
         .filter((o: IbOpenOrder) => o.status === "Submitted" || o.status === "PreSubmitted");
 
@@ -337,6 +339,8 @@ export function usePortfolioData(): UsePortfolioDataResult {
         strike: d.strike !== undefined ? Number(d.strike) : undefined,
         expiry: d.expiry !== undefined ? String(d.expiry) : undefined,
         right: d.right !== undefined ? String(d.right) : undefined,
+        algoStrategy: d.algoStrategy !== undefined ? String(d.algoStrategy) : undefined,
+        algoPriority: d.algoPriority !== undefined ? String(d.algoPriority) : undefined,
       };
 
       setAccountState((prev) => {

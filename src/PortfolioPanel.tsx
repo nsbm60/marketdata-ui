@@ -22,6 +22,7 @@ import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from ".
 import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
 import { usePortfolioData } from "./hooks/usePortfolioData";
 import { useTradeTicket } from "./hooks/useTradeTicket";
+import { useAppState } from "./state/useAppState";
 import type { TimeframeOption } from "./services/marketState";
 
 // Default timeframes used when marketState hasn't loaded yet
@@ -62,6 +63,10 @@ export default function PortfolioPanel() {
     setModifyingOrder,
     setCancellingOrder,
   } = useTradeTicket();
+
+  // WebSocket connection status
+  const { state: appState } = useAppState();
+  const wsConnected = appState.connection.websocket === "connected";
 
   // Tab for positions view: "positions", "analysis", or "pnl"
   const [positionsTab, setPositionsTab] = useState<"positions" | "analysis" | "pnl">("positions");
@@ -129,9 +134,11 @@ export default function PortfolioPanel() {
   type OptionPriceData = { prevClose: number; todayClose?: number };
   const [optionClosePrices, setOptionClosePrices] = useState<Map<string, OptionPriceData>>(new Map());
 
-  // Fetch close prices for equity positions
+  // Fetch close prices for equity positions when positions, timeframe, or connection change
+  // Wait for marketState.timeframes to be loaded to ensure correct date interpretation
+  // Also re-fetch when marketState.lastUpdated changes (visibility change, reconnect, etc.)
   useEffect(() => {
-    if (!accountState?.positions) return;
+    if (!accountState?.positions || !wsConnected || !marketState?.timeframes?.length) return;
     const equitySymbols = accountState.positions
       .filter(p => p.secType === "STK")
       .map(p => p.symbol);
@@ -139,11 +146,11 @@ export default function PortfolioPanel() {
       // Pass timeframe for date calculation
       fetchClosePrices(equitySymbols, timeframe).then(setClosePrices);
     }
-  }, [accountState?.positions, timeframe]);
+  }, [accountState?.positions, timeframe, wsConnected, marketState?.timeframes, marketState?.lastUpdated]);
 
-  // Fetch close prices for option positions
+  // Fetch close prices for option positions when positions, timeframe, or connection change
   useEffect(() => {
-    if (!accountState?.positions || !marketState?.timeframes) return;
+    if (!accountState?.positions || !marketState?.timeframes || !wsConnected) return;
 
     // Find the date for the selected timeframe
     const tfInfo = marketState.timeframes.find(t => t.id === timeframe);
@@ -182,7 +189,7 @@ export default function PortfolioPanel() {
     }).catch(err => {
       console.error("[PortfolioPanel] Failed to fetch option close prices:", err);
     });
-  }, [accountState?.positions, marketState?.timeframes, timeframe]);
+  }, [accountState?.positions, marketState?.timeframes, timeframe, wsConnected, marketState?.lastUpdated]);
 
   // Build OSI symbols for option positions (for backend subscription)
   const optionOsiSymbols = useMemo(() => {
@@ -192,26 +199,29 @@ export default function PortfolioPanel() {
       .map(p => buildOsiSymbol(p.symbol, p.expiry!, p.right!, p.strike!));
   }, [accountState?.positions]);
 
+  // Helper to send option subscriptions (used on initial mount and reconnect)
+  const sendOptionSubscriptions = (symbols: string[]) => {
+    if (symbols.length === 0) return;
+    console.log("[PortfolioPanel] Subscribing to option contracts:", symbols);
+    // 1. Register interest with UI bridge so it forwards option messages to this client
+    socketHub.send({
+      type: "subscribe",
+      channels: ["md.option.quote", "md.option.trade", "md.option.greeks"],
+      symbols,
+    });
+    // 2. Tell backend to subscribe to Alpaca streaming for these contracts
+    socketHub.send({
+      type: "control",
+      target: "marketData",
+      op: "subscribe_portfolio_contracts",
+      contracts: symbols,
+    });
+  };
+
   // Tell backend to subscribe to portfolio option contracts AND register interest with UI bridge
   useEffect(() => {
     console.log("[PortfolioPanel] optionOsiSymbols changed:", optionOsiSymbols.length, "symbols");
-    if (optionOsiSymbols.length > 0) {
-      console.log("[PortfolioPanel] Subscribing to option contracts:", optionOsiSymbols);
-      // 1. Register interest with UI bridge so it forwards option messages to this client
-      socketHub.send({
-        type: "subscribe",
-        channels: ["md.option.quote", "md.option.trade", "md.option.greeks"],
-        symbols: optionOsiSymbols,
-      });
-
-      // 2. Tell backend to subscribe to Alpaca streaming for these contracts
-      socketHub.send({
-        type: "control",
-        target: "marketData",
-        op: "subscribe_portfolio_contracts",
-        contracts: optionOsiSymbols,
-      });
-    }
+    sendOptionSubscriptions(optionOsiSymbols);
 
     // Cleanup: unsubscribe when component unmounts or symbols change
     return () => {
@@ -225,6 +235,54 @@ export default function PortfolioPanel() {
       }
     };
   }, [optionOsiSymbols]);
+
+  // Re-subscribe to option contracts on WebSocket reconnect
+  useEffect(() => {
+    const handleReconnect = () => {
+      console.log("[PortfolioPanel] WebSocket reconnected, resubscribing to options...");
+      sendOptionSubscriptions(optionOsiSymbols);
+    };
+    socketHub.onConnect(handleReconnect);
+    return () => socketHub.offConnect(handleReconnect);
+  }, [optionOsiSymbols]);
+
+  // Create combined positions list with synthetic 0-quantity underlying positions
+  // for options where we don't own the underlying stock
+  const positionsWithSyntheticUnderlyings = useMemo(() => {
+    if (!accountState?.positions) return [];
+
+    const positions = accountState.positions;
+
+    // Find underlying symbols that have options but no STK position
+    const stkSymbols = new Set(
+      positions.filter(p => p.secType === "STK").map(p => p.symbol.toUpperCase())
+    );
+    const optionUnderlyings = new Set(
+      positions.filter(p => p.secType === "OPT").map(p => p.symbol.toUpperCase())
+    );
+    const missingUnderlyings = [...optionUnderlyings].filter(s => !stkSymbols.has(s));
+
+    if (missingUnderlyings.length === 0) {
+      return positions;
+    }
+
+    // Get account from first position (for synthetic positions)
+    const account = positions[0]?.account || "";
+
+    // Create synthetic 0-quantity STK positions for missing underlyings
+    const syntheticPositions = missingUnderlyings.map(symbol => ({
+      account,
+      symbol,
+      secType: "STK" as const,
+      currency: "USD",
+      quantity: 0,
+      avgCost: 0,
+      // Mark as synthetic for potential UI differentiation
+      _synthetic: true,
+    }));
+
+    return [...positions, ...syntheticPositions];
+  }, [accountState?.positions]);
 
   // Memoize portfolio totals for P&L summary
   const { totalMktValue, totalCash, totalPortfolio, primaryAccount } = useMemo(() => {
@@ -433,7 +491,7 @@ export default function PortfolioPanel() {
                     <div style={hdrCellRight}>Trade</div>
                   </div>
 
-                  {accountState.positions
+                  {positionsWithSyntheticUnderlyings
                     .slice()
                     .sort((a, b) => {
                       // Sort by symbol, then by secType (STK before OPT)

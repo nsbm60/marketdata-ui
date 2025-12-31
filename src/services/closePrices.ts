@@ -165,7 +165,25 @@ export function getCachedClosePrice(symbol: string): ClosePriceData | null {
  * Clear the cache (useful for testing or forced refresh).
  */
 export function clearCache(): void {
+  console.log("[ClosePrices] Cache cleared");
   cache.clear();
+}
+
+// Track the last known prevTradingDay to detect date changes
+let lastKnownPrevTradingDay: string | null = null;
+
+/**
+ * Check if the trading day has changed and clear cache if so.
+ * Call this when marketState updates.
+ */
+export function checkAndClearCacheOnDateChange(prevTradingDay: string | null): void {
+  if (!prevTradingDay) return;
+
+  if (lastKnownPrevTradingDay !== null && lastKnownPrevTradingDay !== prevTradingDay) {
+    console.log(`[ClosePrices] Trading day changed from ${lastKnownPrevTradingDay} to ${prevTradingDay}, clearing cache`);
+    cache.clear();
+  }
+  lastKnownPrevTradingDay = prevTradingDay;
 }
 
 /**

@@ -38,6 +38,7 @@ interface OptionMetrics {
     cashEffect: number;           // +/- cash if exercised
   };
   optionPrice: number | null;
+  theoPrice: number | null;       // Black-Scholes theoretical price
   underlyingPrice: number | null;
 }
 
@@ -96,6 +97,7 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
         const osiSymbol = buildOsiSymbol(opt.symbol, opt.expiry, opt.right, opt.strike);
         const priceData = optionPrices.get(osiSymbol);
         const optionPrice = priceData?.last || null;
+        const theoPrice = (priceData as any)?.theo ?? null;
         const delta = (priceData as any)?.delta ?? null;
         const theta = (priceData as any)?.theta ?? null;
 
@@ -174,6 +176,7 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
           timeValue,
           exerciseEffect: { shares: exerciseShares, cashEffect: exerciseCash },
           optionPrice,
+          theoPrice,
           underlyingPrice,
         });
       });
@@ -288,14 +291,17 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
               <div style={cellLeft}>Position</div>
               <div style={cellRight}>DTE</div>
               <div style={cellRight}>Qty</div>
+              <div style={cellRight}>Price</div>
+              <div style={{ ...cellRight, color: "#2563eb" }}>Theo</div>
+              <div style={cellRight}>Value</div>
               <div style={cellRight}>Delta</div>
               <div style={cellRight}>Theta</div>
               <div style={cellRight}>Eff. Equiv</div>
-              <div style={cellRight}>Intrinsic $</div>
+              <div style={cellRight}>Intrinsic</div>
               <div style={cellRight}>Time $</div>
               <div style={cellRight}>Theta $</div>
-              <div style={cellRight}>Exer → Shrs</div>
-              <div style={cellRight}>Exer → Cash</div>
+              <div style={cellRight}>Exer Shrs</div>
+              <div style={cellRight}>Exer Cash</div>
             </div>
 
             {/* Equity row */}
@@ -303,6 +309,9 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
               <div style={cellLeft}>Shares</div>
               <div style={cellRight}>—</div>
               <div style={cellRight}>{fmtShares(group.equityShares)}</div>
+              <div style={cellRight}>{equityPrices.get(group.underlying)?.last?.toFixed(2) || "—"}</div>
+              <div style={cellRight}>—</div>
+              <div style={cellRight}>{group.equityShares !== 0 && equityPrices.get(group.underlying)?.last ? `$${fmt(group.equityShares * (equityPrices.get(group.underlying)?.last || 0), 0)}` : "—"}</div>
               <div style={cellRight}>1.0000</div>
               <div style={cellRight}>—</div>
               <div style={cellRight}>{fmtShares(group.equityShares)}</div>
@@ -323,6 +332,8 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
               const expiryShort = p.expiry ? formatExpiryShort(`${p.expiry.substring(0, 4)}-${p.expiry.substring(4, 6)}-${p.expiry.substring(6, 8)}`) : "?";
               const dte = p.expiry ? calcDTE(p.expiry) : 0;
 
+              const positionValue = opt.optionPrice !== null ? opt.optionPrice * p.quantity * 100 : null;
+
               return (
                 <div key={opt.osiSymbol} style={optionRow}>
                   <div style={cellLeft}>
@@ -331,6 +342,9 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
                   </div>
                   <div style={cellRight}>{dte}</div>
                   <div style={cellRight}>{fmtShares(p.quantity)}</div>
+                  <div style={cellRight}>{opt.optionPrice !== null ? opt.optionPrice.toFixed(2) : "—"}</div>
+                  <div style={{ ...cellRight, color: "#2563eb" }}>{opt.theoPrice !== null ? opt.theoPrice.toFixed(2) : "—"}</div>
+                  <div style={cellRight}>{positionValue !== null ? `$${fmt(positionValue, 0)}` : "—"}</div>
                   <div style={cellRight}>{fmtDelta(opt.delta)}</div>
                   <div style={cellRight}>{opt.theta !== null ? opt.theta.toFixed(4) : "—"}</div>
                   <div style={cellRight}>
@@ -360,6 +374,9 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
                 <div style={{ ...cellRight, color: group.callIntrinsicValue > 0 ? "#16a34a" : undefined }}>
                   ${fmt(group.callIntrinsicValue, 0)}
                 </div>
@@ -378,6 +395,9 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
             {group.options.some(o => o.position.right === "P" || o.position.right === "Put") && (
               <div style={putSubtotalRow}>
                 <div style={cellLeft}>Puts Subtotal</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
@@ -405,6 +425,9 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
                 <div style={cellRight}>{fmtShares(Math.round(group.totalEffectiveEquiv))}</div>
                 <div style={{ ...cellRight, color: group.totalIntrinsicValue > 0 ? "#16a34a" : undefined }}>
                   ${fmt(group.totalIntrinsicValue, 0)}
@@ -424,6 +447,9 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
             {group.options.length > 0 && (
               <div style={netRow}>
                 <div style={cellLeft}>Net After Exercise</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
@@ -475,7 +501,7 @@ const table: React.CSSProperties = {
   fontSize: 11,
 };
 
-const gridCols = "180px 40px 50px 60px 60px 70px 80px 80px 70px 90px 90px";
+const gridCols = "140px 35px 45px 55px 50px 55px 60px 70px 70px 65px 65px 70px 80px 80px";
 
 const headerRow: React.CSSProperties = {
   display: "grid",

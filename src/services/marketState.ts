@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { socketHub } from "../ws/SocketHub";
 import type { TickEnvelope } from "../ws/ws-types";
+import { checkAndClearCacheOnDateChange, clearCache as clearClosePricesCache } from "./closePrices";
 
 // ---- Types ----
 
@@ -66,14 +67,16 @@ async function initialize() {
 
   // Refresh on WebSocket reconnect
   socketHub.onConnect(() => {
-    console.log("[MarketState] WebSocket reconnected, refreshing...");
+    console.log("[MarketState] WebSocket reconnected, refreshing and clearing caches...");
+    clearClosePricesCache(); // Clear stale close prices on reconnect
     refetchMarketState();
   });
 
   // Refresh when page becomes visible (e.g., after sleeping overnight)
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && initialized) {
-      console.log("[MarketState] Page visible, refreshing...");
+      console.log("[MarketState] Page visible, refreshing and clearing caches...");
+      clearClosePricesCache(); // Clear stale close prices on visibility change
       refetchMarketState();
     }
   });
@@ -87,28 +90,45 @@ async function initialize() {
     }
   }, 5 * 60 * 1000);
 
-  // Query current state
-  try {
-    const ack = await socketHub.sendControl("market_state", {}, { timeoutMs: 5000 });
-    if (ack.ok && ack.data) {
-      const d = (ack.data as any).data || ack.data;
-      currentState = {
-        state: d.state as SessionState,
-        isTradingDay: d.isTradingDay ?? true,
-        prevTradingDay: d.prevTradingDay ?? "",
-        regularOpen: d.regularOpen,
-        regularClose: d.regularClose,
-        sessions: d.sessions ?? [],
-        timeframes: d.timeframes ?? [],
-        lastUpdated: Date.now(),
-      };
-      console.log("[MarketState] Initialized:", currentState.state,
-        "prevTradingDay:", currentState.prevTradingDay,
-        "timeframes:", currentState.timeframes.map((t: TimeframeOption) => `${t.id}=${t.date}`).join(", "));
-      notify();
+  // Query current state with retry on failure
+  let retries = 3;
+  while (retries > 0) {
+    try {
+      console.log("[MarketState] Fetching market_state... (retries left:", retries, ")");
+      const ack = await socketHub.sendControl("market_state", {}, { timeoutMs: 5000 });
+      if (ack.ok && ack.data) {
+        const d = (ack.data as any).data || ack.data;
+        currentState = {
+          state: d.state as SessionState,
+          isTradingDay: d.isTradingDay ?? true,
+          prevTradingDay: d.prevTradingDay ?? "",
+          regularOpen: d.regularOpen,
+          regularClose: d.regularClose,
+          sessions: d.sessions ?? [],
+          timeframes: d.timeframes ?? [],
+          lastUpdated: Date.now(),
+        };
+        if (!currentState.timeframes.length) {
+          console.warn("[MarketState] Received empty timeframes from server!");
+        }
+        console.log("[MarketState] Initialized:", currentState.state,
+          "prevTradingDay:", currentState.prevTradingDay,
+          "timeframes:", currentState.timeframes.map((t: TimeframeOption) => `${t.id}=${t.date}`).join(", ") || "(none)");
+        // Clear close prices cache if trading day changed
+        checkAndClearCacheOnDateChange(currentState.prevTradingDay);
+        notify();
+        break; // Success, exit retry loop
+      } else {
+        console.error("[MarketState] market_state returned ok=false:", ack);
+      }
+    } catch (err) {
+      console.error("[MarketState] Failed to fetch market_state:", err);
     }
-  } catch (err) {
-    console.error("[MarketState] Failed to fetch market_state:", err);
+    retries--;
+    if (retries > 0) {
+      console.log("[MarketState] Retrying in 1s...");
+      await new Promise(r => setTimeout(r, 1000));
+    }
   }
 
   initialized = true;
@@ -148,6 +168,8 @@ async function refetchMarketState() {
       };
       console.log("[MarketState] Updated:", currentState.state,
         "timeframes:", currentState.timeframes.map((t: TimeframeOption) => `${t.id}=${t.date}`).join(", "));
+      // Clear close prices cache if trading day changed
+      checkAndClearCacheOnDateChange(currentState.prevTradingDay);
       notify();
     }
   } catch (err) {

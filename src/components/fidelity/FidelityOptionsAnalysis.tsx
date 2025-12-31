@@ -23,6 +23,7 @@ interface OptionMetrics {
     cashEffect: number;
   };
   optionPrice: number | null;
+  theoPrice: number | null;       // Black-Scholes theoretical price
   underlyingPrice: number | null;
 }
 
@@ -73,6 +74,7 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
         const osiSymbol = opt.osiSymbol;
         const priceData = osiSymbol ? optionPrices.get(osiSymbol) : null;
         const optionPrice = priceData?.last ?? opt.lastPrice;
+        const theoPrice = (priceData as any)?.theo ?? null;
         const delta = (priceData as any)?.delta ?? null;
         const theta = (priceData as any)?.theta ?? null;
 
@@ -140,6 +142,7 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
           timeValue,
           exerciseEffect: { shares: exerciseShares, cashEffect: exerciseCash },
           optionPrice,
+          theoPrice,
           underlyingPrice,
         });
       });
@@ -256,6 +259,9 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
               <div style={cellLeft}>Position</div>
               <div style={cellRight}>DTE</div>
               <div style={cellRight}>Qty</div>
+              <div style={cellRight}>Price</div>
+              <div style={{ ...cellRight, color: "#2563eb" }}>Theo</div>
+              <div style={cellRight}>Value</div>
               <div style={cellRight}>Delta</div>
               <div style={cellRight}>Theta</div>
               <div style={cellRight}>Eff. Equiv</div>
@@ -271,6 +277,15 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
               <div style={cellLeft}>Shares</div>
               <div style={cellRight}>—</div>
               <div style={cellRight}>{fmtShares(group.equityShares)}</div>
+              <div style={cellRight}>
+                {equityPrices.get(group.underlying)?.last?.toFixed(2) || "—"}
+              </div>
+              <div style={cellRight}>—</div>
+              <div style={cellRight}>
+                {equityPrices.get(group.underlying)?.last && group.equityShares
+                  ? `$${fmt((equityPrices.get(group.underlying)?.last || 0) * group.equityShares, 0)}`
+                  : "—"}
+              </div>
               <div style={cellRight}>1.0000</div>
               <div style={cellRight}>—</div>
               <div style={cellRight}>{fmtShares(group.equityShares)}</div>
@@ -290,6 +305,7 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                 : "?";
               const expiryShort = p.expiry ? formatExpiryShort(p.expiry) : "?";
               const dte = p.expiry ? daysToExpiry(p.expiry) : 0;
+              const positionValue = opt.optionPrice !== null ? opt.optionPrice * p.quantity * 100 : null;
 
               return (
                 <div key={`${opt.position.osiSymbol}-${i}`} style={optionRow}>
@@ -299,6 +315,9 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                   </div>
                   <div style={cellRight}>{dte}</div>
                   <div style={cellRight}>{fmtShares(p.quantity)}</div>
+                  <div style={cellRight}>{opt.optionPrice !== null ? opt.optionPrice.toFixed(2) : "—"}</div>
+                  <div style={{ ...cellRight, color: "#2563eb" }}>{opt.theoPrice !== null ? opt.theoPrice.toFixed(2) : "—"}</div>
+                  <div style={cellRight}>{positionValue !== null ? `$${fmt(positionValue, 0)}` : "—"}</div>
                   <div style={cellRight}>{fmtDelta(opt.delta)}</div>
                   <div style={cellRight}>{opt.theta !== null ? opt.theta.toFixed(4) : "—"}</div>
                   <div style={cellRight}>
@@ -328,6 +347,9 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
                 <div style={{ ...cellRight, color: group.callIntrinsicValue > 0 ? "#16a34a" : undefined }}>
                   ${fmt(group.callIntrinsicValue, 0)}
                 </div>
@@ -346,6 +368,9 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
             {group.options.some(o => o.position.optionType === "put") && (
               <div style={putSubtotalRow}>
                 <div style={cellLeft}>Puts Subtotal</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
@@ -373,6 +398,9 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
                 <div style={cellRight}>{fmtShares(Math.round(group.totalEffectiveEquiv))}</div>
                 <div style={{ ...cellRight, color: group.totalIntrinsicValue > 0 ? "#16a34a" : undefined }}>
                   ${fmt(group.totalIntrinsicValue, 0)}
@@ -392,6 +420,9 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
             {group.options.length > 0 && (
               <div style={netRow}>
                 <div style={cellLeft}>Net After Exercise</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
@@ -444,7 +475,7 @@ const table: React.CSSProperties = {
   fontSize: 11,
 };
 
-const gridCols = "180px 40px 50px 60px 60px 70px 80px 80px 70px 90px 90px";
+const gridCols = "140px 35px 45px 55px 50px 55px 60px 70px 70px 65px 65px 70px 80px 80px";
 
 const headerRow: React.CSSProperties = {
   display: "grid",

@@ -11,11 +11,12 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import {
   marketDataBus,
   PriceData,
+  OptionPriceData,
   Channel,
 } from "../services/MarketDataBus";
 
 // Re-export types for convenience
-export type { PriceData, Channel };
+export type { PriceData, OptionPriceData, Channel };
 
 // ─────────────────────────────────────────────────────────────
 // useMarketPrice - Single symbol subscription

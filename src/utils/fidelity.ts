@@ -21,19 +21,33 @@ export interface FidelityPosition {
 }
 
 /**
+ * Result of parsing a Fidelity CSV export.
+ */
+export interface FidelityImportResult {
+  positions: FidelityPosition[];
+  downloadedAt: Date | null;      // Extracted from "Date downloaded..." line
+  downloadedAtRaw: string | null; // Original string for display
+}
+
+/**
  * Parse Fidelity CSV export into positions array.
  * Includes cash positions and pending activity.
+ * Also extracts the download timestamp from the footer.
  */
-export function parseFidelityCSV(csvText: string): FidelityPosition[] {
+export function parseFidelityCSV(csvText: string): FidelityImportResult {
   const lines = csvText.split("\n");
-  if (lines.length < 2) return [];
+  if (lines.length < 2) return { positions: [], downloadedAt: null, downloadedAtRaw: null };
 
   // Find header line
   const headerLine = lines[0];
   if (!headerLine.includes("Account Number")) {
     console.error("[Fidelity] Invalid CSV format - missing headers");
-    return [];
+    return { positions: [], downloadedAt: null, downloadedAtRaw: null };
   }
+
+  // Extract download timestamp from footer
+  // Format: "Date downloaded Dec-30-2025 at 1:06 p.m ET"
+  const { downloadedAt, downloadedAtRaw } = extractDownloadTimestamp(lines);
 
   const positions: FidelityPosition[] = [];
 
@@ -149,7 +163,55 @@ export function parseFidelityCSV(csvText: string): FidelityPosition[] {
     positions.push(position);
   }
 
-  return positions;
+  return { positions, downloadedAt, downloadedAtRaw };
+}
+
+/**
+ * Extract download timestamp from Fidelity CSV footer.
+ * Looks for: "Date downloaded Dec-30-2025 at 1:06 p.m ET"
+ */
+function extractDownloadTimestamp(lines: string[]): { downloadedAt: Date | null; downloadedAtRaw: string | null } {
+  for (const line of lines) {
+    const match = line.match(/Date downloaded\s+([A-Za-z]{3}-\d{1,2}-\d{4})\s+at\s+(\d{1,2}:\d{2})\s*(a\.m\.|p\.m\.)\s*ET/i);
+    if (match) {
+      const [, dateStr, timeStr, ampm] = match;
+      const rawString = `${dateStr} at ${timeStr} ${ampm} ET`;
+
+      try {
+        // Parse "Dec-30-2025" -> month, day, year
+        const [monthStr, dayStr, yearStr] = dateStr.split("-");
+        const months: Record<string, number> = {
+          Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+          Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11
+        };
+        const month = months[monthStr];
+        const day = parseInt(dayStr, 10);
+        const year = parseInt(yearStr, 10);
+
+        // Parse time "1:06" with am/pm
+        const [hourStr, minStr] = timeStr.split(":");
+        let hour = parseInt(hourStr, 10);
+        const min = parseInt(minStr, 10);
+
+        // Convert to 24-hour
+        if (ampm.toLowerCase().includes("p") && hour !== 12) {
+          hour += 12;
+        } else if (ampm.toLowerCase().includes("a") && hour === 12) {
+          hour = 0;
+        }
+
+        // Create date in ET (approximate - use local for now)
+        const downloadedAt = new Date(year, month, day, hour, min);
+
+        console.log(`[Fidelity] Extracted download timestamp: ${rawString} -> ${downloadedAt.toISOString()}`);
+        return { downloadedAt, downloadedAtRaw: rawString };
+      } catch (e) {
+        console.warn("[Fidelity] Failed to parse download timestamp:", dateStr, timeStr, ampm);
+      }
+    }
+  }
+
+  return { downloadedAt: null, downloadedAtRaw: null };
 }
 
 /**

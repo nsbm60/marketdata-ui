@@ -137,11 +137,13 @@ export default function EquityPanel({
     return marketState?.timeframes?.find(t => t.id === timeframe);
   }, [marketState?.timeframes, timeframe]);
 
-  // Fetch close prices when symbols or timeframe change
+  // Fetch close prices when symbols, timeframe, or connection change
+  // Wait for marketState.timeframes to be loaded to ensure correct date interpretation
+  // Also re-fetch when marketState.lastUpdated changes (visibility change, reconnect, etc.)
   useEffect(() => {
-    if (symbols.length === 0) return;
+    if (symbols.length === 0 || !wsConnected || !marketState?.timeframes?.length) return;
     fetchClosePrices(symbols, timeframe).then(setClosePrices);
-  }, [symbols.join(","), timeframe]);
+  }, [symbols.join(","), timeframe, wsConnected, marketState?.timeframes, marketState?.lastUpdated]);
 
   /* ---------------- WS status for display ---------------- */
   const wsStatus = wsConnected

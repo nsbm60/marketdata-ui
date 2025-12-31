@@ -38,6 +38,7 @@ export interface OptionPriceData extends PriceData {
   theta?: number;
   vega?: number;
   iv?: number;
+  theo?: number;        // Theoretical price from Black-Scholes
 }
 
 export type Channel = "equity" | "option";
@@ -403,6 +404,11 @@ class MarketDataBus {
       const iv = data.iv ?? data.impliedVolatility ?? data.impliedVol;
       if (iv !== undefined && iv !== null) {
         optPrice.iv = Number(iv);
+      }
+
+      const theo = data.theo ?? data.theoreticalPrice;
+      if (theo !== undefined && theo !== null) {
+        optPrice.theo = Number(theo);
       }
     }
 

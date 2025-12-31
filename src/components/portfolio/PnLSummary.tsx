@@ -127,11 +127,25 @@ export default function PnLSummary({
       const contractMultiplier = p.secType === "OPT" ? 100 : 1;
       const currentValue = p.quantity * currentPrice * contractMultiplier;
 
-      // Get snapshot data
+      // Get snapshot data or use avgCost for new positions
       const snapshotPos = snapshotMap.get(posKey);
-      const snapshotValue = snapshotPos?.market_value ?? 0;
-      const snapshotPrice = snapshotPos?.close_price ?? 0;
-      const snapshotQty = snapshotPos?.quantity ?? 0;
+      let snapshotValue: number;
+      let snapshotPrice: number;
+      let snapshotQty: number;
+
+      if (snapshotPos) {
+        // Existing position - use snapshot data
+        snapshotValue = snapshotPos.market_value ?? 0;
+        snapshotPrice = snapshotPos.close_price ?? 0;
+        snapshotQty = snapshotPos.quantity ?? 0;
+      } else {
+        // New position - use avgCost as entry price
+        // For options, avgCost from IB is per-contract total, so divide by 100 to get per-share
+        const entryPrice = p.secType === "OPT" ? p.avgCost / 100 : p.avgCost;
+        snapshotPrice = entryPrice;
+        snapshotQty = p.quantity;
+        snapshotValue = p.quantity * entryPrice * contractMultiplier;
+      }
 
       const pnlDollar = currentValue - snapshotValue;
       const pnlPercent = snapshotValue !== 0 ? (pnlDollar / Math.abs(snapshotValue)) * 100 : 0;

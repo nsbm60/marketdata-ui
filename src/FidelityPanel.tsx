@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { socketHub } from "./ws/SocketHub";
 import {
   FidelityPosition,
+  FidelityImportResult,
   parseFidelityCSV,
   getSubscriptionSymbols,
   savePositions,
@@ -17,11 +18,16 @@ import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalys
 import TimeframeSelector from "./components/shared/TimeframeSelector";
 import TabButtonGroup from "./components/shared/TabButtonGroup";
 import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
+import { useAppState } from "./state/useAppState";
 
 export default function FidelityPanel() {
   const [positions, setPositions] = useState<FidelityPosition[]>([]);
   const [importDate, setImportDate] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // WebSocket connection status
+  const { state: appState } = useAppState();
+  const wsConnected = appState.connection.websocket === "connected";
 
   // Tab state: "positions" or "analysis"
   const [activeTab, setActiveTab] = useState<"positions" | "analysis">("positions");
@@ -59,22 +65,26 @@ export default function FidelityPanel() {
   // Subscribe to option market data
   const optionVersion = useChannelUpdates("option", 250);
 
+  // Helper to send option subscriptions (used on initial mount and reconnect)
+  const sendOptionSubscriptions = (symbols: string[]) => {
+    if (symbols.length === 0) return;
+    console.log("[FidelityPanel] Subscribing to option contracts:", symbols);
+    socketHub.send({
+      type: "subscribe",
+      channels: ["md.option.quote", "md.option.trade", "md.option.greeks"],
+      symbols,
+    });
+    socketHub.send({
+      type: "control",
+      target: "marketData",
+      op: "subscribe_portfolio_contracts",
+      contracts: symbols,
+    });
+  };
+
   // Register option subscriptions with backend
   useEffect(() => {
-    if (subscriptionSymbols.options.length > 0) {
-      socketHub.send({
-        type: "subscribe",
-        channels: ["md.option.quote", "md.option.trade", "md.option.greeks"],
-        symbols: subscriptionSymbols.options,
-      });
-
-      socketHub.send({
-        type: "control",
-        target: "marketData",
-        op: "subscribe_portfolio_contracts",
-        contracts: subscriptionSymbols.options,
-      });
-    }
+    sendOptionSubscriptions(subscriptionSymbols.options);
 
     return () => {
       if (subscriptionSymbols.options.length > 0) {
@@ -87,22 +97,35 @@ export default function FidelityPanel() {
     };
   }, [subscriptionSymbols.options.join(",")]);
 
+  // Re-subscribe to option contracts on WebSocket reconnect
+  useEffect(() => {
+    const handleReconnect = () => {
+      console.log("[FidelityPanel] WebSocket reconnected, resubscribing to options...");
+      sendOptionSubscriptions(subscriptionSymbols.options);
+    };
+    socketHub.onConnect(handleReconnect);
+    return () => socketHub.offConnect(handleReconnect);
+  }, [subscriptionSymbols.options.join(",")]);
+
   // Close prices for equities
   const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
 
+  // Fetch close prices when symbols, timeframe, or connection change
+  // Wait for marketState.timeframes to be loaded to ensure correct date interpretation
+  // Also re-fetch when marketState.lastUpdated changes (visibility change, reconnect, etc.)
   useEffect(() => {
-    if (subscriptionSymbols.equities.length > 0) {
+    if (subscriptionSymbols.equities.length > 0 && wsConnected && marketState?.timeframes?.length) {
       fetchClosePrices(subscriptionSymbols.equities, timeframe).then(setClosePrices);
     }
-  }, [subscriptionSymbols.equities.join(","), timeframe]);
+  }, [subscriptionSymbols.equities.join(","), timeframe, wsConnected, marketState?.timeframes, marketState?.lastUpdated]);
 
   // Option close prices for % change display
   type OptionPriceData = { prevClose: number; todayClose?: number };
   const [optionClosePrices, setOptionClosePrices] = useState<Map<string, OptionPriceData>>(new Map());
 
-  // Fetch close prices for option positions
+  // Fetch close prices for option positions when options, timeframe, or connection change
   useEffect(() => {
-    if (subscriptionSymbols.options.length === 0 || !marketState?.timeframes) return;
+    if (subscriptionSymbols.options.length === 0 || !marketState?.timeframes || !wsConnected) return;
 
     // Find the date for the selected timeframe
     const tfInfo = marketState.timeframes.find(t => t.id === timeframe);
@@ -129,7 +152,7 @@ export default function FidelityPanel() {
     }).catch(err => {
       console.error("[FidelityPanel] Failed to fetch option close prices:", err);
     });
-  }, [subscriptionSymbols.options.join(","), marketState?.timeframes, timeframe]);
+  }, [subscriptionSymbols.options.join(","), marketState?.timeframes, timeframe, wsConnected, marketState?.lastUpdated]);
 
   // Option prices from channel
   const optionPrices = useMemo(() => {
@@ -168,13 +191,18 @@ export default function FidelityPanel() {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
-      const parsed = parseFidelityCSV(text);
-      setPositions(parsed);
-      savePositions(parsed);
-      const date = new Date().toISOString();
-      setImportDate(date);
-      localStorage.setItem("fidelity.importDate", date);
-      console.log(`[FidelityPanel] Imported ${parsed.length} positions`);
+      const result = parseFidelityCSV(text);
+      setPositions(result.positions);
+      savePositions(result.positions);
+      // Use extracted timestamp from file, fallback to current time
+      const dateDisplay = result.downloadedAtRaw || new Date().toLocaleString();
+      setImportDate(dateDisplay);
+      localStorage.setItem("fidelity.importDate", dateDisplay);
+      // Also store the parsed Date for programmatic use
+      if (result.downloadedAt) {
+        localStorage.setItem("fidelity.downloadedAt", result.downloadedAt.toISOString());
+      }
+      console.log(`[FidelityPanel] Imported ${result.positions.length} positions, downloaded: ${dateDisplay}`);
     };
     reader.readAsText(file);
 

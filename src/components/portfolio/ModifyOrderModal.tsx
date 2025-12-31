@@ -31,6 +31,7 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
   const [iv, setIv] = useState("—");
 
   // Adaptive algo - initialize from order's current settings
+  // Note: IB returns "none" for algoStrategy even for Adaptive orders, so this may not be reliable
   const [useAdaptive, setUseAdaptive] = useState(order.algoStrategy === "Adaptive");
   const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">(
     (order.algoPriority as "Patient" | "Normal" | "Urgent") || "Normal"
