@@ -5,6 +5,7 @@ import OptionPanel from "./OptionPanel";
 import PortfolioPanel from "./PortfolioPanel";
 import FidelityPanel from "./FidelityPanel";
 import ConnectionStatus from "./components/shared/ConnectionStatus";
+import NotificationBanner from "./components/shared/NotificationBanner";
 import { socketHub } from "./ws/SocketHub";
 import { useAppState } from "./state/useAppState";
 
@@ -40,6 +41,9 @@ export default function TwoPane() {
 
   return (
     <div style={root as any}>
+      {/* Global notification banner */}
+      <NotificationBanner />
+
       {/* Tab bar */}
       <div style={tabBar as any}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 4 }}>

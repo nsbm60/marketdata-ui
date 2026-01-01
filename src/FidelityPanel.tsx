@@ -54,6 +54,43 @@ export default function FidelityPanel() {
     }
   }, []);
 
+  // Compute import reminder based on last import time and market state
+  const importReminder = useMemo(() => {
+    const downloadedAtStr = localStorage.getItem("fidelity.downloadedAt");
+    if (!downloadedAtStr) {
+      return positions.length > 0 ? null : "Import positions from Fidelity CSV";
+    }
+
+    const downloadedAt = new Date(downloadedAtStr);
+    const now = new Date();
+    const today = now.toDateString();
+    const importDay = downloadedAt.toDateString();
+    const isToday = today === importDay;
+    const importHour = downloadedAt.getHours();
+
+    // If import is from a different day
+    if (!isToday) {
+      const daysDiff = Math.floor((now.getTime() - downloadedAt.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysDiff === 1) {
+        return "Last import was yesterday - consider importing today's positions";
+      }
+      return `Last import was ${daysDiff} days ago - positions may be stale`;
+    }
+
+    // Import is from today - check timing vs market state
+    if (marketState?.state === "PreMarket" && importHour >= 16) {
+      // Have yesterday's EOD import, but need today's SOD
+      return "Import pre-market positions for accurate intraday P&L";
+    }
+
+    if (marketState?.state === "AfterHours" && importHour < 16) {
+      // Have SOD but not EOD - optional reminder
+      return "Consider EOD import for historical record";
+    }
+
+    return null; // All good
+  }, [positions.length, marketState?.state]);
+
   // Get symbols for subscription
   const subscriptionSymbols = useMemo(() => {
     return getSubscriptionSymbols(positions);
@@ -312,8 +349,15 @@ export default function FidelityPanel() {
             </button>
           )}
         </div>
-        <div style={{ fontSize: 12, color: "#666" }}>
-          {importDate && <>Imported: {new Date(importDate).toLocaleString()}</>}
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {importReminder && (
+            <span style={reminderStyle}>
+              {importReminder}
+            </span>
+          )}
+          <span style={{ fontSize: 12, color: "#666" }}>
+            {importDate && <>Imported: {importDate}</>}
+          </span>
         </div>
       </div>
 
@@ -587,6 +631,15 @@ const rightMono: React.CSSProperties = { ...cellBorder, textAlign: "right", font
 const gray10: React.CSSProperties = { ...cellBorder, fontSize: 10, color: "#666" };
 
 const empty: React.CSSProperties = { padding: 40, textAlign: "center", color: "#666", fontSize: 14 };
+
+const reminderStyle: React.CSSProperties = {
+  fontSize: 11,
+  padding: "4px 10px",
+  background: "#fef3c7",
+  border: "1px solid #fcd34d",
+  borderRadius: 4,
+  color: "#92400e",
+};
 
 const uploadBtn: React.CSSProperties = {
   padding: "4px 12px",
