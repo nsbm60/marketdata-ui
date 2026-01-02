@@ -93,6 +93,67 @@ export function buildOsiSymbol(
   return `${underlying.toUpperCase()}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
 }
 
+/**
+ * Build a hierarchical topic symbol for option subscriptions and matching.
+ * Format: UNDERLYING.EXPIRY.SIDE.STRIKE_CENTS
+ * Example: NVDA.2025-01-03.C.177_50
+ *
+ * @param underlying - The underlying symbol (e.g., "NVDA")
+ * @param expiry - Expiry in YYYY-MM-DD format
+ * @param right - "C", "P", "Call", or "Put"
+ * @param strike - Strike price (e.g., 177.50)
+ * @returns Hierarchical topic symbol (e.g., "NVDA.2025-01-03.C.177_50")
+ */
+export function buildTopicSymbol(
+  underlying: string,
+  expiry: string,
+  right: string,
+  strike: number
+): string {
+  const rightChar = right === "Call" || right === "C" ? "C" : "P";
+  const cents = Math.round(strike * 100);
+  const dollars = Math.floor(cents / 100);
+  const remainder = cents % 100;
+  const strikeFormatted = `${dollars}_${String(remainder).padStart(2, "0")}`;
+  return `${underlying.toUpperCase()}.${expiry}.${rightChar}.${strikeFormatted}`;
+}
+
+/**
+ * Parse a hierarchical topic symbol back into components.
+ * Input: "NVDA.2025-01-03.C.177_50"
+ * Returns: { underlying, expiry, right, strike } or null if invalid
+ */
+export function parseTopicSymbol(topicSymbol: string): ParsedOption | null {
+  const parts = topicSymbol.split(".");
+  if (parts.length !== 4) return null;
+
+  const underlying = parts[0];
+  const expiry = parts[1]; // YYYY-MM-DD
+  const rightChar = parts[2];
+  const strikeStr = parts[3];
+
+  // Validate expiry format
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return null;
+
+  // Validate right
+  if (rightChar !== "C" && rightChar !== "P") return null;
+
+  // Parse strike (dollars_cents format)
+  const strikeParts = strikeStr.split("_");
+  if (strikeParts.length !== 2) return null;
+  const dollars = parseInt(strikeParts[0], 10);
+  const cents = parseInt(strikeParts[1], 10);
+  if (isNaN(dollars) || isNaN(cents)) return null;
+  const strike = dollars + cents / 100;
+
+  return {
+    underlying,
+    expiration: expiry,
+    right: rightChar === "C" ? "call" : "put",
+    strike,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────
 // Expiry Formatting
 // ─────────────────────────────────────────────────────────────

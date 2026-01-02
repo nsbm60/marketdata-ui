@@ -9,9 +9,15 @@ import { PriceChangePercent, PriceChangeDollar } from "./components/shared/Price
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState, TimeframeOption } from "./services/marketState";
 import { useThrottledMarketPrices } from "./hooks/useMarketData";
+import { useWatchlistReport, WatchlistReportRow } from "./hooks/useWatchlistReport";
 import { PriceData } from "./services/MarketDataBus";
 import { isNum, fmtPrice } from "./utils/formatters";
 import { useAppState } from "./state/useAppState";
+
+// Feature flag for report-based data (vs tick-based)
+// Set to true to use pre-computed reports from CalcServer
+// NOTE: Requires WatchlistReportBuilder running in CalcServer
+const USE_REPORT_DATA = true;
 
 const LS_INPUT = "wl.input";
 const LS_TIMEFRAME = "wl.timeframe";
@@ -24,11 +30,12 @@ async function fetchActiveWatchlist(): Promise<{ name: string; symbols: string[]
   });
   if (!resp.ok) throw new Error(resp.error || "Failed to fetch watchlist");
   // Response has nested data: resp.data.data contains the actual payload
-  const payload = resp.data?.data ?? resp.data;
+  const data = resp.data as Record<string, unknown> | undefined;
+  const payload = (data?.data ?? data) as Record<string, unknown>;
   return {
-    name: payload.name,
-    symbols: payload.symbols || [],
-    lists: payload.lists || [],
+    name: payload.name as string,
+    symbols: (payload.symbols as string[]) || [],
+    lists: (payload.lists as string[]) || [],
   };
 }
 
@@ -47,8 +54,9 @@ async function setActiveWatchlist(name: string): Promise<string[]> {
     name,
   });
   if (!resp.ok) throw new Error(resp.error || "Failed to set active watchlist");
-  const payload = resp.data?.data ?? resp.data;
-  return payload.symbols || [];
+  const data = resp.data as Record<string, unknown> | undefined;
+  const payload = (data?.data ?? data) as Record<string, unknown>;
+  return (payload.symbols as string[]) || [];
 }
 
 async function deleteWatchlist(name: string): Promise<void> {
@@ -152,11 +160,26 @@ export default function EquityPanel({
       ? "connecting"
       : "closed";
 
-  /* ---------------- MARKET DATA via MarketDataBus ---------------- */
+  /* ---------------- MARKET DATA via MarketDataBus OR Reports ---------------- */
   // When paused, pass empty array to avoid subscriptions
   // Throttle to 250ms (4 updates/sec) for readability
   const activeSymbols = paused ? [] : symbols;
-  const prices = useThrottledMarketPrices(activeSymbols, "equity", 250);
+
+  // Tick-based approach (traditional)
+  const tickPrices = useThrottledMarketPrices(
+    USE_REPORT_DATA ? [] : activeSymbols,
+    "equity",
+    250
+  );
+
+  // Report-based approach (pre-computed from CalcServer)
+  const { rowsBySymbol: reportRows, report } = useWatchlistReport(
+    watchlistName,
+    USE_REPORT_DATA && !paused && wsConnected
+  );
+
+  // Unified prices map for downstream use
+  const prices = USE_REPORT_DATA ? new Map<string, PriceData>() : tickPrices;
 
   /* ---------------- actions ---------------- */
   // Debounced save to backend
@@ -249,17 +272,38 @@ export default function EquityPanel({
 
   /* ---------------- view model ---------------- */
   const list = useMemo(() => {
-    return symbols.map((s) => {
-      const price = prices.get(s);
-      return {
-        symbol: s,
-        last: price?.last,
-        bid: price?.bid,
-        ask: price?.ask,
-        updatedAt: price?.timestamp,
-      };
-    });
-  }, [symbols, prices]);
+    if (USE_REPORT_DATA) {
+      // Report-based: data comes pre-computed from CalcServer
+      return symbols.map((s) => {
+        const row = reportRows.get(s);
+        return {
+          symbol: s,
+          last: row?.last,
+          bid: row?.bid,
+          ask: row?.ask,
+          updatedAt: row?.timestamp,
+          // Pre-computed from CalcServer
+          change: row?.change,
+          pctChange: row?.pctChange,
+        };
+      });
+    } else {
+      // Tick-based: raw prices, change calculated locally
+      return symbols.map((s) => {
+        const price = prices.get(s);
+        return {
+          symbol: s,
+          last: price?.last,
+          bid: price?.bid,
+          ask: price?.ask,
+          updatedAt: price?.timestamp,
+          // Change calculated below from closePrices
+          change: undefined as number | undefined,
+          pctChange: undefined as number | undefined,
+        };
+      });
+    }
+  }, [symbols, prices, reportRows]);
 
   const stats = useMemo(() => {
     let withQuote = 0, withTrade = 0;
@@ -363,38 +407,36 @@ export default function EquityPanel({
       <div style={tableWrap as any}>
         <table style={tableStyle as any}>
           <colgroup>
-            <col style={{ width: "6ch" }} />
-            <col style={{ width: "9ch" }} />
-            <col style={{ width: "8ch" }} />
-            <col style={{ width: "8ch" }} />
-            <col style={{ width: "9ch" }} />
-            <col style={{ width: "9ch" }} />
-            <col style={{ width: "9ch" }} />
-            <col style={{ width: "7ch" }} />
-            <col style={{ width: "12ch" }} />
-            <col style={{ width: "14ch" }} />
+            <col style={{ width: "5ch" }} />  {/* Symbol */}
+            <col style={{ width: "8ch" }} />  {/* Last */}
+            <col style={{ width: "9ch" }} /> {/* Chg % */}
+            <col style={{ width: "7ch" }} />  {/* Chg $ */}
+            <col style={{ width: "8ch" }} />  {/* Bid */}
+            <col style={{ width: "8ch" }} />  {/* Ask */}
+            <col style={{ width: "7ch" }} />  {/* Updated */}
+            <col style={{ width: "10ch" }} /> {/* Trade */}
           </colgroup>
           <thead>
             <tr>
               <Th>Symbol</Th>
               <Th center>Last</Th>
               <Th center colSpan={2}>
-                {currentTimeframeInfo
-                  ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
-                  : "Change"}
+                {USE_REPORT_DATA && report?.referenceDate
+                  ? `Chg (${formatCloseDateShort(report.referenceDate)})`
+                  : currentTimeframeInfo
+                    ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
+                    : "Change"}
               </Th>
               <Th center>Bid</Th>
               <Th center>Ask</Th>
-              <Th center>Mid</Th>
-              <Th center>Spread</Th>
-              <Th>Updated</Th>
-              <Th>Trade</Th>
+              <Th center>Updated</Th>
+              <Th center>Trade</Th>
             </tr>
           </thead>
           <tbody>
             {symbols.length === 0 ? (
               <tr>
-                <td colSpan={10} style={{ padding: 6, color: "#666", textAlign: "center", borderTop: "1px solid #eee", fontSize: 12 }}>
+                <td colSpan={8} style={{ padding: 6, color: "#666", textAlign: "center", borderTop: "1px solid #eee", fontSize: 12 }}>
                   No tickers selected.
                 </td>
               </tr>
@@ -403,19 +445,28 @@ export default function EquityPanel({
                 const hasBid = isNum(r.bid);
                 const hasAsk = isNum(r.ask);
                 const mid = (hasBid && hasAsk) ? (r.bid! + r.ask!) / 2 : undefined;
-                const spread = (hasBid && hasAsk) ? (r.ask! - r.bid!) : undefined;
                 const lastVal = isNum(r.last) ? r.last : mid;
                 const stale = isStale(r.updatedAt, STALE_MS);
                 const isSelected = r.symbol === selectedSym;
 
-                // Calculate price change (% and $)
-                const closeData = closePrices.get(r.symbol);
-                const pctChange = (closeData && isNum(lastVal))
-                  ? calcPctChange(lastVal!, closeData.prevClose)
-                  : undefined;
-                const dollarChange = (closeData && isNum(lastVal))
-                  ? lastVal! - closeData.prevClose
-                  : undefined;
+                // Use pre-computed changes from report, or calculate from closePrices
+                let pctChange: number | undefined;
+                let dollarChange: number | undefined;
+
+                if (USE_REPORT_DATA && isNum(r.pctChange)) {
+                  // Report-based: use pre-computed values
+                  pctChange = r.pctChange;
+                  dollarChange = r.change;
+                } else {
+                  // Tick-based: calculate from closePrices
+                  const closeData = closePrices.get(r.symbol);
+                  pctChange = (closeData && isNum(lastVal))
+                    ? calcPctChange(lastVal!, closeData.prevClose)
+                    : undefined;
+                  dollarChange = (closeData && isNum(lastVal))
+                    ? lastVal! - closeData.prevClose
+                    : undefined;
+                }
                 return (
                   <tr
                     key={r.symbol}
@@ -434,9 +485,7 @@ export default function EquityPanel({
                     </Td>
                     <Td num selected={isSelected}>{fmtPrice(r.bid)}</Td>
                     <Td num selected={isSelected}>{fmtPrice(r.ask)}</Td>
-                    <Td num selected={isSelected}>{fmtPrice(mid)}</Td>
-                    <Td num selected={isSelected}>{fmtPrice(spread)}</Td>
-                    <Td selected={isSelected}>{fmtTime(r.updatedAt)}</Td>
+                    <Td center selected={isSelected}>{fmtTime(r.updatedAt)}</Td>
 
                     {/* BUY/SELL */}
                     <Td selected={isSelected}>
@@ -524,10 +573,10 @@ const inputStyle = {
 };
 const tableWrap = { overflowX: "auto", maxWidth: "100%" as const };
 const tableStyle = {
-  width: "auto",
+  width: "100%",
   borderCollapse: "separate" as const,
   borderSpacing: 0,
-  tableLayout: "auto" as const,
+  tableLayout: "fixed" as const,
   background: "#fff",
   fontSize: 12,
   lineHeight: 1.2,
@@ -629,8 +678,8 @@ function Th({ children, center, colSpan }: { children: any; center?: boolean; co
   );
 }
 function Td(
-  { children, mono, num, strong, selected, first }:
-  { children: any; mono?: boolean; num?: boolean; strong?: boolean; selected?: boolean; first?: boolean }
+  { children, mono, num, center, strong, selected, first }:
+  { children: any; mono?: boolean; num?: boolean; center?: boolean; strong?: boolean; selected?: boolean; first?: boolean }
 ) {
   return (
     <td
@@ -639,7 +688,7 @@ function Td(
         borderBottom: "1px solid #eee",
         borderRight: "1px solid #eee",
         fontFamily: mono ? "ui-monospace, SFMono-Regular, Menlo, monospace" : "inherit",
-        textAlign: num ? "right" : "left",
+        textAlign: center ? "center" : num ? "right" : "left",
         whiteSpace: "nowrap",
         overflow: "hidden",
         textOverflow: "ellipsis",

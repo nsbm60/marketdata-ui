@@ -36,7 +36,7 @@ export interface ControlAck {
 
 export interface TickEnvelope {
   // Matches your logs: {"topic":"md.option.quote.SYMBOL", "data":{...}}
-  topic: string;              // e.g. "md.option.quote.NVDA251128C00200000"
+  topic: string;              // e.g. "md.option.quote.NVDA.2025-01-03.C.177_50"
   data: {
     type: string;             // "quote" | "trade" | "lastTrade" | etc.
     symbol?: string;          // parsed by server; may be present

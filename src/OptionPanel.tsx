@@ -4,9 +4,13 @@ import { socketHub } from "./ws/SocketHub";
 import OptionTradeTicket from "./components/OptionTradeTicket";
 import TradeButton, { tradeButtonContainerCompact } from "./components/shared/TradeButton";
 import { useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
+import { useOptionsReport } from "./hooks/useOptionsReport";
 import { isNum, fmtPrice, fmtGreek } from "./utils/formatters";
 import { parseOptionSymbol, formatExpiryWithDTE } from "./utils/options";
 import Select from "./components/shared/Select";
+
+// Feature flag: use pre-computed report from CalcServer instead of per-tick updates
+const USE_REPORT_DATA = true;
 
 /** ---------- Component ---------- */
 export default function OptionPanel({ ticker }: { ticker?: string }) {
@@ -36,6 +40,13 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
   // Listen to option channel updates (triggers re-render on any option price change)
   // Throttle to 250ms (4 updates/sec) for readability
   const optionVersion = useChannelUpdates("option", 250);
+
+  // Report-based data (when USE_REPORT_DATA is enabled)
+  const { report: optionsReport, loaded: reportLoaded } = useOptionsReport(
+    underlying,
+    selectedExpiry || "",
+    USE_REPORT_DATA && !!underlying && !!selectedExpiry
+  );
 
   // Load expiries when ticker changes
   useEffect(() => {
@@ -86,6 +97,8 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
     if (!und || !expiry) return;
     console.log("[OptionPanel] loadChain:", und, "expiry:", expiry, "limit:", lim);
     setLoadingChain(true);
+
+    // Request MarketData to subscribe to option chain ticks
     socketHub.send({
       type: "control",
       target: "marketData",
@@ -95,6 +108,18 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
       expiry: expiry,
       limit: lim,
     });
+
+    // Request CalcServer to start OptionsReportBuilder for this chain
+    if (USE_REPORT_DATA) {
+      socketHub.send({
+        type: "control",
+        target: "calc",
+        op: "start_options_report",
+        id: `start_options_report_${Date.now()}`,
+        underlying: und,
+        expiry: expiry,
+      });
+    }
   };
 
   // Handle control messages (find_expiries, get_chain responses)
@@ -119,16 +144,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
             setSelectedExpiry(firstExpiry);
 
             if (und && firstExpiry) {
-              setLoadingChain(true);
-              socketHub.send({
-                type: "control",
-                target: "marketData",
-                op: "get_chain",
-                id: `get_chain_${Date.now()}`,
-                underlying: und,
-                expiry: firstExpiry,
-                limit: limit,
-              });
+              loadChain(und, firstExpiry, limit);
             }
           }
         }
@@ -164,11 +180,36 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
     return () => socketHub.offMessage(onMsg);
   }, [ticker, limit]);
 
-  // Build rows for SELECTED expiry only using MarketDataBus
+  // Build rows for SELECTED expiry - from report or individual ticks
   const rows = useMemo(() => {
     if (!ticker || !selectedExpiry) return [];
 
-    // Get all option prices from the bus
+    // Use report data if feature flag is enabled and report is loaded
+    if (USE_REPORT_DATA && optionsReport && reportLoaded) {
+      return optionsReport.rows.map((r) => ({
+        strike: r.strike,
+        cLast: r.call?.last,
+        cBid: r.call?.bid,
+        cMid: r.call?.mid,
+        cAsk: r.call?.ask,
+        cDelta: r.call?.delta,
+        cGamma: r.call?.gamma,
+        cTheta: r.call?.theta,
+        cVega: r.call?.vega,
+        cIv: r.call?.iv,
+        pLast: r.put?.last,
+        pBid: r.put?.bid,
+        pMid: r.put?.mid,
+        pAsk: r.put?.ask,
+        pDelta: r.put?.delta,
+        pGamma: r.put?.gamma,
+        pTheta: r.put?.theta,
+        pVega: r.put?.vega,
+        pIv: r.put?.iv,
+      }));
+    }
+
+    // Fallback: build from individual ticks via MarketDataBus
     const optionPrices = getChannelPrices("option");
 
     const strikeMap = new Map<number, { call?: PriceData; put?: PriceData }>();
@@ -238,7 +279,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
           pIv,
         };
       });
-  }, [ticker, selectedExpiry, optionVersion]);
+  }, [ticker, selectedExpiry, optionVersion, optionsReport, reportLoaded]);
 
   /** ---------- Render ---------- */
   return (
@@ -247,9 +288,6 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
       <div style={panelHeader as any}>
         <div style={hdrRow as any}>
           <div style={{ fontWeight: 700 }}>Options</div>
-          <span style={{ marginLeft: "auto", fontSize: 12, color: wsOpen ? "#137333" : "#666" }}>
-            WS: {wsOpen ? "open" : "…"}
-          </span>
         </div>
 
         {/* Controls row */}
@@ -342,11 +380,10 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
               </div>
               {/* Level 2 header */}
               <div style={hdrRow2 as any}>
-                <div style={subgrid10 as any}>
+                <div style={subgrid9 as any}>
                   <div style={subTh as any}>Trade</div>
                   <div style={subTh as any}>Last</div>
                   <div style={subTh as any}>Bid</div>
-                  <div style={subTh as any}>Mid</div>
                   <div style={subTh as any}>Ask</div>
                   <div style={subTh as any}>Δ</div>
                   <div style={subTh as any}>Γ</div>
@@ -355,10 +392,9 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                   <div style={subTh as any}>IV</div>
                 </div>
                 <div style={subTh as any}>{/* strike subheader empty */}</div>
-                <div style={subgrid10 as any}>
+                <div style={subgrid9 as any}>
                   <div style={subTh as any}>Last</div>
                   <div style={subTh as any}>Bid</div>
-                  <div style={subTh as any}>Mid</div>
                   <div style={subTh as any}>Ask</div>
                   <div style={subTh as any}>Δ</div>
                   <div style={subTh as any}>Γ</div>
@@ -386,7 +422,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                   <Fragment key={rowKey}>
                     {showDivider && <div style={atmDivider as any} />}
                     <div
-                      style={{ ...row21, cursor: "pointer" } as any}
+                      style={{ ...row19, cursor: "pointer" } as any}
                       onClick={() => setSelectedKey(rowKey)}
                     >
                       {/* Call Trade Buttons */}
@@ -415,10 +451,9 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                         />
                       </div>
 
-                      {/* Calls: Last | Bid | Mid | Ask | Greeks */}
+                      {/* Calls: Last | Bid | Ask | Greeks */}
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cLast)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cBid)}</div>
-                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cMid)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cAsk)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cDelta)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cGamma)}</div>
@@ -431,10 +466,9 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                         {fmtPrice(r.strike)}
                       </div>
 
-                      {/* Puts: Last | Bid | Mid | Ask | Greeks */}
+                      {/* Puts: Last | Bid | Ask | Greeks */}
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pLast)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pBid)}</div>
-                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pMid)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pAsk)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pDelta)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.pGamma)}</div>
@@ -578,7 +612,7 @@ const stickyHeader = {
 
 const hdrRow1 = {
   display: "grid",
-  gridTemplateColumns: "520px 70px 520px",
+  gridTemplateColumns: "468px 70px 468px",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
@@ -598,16 +632,16 @@ const thBlock = {
 
 const hdrRow2 = {
   display: "grid",
-  gridTemplateColumns: "520px 70px 520px",
+  gridTemplateColumns: "468px 70px 468px",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
   borderBottom: "1px solid #f0f0f0",
 };
 
-const subgrid10 = {
+const subgrid9 = {
   display: "grid",
-  gridTemplateColumns: "repeat(10, 52px)",
+  gridTemplateColumns: "repeat(9, 52px)",
   columnGap: 0,
 };
 
@@ -623,9 +657,9 @@ const subTh = {
   textAlign: "center" as const,
 };
 
-const row21 = {
+const row19 = {
   display: "grid",
-  gridTemplateColumns: "52px repeat(9, 52px) 70px repeat(9, 52px) 52px",
+  gridTemplateColumns: "52px repeat(8, 52px) 70px repeat(8, 52px) 52px",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
