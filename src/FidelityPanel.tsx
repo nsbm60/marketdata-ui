@@ -13,7 +13,7 @@ import {
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
-import { formatExpiryShort, daysToExpiry } from "./utils/options";
+import { formatExpiryShort, daysToExpiry, osiToTopicSymbol } from "./utils/options";
 import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalysis";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
 import TabButtonGroup from "./components/shared/TabButtonGroup";
@@ -270,8 +270,11 @@ export default function FidelityPanel() {
       let currentPrice = pos.lastPrice;
       if (pos.type === "equity" && equityPrices.has(pos.symbol)) {
         currentPrice = equityPrices.get(pos.symbol)?.last ?? currentPrice;
-      } else if (pos.type === "option" && pos.osiSymbol && optionPrices.has(pos.osiSymbol)) {
-        currentPrice = optionPrices.get(pos.osiSymbol)?.last ?? currentPrice;
+      } else if (pos.type === "option" && pos.osiSymbol) {
+        const topicKey = osiToTopicSymbol(pos.osiSymbol);
+        if (topicKey && optionPrices.has(topicKey)) {
+          currentPrice = optionPrices.get(topicKey)?.last ?? currentPrice;
+        }
       }
 
       if (currentPrice !== null) {
@@ -444,7 +447,10 @@ export default function FidelityPanel() {
                     if (pos.type === "equity" && equityPrices.has(pos.symbol)) {
                       currentPrice = equityPrices.get(pos.symbol)?.last ?? currentPrice;
                     } else if (pos.type === "option" && pos.osiSymbol) {
-                      currentPrice = optionPrices.get(pos.osiSymbol)?.last ?? currentPrice;
+                      const topicKey = osiToTopicSymbol(pos.osiSymbol);
+                      if (topicKey) {
+                        currentPrice = optionPrices.get(topicKey)?.last ?? currentPrice;
+                      }
                     }
 
                     const multiplier = pos.type === "option" ? 100 : 1;

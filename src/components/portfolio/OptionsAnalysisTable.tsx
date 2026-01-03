@@ -2,7 +2,7 @@
 import { useMemo } from "react";
 import { IbPosition } from "../../types/portfolio";
 import { PriceData, getChannelPrices } from "../../hooks/useMarketData";
-import { buildOsiSymbol, formatExpiryShort, compareOptions } from "../../utils/options";
+import { buildOsiSymbol, buildTopicSymbolFromYYYYMMDD, formatExpiryShort, compareOptions } from "../../utils/options";
 
 /**
  * Calculate days to expiry from YYYYMMDD expiry string.
@@ -95,7 +95,8 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
         if (opt.strike === undefined || opt.expiry === undefined || opt.right === undefined) return;
 
         const osiSymbol = buildOsiSymbol(opt.symbol, opt.expiry, opt.right, opt.strike);
-        const priceData = optionPrices.get(osiSymbol);
+        const topicSymbol = buildTopicSymbolFromYYYYMMDD(opt.symbol, opt.expiry, opt.right, opt.strike);
+        const priceData = optionPrices.get(topicSymbol);
         const optionPrice = priceData?.last || null;
         const theoPrice = (priceData as any)?.theo ?? null;
         const delta = (priceData as any)?.delta ?? null;

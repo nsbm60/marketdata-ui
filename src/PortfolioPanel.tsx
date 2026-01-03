@@ -19,7 +19,7 @@ import { PriceChangePercent, PriceChangeDollar } from "./components/shared/Price
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
-import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
+import { buildOsiSymbol, buildTopicSymbolFromYYYYMMDD, formatExpiryYYYYMMDD } from "./utils/options";
 import { usePortfolioData } from "./hooks/usePortfolioData";
 import { useTradeTicket } from "./hooks/useTradeTicket";
 import { useAppState } from "./state/useAppState";
@@ -295,7 +295,7 @@ export default function PortfolioPanel() {
       let priceKey = p.symbol.toUpperCase();
       let priceData;
       if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
+        priceKey = buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike);
         priceData = getChannelPrices("option").get(priceKey);
       } else {
         priceData = equityPrices.get(priceKey);
@@ -516,8 +516,10 @@ export default function PortfolioPanel() {
                     // Build the proper symbol for price lookup
                     let priceKey = p.symbol.toUpperCase();
                     let priceData;
+                    let osiKey = priceKey; // OSI key for option close price lookup
                     if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-                      priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
+                      priceKey = buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike);
+                      osiKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
                       priceData = getChannelPrices("option").get(priceKey);
                     } else {
                       priceData = equityPrices.get(priceKey);
@@ -526,7 +528,7 @@ export default function PortfolioPanel() {
                     const lastPrice = priceData?.last || 0;
 
                     // Use todayClose as fallback when no live price (after market close / no post-market trades)
-                    const optPriceData = p.secType === "OPT" ? optionClosePrices.get(priceKey) : undefined;
+                    const optPriceData = p.secType === "OPT" ? optionClosePrices.get(osiKey) : undefined;
                     const equityCloseData = p.secType === "STK" ? closePrices.get(p.symbol) : undefined;
                     let displayPrice = lastPrice;
                     if (lastPrice === 0) {
@@ -622,7 +624,7 @@ export default function PortfolioPanel() {
                                 : undefined;
                               // Get fresh price data at click time (not closure-captured render-time value)
                               const freshPriceData = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
-                                ? getChannelPrices("option").get(buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike))
+                                ? getChannelPrices("option").get(buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike))
                                 : equityPrices.get(p.symbol.toUpperCase());
                               // Calculate mid if we have bid and ask
                               const marketData = freshPriceData ? {
@@ -645,7 +647,7 @@ export default function PortfolioPanel() {
                                 : undefined;
                               // Get fresh price data at click time (not closure-captured render-time value)
                               const freshPriceData = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
-                                ? getChannelPrices("option").get(buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike))
+                                ? getChannelPrices("option").get(buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike))
                                 : equityPrices.get(p.symbol.toUpperCase());
                               // Calculate mid if we have bid and ask
                               const marketData = freshPriceData ? {

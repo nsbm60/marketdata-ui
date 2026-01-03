@@ -1,7 +1,7 @@
 // src/components/portfolio/PnLSummary.tsx
 import { useMemo, useEffect, useState } from "react";
 import { IbPosition } from "../../types/portfolio";
-import { buildOsiSymbol, formatExpiryYYYYMMDD, compareOptions } from "../../utils/options";
+import { buildTopicSymbolFromYYYYMMDD, formatExpiryYYYYMMDD, compareOptions } from "../../utils/options";
 import { getChannelPrices } from "../../hooks/useMarketData";
 import { formatCloseDateShort } from "../../services/closePrices";
 import { TimeframeInfo } from "../../services/marketState";
@@ -116,8 +116,8 @@ export default function PnLSummary({
       // Get current price
       let currentPrice = 0;
       if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        const osiSymbol = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
-        const priceData = getChannelPrices("option").get(osiSymbol);
+        const topicSymbol = buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike);
+        const priceData = getChannelPrices("option").get(topicSymbol);
         currentPrice = priceData?.last || 0;
       } else {
         const priceData = equityPrices.get(p.symbol.toUpperCase());

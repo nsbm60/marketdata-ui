@@ -84,12 +84,15 @@ export default function OptionTradeTicket({
 
   useEffect(() => {
     // Build the expected option symbol for this specific contract
-    // OSI format: UNDERLYING + YYMMDD + C/P + STRIKE (8 digits, strike * 1000)
-    const yy = expiry.substring(2, 4);
-    const mm = expiry.substring(5, 7);
-    const dd = expiry.substring(8, 10);
-    const strikeFormatted = String(Math.round(strike * 1000)).padStart(8, "0");
-    const expectedSymbol = `${underlying.toUpperCase()}${yy}${mm}${dd}${right}${strikeFormatted}`;
+    // Hierarchical topic format: UNDERLYING.EXPIRY.SIDE.STRIKE_CENTS
+    // e.g., NVDA.2025-01-03.C.177_50
+    const formatStrikeTopic = (s: number): string => {
+      const cents = Math.round(s * 100);
+      const dollars = Math.floor(cents / 100);
+      const remainder = cents % 100;
+      return `${dollars}_${String(remainder).padStart(2, "0")}`;
+    };
+    const expectedSymbol = `${underlying.toUpperCase()}.${expiry}.${right}.${formatStrikeTopic(strike)}`;
 
     const flushUpdates = () => {
       const p = pendingRef.current;

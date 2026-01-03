@@ -119,6 +119,39 @@ export function buildTopicSymbol(
 }
 
 /**
+ * Build a hierarchical topic symbol from YYYYMMDD expiry format.
+ * Convenience wrapper for buildTopicSymbol that handles the date conversion.
+ *
+ * @param underlying - The underlying symbol (e.g., "NVDA")
+ * @param expiryYYYYMMDD - Expiry in YYYYMMDD format (e.g., "20250103")
+ * @param right - "C", "P", "Call", or "Put"
+ * @param strike - Strike price (e.g., 177.50)
+ * @returns Hierarchical topic symbol (e.g., "NVDA.2025-01-03.C.177_50")
+ */
+export function buildTopicSymbolFromYYYYMMDD(
+  underlying: string,
+  expiryYYYYMMDD: string,
+  right: string,
+  strike: number
+): string {
+  const expiryIso = `${expiryYYYYMMDD.substring(0, 4)}-${expiryYYYYMMDD.substring(4, 6)}-${expiryYYYYMMDD.substring(6, 8)}`;
+  return buildTopicSymbol(underlying, expiryIso, right, strike);
+}
+
+/**
+ * Convert an OSI symbol to a hierarchical topic symbol.
+ * E.g., "NVDA250103C00140000" -> "NVDA.2025-01-03.C.140_00"
+ *
+ * @param osiSymbol - OSI format symbol
+ * @returns Hierarchical topic symbol, or null if parsing fails
+ */
+export function osiToTopicSymbol(osiSymbol: string): string | null {
+  const parsed = parseOptionSymbol(osiSymbol);
+  if (!parsed) return null;
+  return buildTopicSymbol(parsed.underlying, parsed.expiration, parsed.right === "call" ? "C" : "P", parsed.strike);
+}
+
+/**
  * Parse a hierarchical topic symbol back into components.
  * Input: "NVDA.2025-01-03.C.177_50"
  * Returns: { underlying, expiry, right, strike } or null if invalid

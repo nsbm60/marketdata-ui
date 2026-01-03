@@ -2,7 +2,7 @@
 import { useMemo } from "react";
 import { FidelityPosition } from "../../utils/fidelity";
 import { PriceData } from "../../hooks/useMarketData";
-import { formatExpiryShort, daysToExpiry, compareOptions } from "../../utils/options";
+import { formatExpiryShort, daysToExpiry, compareOptions, osiToTopicSymbol } from "../../utils/options";
 
 type Props = {
   positions: FidelityPosition[];
@@ -72,7 +72,8 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
         if (opt.strike === undefined || opt.expiry === undefined || opt.optionType === undefined) return;
 
         const osiSymbol = opt.osiSymbol;
-        const priceData = osiSymbol ? optionPrices.get(osiSymbol) : null;
+        const topicSymbol = osiSymbol ? osiToTopicSymbol(osiSymbol) : null;
+        const priceData = topicSymbol ? optionPrices.get(topicSymbol) : null;
         const optionPrice = priceData?.last ?? opt.lastPrice;
         const theoPrice = (priceData as any)?.theo ?? null;
         const delta = (priceData as any)?.delta ?? null;

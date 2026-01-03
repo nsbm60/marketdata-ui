@@ -51,7 +51,7 @@ export default function TradeButton({ side, onClick, compact, label }: TradeButt
 /** Style helper for button containers */
 export const tradeButtonContainer: CSSProperties = {
   display: "flex",
-  justifyContent: "flex-end",
+  justifyContent: "center",
   gap: 6,
 };
 

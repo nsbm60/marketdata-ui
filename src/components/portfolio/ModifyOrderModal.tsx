@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { IbOpenOrder } from "../../types/portfolio";
 import { socketHub } from "../../ws/SocketHub";
 import { modalOverlay, modalContent } from "./styles";
-import { buildOsiSymbol } from "../../utils/options";
+import { buildTopicSymbol } from "../../utils/options";
 import Select from "../shared/Select";
 
 const THROTTLE_MS = 200;
@@ -48,10 +48,18 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
 
   const isOption = order.secType === "OPT";
 
-  // Build the symbol for market data lookup
-  const marketSymbol = isOption && order.strike && order.expiry && order.right
-    ? buildOsiSymbol(order.symbol, order.expiry, order.right, order.strike)
-    : order.symbol.toUpperCase();
+  // Build the symbol for market data lookup (hierarchical format for topic matching)
+  const marketSymbol = (() => {
+    if (isOption && order.strike && order.expiry && order.right) {
+      // Convert YYYYMMDD to YYYY-MM-DD for buildTopicSymbol
+      const expiry = order.expiry;
+      const expiryIso = expiry.length === 8
+        ? `${expiry.substring(0, 4)}-${expiry.substring(4, 6)}-${expiry.substring(6, 8)}`
+        : expiry;
+      return buildTopicSymbol(order.symbol, expiryIso, order.right, order.strike);
+    }
+    return order.symbol.toUpperCase();
+  })();
 
   useEffect(() => {
     // Subscribe to market data

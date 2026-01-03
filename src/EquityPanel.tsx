@@ -193,6 +193,21 @@ export default function EquityPanel({
         .then(() => {
           console.log(`[EquityPanel] Saved watchlist '${name}'`);
           setSaving(false);
+          // Notify CalcServer to refresh its WatchlistReportBuilder
+          if (USE_REPORT_DATA) {
+            socketHub.sendControl("refresh_watchlist", {
+              target: "calc",
+              name,
+            }).then((ack) => {
+              if (ack.ok) {
+                console.log(`[EquityPanel] CalcServer refreshed watchlist`);
+              } else {
+                console.warn(`[EquityPanel] CalcServer refresh failed: ${ack.error}`);
+              }
+            }).catch((err) => {
+              console.error("[EquityPanel] Failed to refresh watchlist on CalcServer:", err);
+            });
+          }
         })
         .catch((err) => {
           console.error("[EquityPanel] Failed to save watchlist:", err);
