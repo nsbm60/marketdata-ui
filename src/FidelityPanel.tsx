@@ -13,9 +13,10 @@ import {
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
-import { formatExpiryShort, daysToExpiry, osiToTopicSymbol } from "./utils/options";
+import { formatExpiryShort, daysToExpiry, osiToTopicSymbol, parseOptionSymbol } from "./utils/options";
 import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalysis";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
+import { usePortfolioOptionsReports, PortfolioOptionPosition } from "./hooks/usePortfolioOptionsReports";
 import TabButtonGroup from "./components/shared/TabButtonGroup";
 import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
 import { useAppState } from "./state/useAppState";
@@ -196,6 +197,26 @@ export default function FidelityPanel() {
     void optionVersion;
     return getChannelPrices("option");
   }, [optionVersion]);
+
+  // Build option positions for Greeks lookup via OptionsReportBuilder
+  const portfolioOptionPositions = useMemo((): PortfolioOptionPosition[] => {
+    return positions
+      .filter(p => p.type === "option" && p.osiSymbol)
+      .map(p => {
+        const parsed = parseOptionSymbol(p.osiSymbol!);
+        if (!parsed) return null;
+        return {
+          underlying: parsed.underlying,
+          expiry: parsed.expiration,  // YYYY-MM-DD format
+          strike: parsed.strike,
+          right: parsed.right === "call" ? "C" : "P",
+        };
+      })
+      .filter((p): p is PortfolioOptionPosition => p !== null);
+  }, [positions]);
+
+  // Subscribe to OptionsReportBuilders for portfolio options to get Greeks
+  const { greeksMap: portfolioGreeksMap, version: greeksVersion } = usePortfolioOptionsReports(portfolioOptionPositions);
 
   // Separate cash/pending from tradeable positions
   const { cashPositions, pendingPositions, tradeablePositions } = useMemo(() => {
@@ -604,6 +625,8 @@ export default function FidelityPanel() {
                     positions={tradeablePositions}
                     equityPrices={equityPrices}
                     optionPrices={optionPrices}
+                    greeksMap={portfolioGreeksMap}
+                    greeksVersion={greeksVersion}
                   />
                 </div>
               )}

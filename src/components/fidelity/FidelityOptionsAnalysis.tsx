@@ -2,12 +2,17 @@
 import { useMemo } from "react";
 import { FidelityPosition } from "../../utils/fidelity";
 import { PriceData } from "../../hooks/useMarketData";
-import { formatExpiryShort, daysToExpiry, compareOptions, osiToTopicSymbol } from "../../utils/options";
+import { formatExpiryShort, daysToExpiry, compareOptions, osiToTopicSymbol, parseOptionSymbol } from "../../utils/options";
+import { OptionGreeks, getGreeksForPosition } from "../../hooks/usePortfolioOptionsReports";
 
 type Props = {
   positions: FidelityPosition[];
   equityPrices: Map<string, PriceData>;
   optionPrices: Map<string, PriceData>;
+  /** Greeks from OptionsReportBuilder (if available) */
+  greeksMap?: Map<string, OptionGreeks>;
+  /** Version counter to trigger re-renders when Greeks update */
+  greeksVersion?: number;
 };
 
 interface OptionMetrics {
@@ -47,7 +52,7 @@ interface UnderlyingGroup {
   putThetaDollar: number;
 }
 
-export default function FidelityOptionsAnalysis({ positions, equityPrices, optionPrices }: Props) {
+export default function FidelityOptionsAnalysis({ positions, equityPrices, optionPrices, greeksMap, greeksVersion }: Props) {
   // Group positions by underlying and calculate metrics
   const groups = useMemo(() => {
     const equities = positions.filter(p => p.type === "equity");
@@ -74,10 +79,27 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
         const osiSymbol = opt.osiSymbol;
         const topicSymbol = osiSymbol ? osiToTopicSymbol(osiSymbol) : null;
         const priceData = topicSymbol ? optionPrices.get(topicSymbol) : null;
-        const optionPrice = priceData?.last ?? opt.lastPrice;
-        const theoPrice = (priceData as any)?.theo ?? null;
-        const delta = (priceData as any)?.delta ?? null;
-        const theta = (priceData as any)?.theta ?? null;
+
+        // Try to get Greeks from the report-based greeksMap first (more reliable)
+        // Fall back to raw market data if greeksMap not available
+        let greeksData: OptionGreeks | undefined;
+        if (greeksMap && osiSymbol) {
+          const parsed = parseOptionSymbol(osiSymbol);
+          if (parsed) {
+            greeksData = getGreeksForPosition(
+              greeksMap,
+              parsed.underlying,
+              parsed.expiration,
+              parsed.right === "call" ? "C" : "P",
+              parsed.strike
+            );
+          }
+        }
+
+        const optionPrice = greeksData?.last ?? priceData?.last ?? opt.lastPrice;
+        const theoPrice = greeksData?.theo ?? (priceData as any)?.theo ?? null;
+        const delta = greeksData?.delta ?? (priceData as any)?.delta ?? null;
+        const theta = greeksData?.theta ?? (priceData as any)?.theta ?? null;
 
         const effectiveEquiv = delta !== null ? opt.quantity * 100 * delta : null;
         const thetaDollar = theta !== null ? theta * opt.quantity * 100 : null;
@@ -212,7 +234,7 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
     });
 
     return result;
-  }, [positions, equityPrices, optionPrices]);
+  }, [positions, equityPrices, optionPrices, greeksMap, greeksVersion]);
 
   const fmt = (n: number, decimals = 2) =>
     n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });

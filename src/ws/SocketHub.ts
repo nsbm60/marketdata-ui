@@ -155,12 +155,30 @@ class SocketHub {
   /**
    * Send a control request and await its control.ack (matched by id).
    * If you don't pass an id, one is generated.
+   *
+   * IMPORTANT: Call as sendControl("op_name", { ...payload })
+   * NOT as sendControl({ op: "op_name", ... })
    */
   public sendControl<T extends ControlAck = ControlAck>(
     op: string,
     payload: Record<string, unknown> = {},
     opts?: { id?: string; timeoutMs?: number }
   ): Promise<T> {
+    // Fail fast: catch common mistake of passing object as first argument
+    if (typeof op !== "string") {
+      const err = new Error(
+        `sendControl: first argument must be op string, got ${typeof op}. ` +
+        `Call as sendControl("op_name", { ...payload }) not sendControl({ op: "...", ... })`
+      );
+      console.error("[SocketHub]", err.message, op);
+      return Promise.reject(err);
+    }
+    if (!op || op.trim() === "") {
+      const err = new Error("sendControl: op cannot be empty");
+      console.error("[SocketHub]", err.message);
+      return Promise.reject(err);
+    }
+
     const id = opts?.id ?? this.nextId(op);
     const timeoutMs = opts?.timeoutMs ?? 8000;
 

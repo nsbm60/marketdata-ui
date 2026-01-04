@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { IbPosition } from "../../types/portfolio";
 import { PriceData, getChannelPrices } from "../../hooks/useMarketData";
 import { buildOsiSymbol, buildTopicSymbolFromYYYYMMDD, formatExpiryShort, compareOptions } from "../../utils/options";
+import { OptionGreeks, getGreeksForPosition } from "../../hooks/usePortfolioOptionsReports";
 
 /**
  * Calculate days to expiry from YYYYMMDD expiry string.
@@ -22,6 +23,12 @@ function calcDTE(expiry: string): number {
 type Props = {
   positions: IbPosition[];
   equityPrices: Map<string, PriceData>;
+  /** Greeks from OptionsReportBuilder (if available) */
+  greeksMap?: Map<string, OptionGreeks>;
+  /** Version counter to trigger re-renders when Greeks update */
+  greeksVersion?: number;
+  /** Debug: subscribed pairs */
+  subscribedPairs?: string;
 };
 
 interface OptionMetrics {
@@ -63,7 +70,7 @@ interface UnderlyingGroup {
   putThetaDollar: number;
 }
 
-export default function OptionsAnalysisTable({ positions, equityPrices }: Props) {
+export default function OptionsAnalysisTable({ positions, equityPrices, greeksMap, greeksVersion, subscribedPairs }: Props) {
   // Get option prices from the channel
   const optionPrices = getChannelPrices("option");
 
@@ -97,10 +104,17 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
         const osiSymbol = buildOsiSymbol(opt.symbol, opt.expiry, opt.right, opt.strike);
         const topicSymbol = buildTopicSymbolFromYYYYMMDD(opt.symbol, opt.expiry, opt.right, opt.strike);
         const priceData = optionPrices.get(topicSymbol);
-        const optionPrice = priceData?.last || null;
-        const theoPrice = (priceData as any)?.theo ?? null;
-        const delta = (priceData as any)?.delta ?? null;
-        const theta = (priceData as any)?.theta ?? null;
+
+        // Try to get Greeks from the report-based greeksMap first (more reliable)
+        // Fall back to raw market data if greeksMap not available
+        const greeksData = greeksMap
+          ? getGreeksForPosition(greeksMap, opt.symbol, opt.expiry, opt.right, opt.strike)
+          : undefined;
+
+        const optionPrice = greeksData?.last ?? priceData?.last ?? null;
+        const theoPrice = greeksData?.theo ?? (priceData as any)?.theo ?? null;
+        const delta = greeksData?.delta ?? (priceData as any)?.delta ?? null;
+        const theta = greeksData?.theta ?? (priceData as any)?.theta ?? null;
 
         // Calculate effective equivalent position
         const effectiveEquiv = delta !== null ? opt.quantity * 100 * delta : null;
@@ -243,7 +257,7 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
     });
 
     return result;
-  }, [positions, equityPrices, optionPrices]);
+  }, [positions, equityPrices, optionPrices, greeksMap, greeksVersion]);
 
   // Format helpers
   const fmt = (n: number, decimals = 2) =>
@@ -268,8 +282,14 @@ export default function OptionsAnalysisTable({ positions, equityPrices }: Props)
     return <div style={emptyStyle}>No positions to analyze</div>;
   }
 
+  // Debug: show subscribed pairs and data status
+  const debugInfo = `Subscribed: ${subscribedPairs || "none"} | Data: ${greeksMap?.size || 0} entries`;
+
   return (
     <div style={container}>
+      <div style={{ fontSize: 10, color: "#999", marginBottom: 8, fontFamily: "monospace" }}>
+        {debugInfo}
+      </div>
       {groups.map(group => (
         <div key={group.underlying} style={groupContainer}>
           {/* Underlying header */}

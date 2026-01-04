@@ -23,6 +23,7 @@ import { buildOsiSymbol, buildTopicSymbolFromYYYYMMDD, formatExpiryYYYYMMDD } fr
 import { usePortfolioData } from "./hooks/usePortfolioData";
 import { useTradeTicket } from "./hooks/useTradeTicket";
 import { useAppState } from "./state/useAppState";
+import { usePortfolioOptionsReports, PortfolioOptionPosition } from "./hooks/usePortfolioOptionsReports";
 import type { TimeframeOption } from "./services/marketState";
 
 // Default timeframes used when marketState hasn't loaded yet
@@ -198,6 +199,23 @@ export default function PortfolioPanel() {
       .filter(p => p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined)
       .map(p => buildOsiSymbol(p.symbol, p.expiry!, p.right!, p.strike!));
   }, [accountState?.positions]);
+
+  // Build option positions for Greeks lookup via OptionsReportBuilder
+  const portfolioOptionPositions = useMemo((): PortfolioOptionPosition[] => {
+    if (!accountState?.positions) return [];
+    return accountState.positions
+      .filter(p => p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined)
+      .map(p => ({
+        underlying: p.symbol,
+        expiry: p.expiry!,
+        strike: p.strike!,
+        // Normalize right to "C" or "P"
+        right: (p.right === "C" || p.right === "Call") ? "C" : "P",
+      }));
+  }, [accountState?.positions]);
+
+  // Subscribe to OptionsReportBuilders for portfolio options to get Greeks
+  const { greeksMap: portfolioGreeksMap, version: greeksVersion, subscribedPairs } = usePortfolioOptionsReports(portfolioOptionPositions);
 
   // Helper to send option subscriptions (used on initial mount and reconnect)
   const sendOptionSubscriptions = (symbols: string[]) => {
@@ -676,6 +694,9 @@ export default function PortfolioPanel() {
                     <OptionsAnalysisTable
                       positions={accountState.positions}
                       equityPrices={equityPrices}
+                      greeksMap={portfolioGreeksMap}
+                      greeksVersion={greeksVersion}
+                      subscribedPairs={subscribedPairs}
                     />
                   </div>
                 )}
