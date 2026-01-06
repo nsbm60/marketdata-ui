@@ -137,8 +137,27 @@ export default function EquityPanel({
   const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem(LS_TIMEFRAME) ?? "1d");
 
-  // Persist timeframe selection
-  useEffect(() => { localStorage.setItem(LS_TIMEFRAME, timeframe); }, [timeframe]);
+  // Persist timeframe selection and notify CalcServer when using report data
+  useEffect(() => {
+    localStorage.setItem(LS_TIMEFRAME, timeframe);
+
+    // When using report data, tell CalcServer to use the new timeframe
+    if (USE_REPORT_DATA && wsConnected && watchlistLoaded) {
+      socketHub.sendControl("refresh_watchlist", {
+        target: "calc",
+        name: watchlistName,
+        timeframe,
+      }).then((ack) => {
+        if (ack.ok) {
+          console.log(`[EquityPanel] CalcServer updated to timeframe=${timeframe}`);
+        } else {
+          console.warn(`[EquityPanel] CalcServer timeframe update failed: ${ack.error}`);
+        }
+      }).catch((err) => {
+        console.error("[EquityPanel] Failed to update CalcServer timeframe:", err);
+      });
+    }
+  }, [timeframe, wsConnected, watchlistLoaded, watchlistName]);
 
   // Get current timeframe info for display
   const currentTimeframeInfo = useMemo(() => {
@@ -195,9 +214,12 @@ export default function EquityPanel({
           setSaving(false);
           // Notify CalcServer to refresh its WatchlistReportBuilder
           if (USE_REPORT_DATA) {
+            // Get current timeframe from localStorage since we may not have it in closure
+            const currentTimeframe = localStorage.getItem(LS_TIMEFRAME) ?? "1d";
             socketHub.sendControl("refresh_watchlist", {
               target: "calc",
               name,
+              timeframe: currentTimeframe,
             }).then((ack) => {
               if (ack.ok) {
                 console.log(`[EquityPanel] CalcServer refreshed watchlist`);

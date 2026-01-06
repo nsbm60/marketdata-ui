@@ -15,11 +15,13 @@ import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort }
 import { useMarketState } from "./services/marketState";
 import { formatExpiryShort, daysToExpiry, osiToTopicSymbol, parseOptionSymbol } from "./utils/options";
 import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalysis";
+import ExpiryScenarioAnalysis from "./components/portfolio/ExpiryScenarioAnalysis";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
 import { usePortfolioOptionsReports, PortfolioOptionPosition } from "./hooks/usePortfolioOptionsReports";
 import TabButtonGroup from "./components/shared/TabButtonGroup";
 import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
 import { useAppState } from "./state/useAppState";
+import { IbPosition } from "./types/portfolio";
 
 export default function FidelityPanel() {
   const [positions, setPositions] = useState<FidelityPosition[]>([]);
@@ -30,8 +32,8 @@ export default function FidelityPanel() {
   const { state: appState } = useAppState();
   const wsConnected = appState.connection.websocket === "connected";
 
-  // Tab state: "positions" or "analysis"
-  const [activeTab, setActiveTab] = useState<"positions" | "analysis">("positions");
+  // Tab state: "positions", "analysis", or "scenarios"
+  const [activeTab, setActiveTab] = useState<"positions" | "analysis" | "scenarios">("positions");
 
   // Market state for timeframe options
   const marketState = useMarketState();
@@ -325,6 +327,19 @@ export default function FidelityPanel() {
     };
   }, [tradeablePositions, equityPrices, optionPrices, closePrices, totalCash, totalPending]);
 
+  // Convert Fidelity positions to IbPosition format for ExpiryScenarioAnalysis
+  const ibFormatPositions = useMemo((): IbPosition[] => {
+    return tradeablePositions.map(pos => ({
+      symbol: pos.underlying || pos.symbol,
+      secType: pos.type === "option" ? "OPT" : "STK",
+      quantity: pos.quantity,
+      avgCost: pos.avgCostBasis ?? 0,
+      strike: pos.strike,
+      expiry: pos.expiry,
+      right: pos.optionType === "call" ? "C" : pos.optionType === "put" ? "P" : undefined,
+    }));
+  }, [tradeablePositions]);
+
   // Sort positions: by symbol, then equity before options, then by expiry/strike
   const sortedPositions = useMemo(() => {
     return [...tradeablePositions].sort((a, b) => {
@@ -428,9 +443,10 @@ export default function FidelityPanel() {
                   tabs={[
                     { id: "positions", label: "Positions" },
                     { id: "analysis", label: "Options Analysis" },
+                    { id: "scenarios", label: "Expiry Scenarios" },
                   ]}
                   activeTab={activeTab}
-                  onTabChange={(tab) => setActiveTab(tab as "positions" | "analysis")}
+                  onTabChange={(tab) => setActiveTab(tab as "positions" | "analysis" | "scenarios")}
                 />
                 {activeTab === "positions" && marketState?.timeframes && (
                   <TimeframeSelector
@@ -625,6 +641,18 @@ export default function FidelityPanel() {
                     positions={tradeablePositions}
                     equityPrices={equityPrices}
                     optionPrices={optionPrices}
+                    greeksMap={portfolioGreeksMap}
+                    greeksVersion={greeksVersion}
+                  />
+                </div>
+              )}
+
+              {/* Expiry Scenarios Tab */}
+              {activeTab === "scenarios" && (
+                <div style={{ maxHeight: 750, overflow: "auto" }}>
+                  <ExpiryScenarioAnalysis
+                    positions={ibFormatPositions}
+                    equityPrices={equityPrices}
                     greeksMap={portfolioGreeksMap}
                     greeksVersion={greeksVersion}
                   />

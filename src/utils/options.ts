@@ -74,7 +74,7 @@ export function parseOptionSymbol(sym: string): ParsedOption | null {
  * Build an OSI option symbol from components.
  *
  * @param underlying - The underlying symbol (e.g., "AAPL")
- * @param expiry - Expiry in YYYYMMDD format
+ * @param expiry - Expiry in YYYYMMDD, YYYY-MM-DD, or YYMMDD format
  * @param right - "C", "P", "Call", or "Put"
  * @param strike - Strike price
  * @returns OSI symbol (e.g., "AAPL251219C00140000")
@@ -85,12 +85,34 @@ export function buildOsiSymbol(
   right: string,
   strike: number
 ): string {
-  const yy = expiry.substring(2, 4);
-  const mm = expiry.substring(4, 6);
-  const dd = expiry.substring(6, 8);
+  // Normalize expiry to YYMMDD
+  let yymmdd: string;
+  if (expiry.includes("-")) {
+    // YYYY-MM-DD -> YYMMDD
+    const parts = expiry.split("-");
+    if (parts.length === 3) {
+      yymmdd = parts[0].substring(2) + parts[1] + parts[2];
+    } else if (parts.length === 2) {
+      // YYYY-MM (no day) - shouldn't happen for valid option contracts
+      console.warn(`[buildOsiSymbol] Expiry missing day: ${expiry}`);
+      yymmdd = parts[0].substring(2) + parts[1] + "01";
+    } else {
+      yymmdd = expiry;
+    }
+  } else if (expiry.length === 8) {
+    // YYYYMMDD -> YYMMDD
+    yymmdd = expiry.substring(2);
+  } else if (expiry.length === 6) {
+    // Already YYMMDD
+    yymmdd = expiry;
+  } else {
+    console.warn(`[buildOsiSymbol] Unknown expiry format: ${expiry}`);
+    yymmdd = expiry;
+  }
+
   const rightChar = right === "Call" || right === "C" ? "C" : "P";
   const strikeFormatted = String(Math.round(strike * 1000)).padStart(8, "0");
-  return `${underlying.toUpperCase()}${yy}${mm}${dd}${rightChar}${strikeFormatted}`;
+  return `${underlying.toUpperCase()}${yymmdd}${rightChar}${strikeFormatted}`;
 }
 
 /**

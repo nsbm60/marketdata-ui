@@ -8,6 +8,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { socketHub } from "../ws/SocketHub";
 import type { TickEnvelope } from "../ws/ws-types";
+import { buildOsiSymbol } from "../utils/options";
 
 // Greeks data for a single option
 export interface OptionGreeks {
@@ -55,35 +56,6 @@ interface PortfolioOptionsReportData {
 
 // Generate a stable client ID for this browser session
 const clientId = `ui_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
-
-/**
- * Build OSI symbol from position data.
- * Format: ROOT + YYMMDD + C/P + 8-digit strike (e.g., "AMD250109C00215000")
- */
-function buildOsiSymbol(underlying: string, expiry: string, right: string, strike: number): string {
-  // Normalize expiry to YYMMDD
-  let yymmdd: string;
-  if (expiry.includes("-")) {
-    // YYYY-MM-DD -> YYMMDD
-    const [yyyy, mm, dd] = expiry.split("-");
-    yymmdd = yyyy.substring(2) + mm + dd;
-  } else if (expiry.length === 8) {
-    // YYYYMMDD -> YYMMDD
-    yymmdd = expiry.substring(2);
-  } else if (expiry.length === 6) {
-    yymmdd = expiry;
-  } else {
-    console.warn(`[buildOsiSymbol] Unknown expiry format: ${expiry}`);
-    yymmdd = expiry;
-  }
-
-  const side = right.toUpperCase().startsWith("C") ? "C" : "P";
-  // Strike in 1/1000 dollars, 8 digits
-  const strikeInt = Math.round(strike * 1000);
-  const strike8 = String(strikeInt).padStart(8, "0");
-
-  return `${underlying.toUpperCase()}${yymmdd}${side}${strike8}`;
-}
 
 export interface UsePortfolioOptionsReportsResult {
   greeksMap: Map<string, OptionGreeks>;

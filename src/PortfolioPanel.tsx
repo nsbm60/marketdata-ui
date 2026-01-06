@@ -10,6 +10,7 @@ import {
   CancelOrderModal,
   ModifyOrderModal,
   OptionsAnalysisTable,
+  ExpiryScenarioAnalysis,
   PnLSummary,
 } from "./components/portfolio";
 import ConnectionStatus from "./components/shared/ConnectionStatus";
@@ -70,7 +71,7 @@ export default function PortfolioPanel() {
   const wsConnected = appState.connection.websocket === "connected";
 
   // Tab for positions view: "positions", "analysis", or "pnl"
-  const [positionsTab, setPositionsTab] = useState<"positions" | "analysis" | "pnl">("positions");
+  const [positionsTab, setPositionsTab] = useState<"positions" | "analysis" | "scenarios" | "pnl">("positions");
 
   // Market state for prevTradingDay and timeframes
   const marketState = useMarketState();
@@ -215,7 +216,7 @@ export default function PortfolioPanel() {
   }, [accountState?.positions]);
 
   // Subscribe to OptionsReportBuilders for portfolio options to get Greeks
-  const { greeksMap: portfolioGreeksMap, version: greeksVersion, subscribedPairs } = usePortfolioOptionsReports(portfolioOptionPositions);
+  const { greeksMap: portfolioGreeksMap, version: greeksVersion, subscribedContracts } = usePortfolioOptionsReports(portfolioOptionPositions);
 
   // Helper to send option subscriptions (used on initial mount and reconnect)
   const sendOptionSubscriptions = (symbols: string[]) => {
@@ -474,10 +475,11 @@ export default function PortfolioPanel() {
                     tabs={[
                       { id: "positions", label: "Positions" },
                       { id: "analysis", label: "Options Analysis" },
+                      { id: "scenarios", label: "Expiry Scenarios" },
                       { id: "pnl", label: "P&L" },
                     ]}
                     activeTab={positionsTab}
-                    onTabChange={(tab) => setPositionsTab(tab as "positions" | "analysis" | "pnl")}
+                    onTabChange={(tab) => setPositionsTab(tab as "positions" | "analysis" | "scenarios" | "pnl")}
                   />
                   {(positionsTab === "positions" || positionsTab === "pnl") && (
                     <TimeframeSelector
@@ -696,7 +698,19 @@ export default function PortfolioPanel() {
                       equityPrices={equityPrices}
                       greeksMap={portfolioGreeksMap}
                       greeksVersion={greeksVersion}
-                      subscribedPairs={subscribedPairs}
+                      subscribedPairs={`${subscribedContracts} contracts`}
+                    />
+                  </div>
+                )}
+
+                {/* Expiry Scenario Analysis */}
+                {positionsTab === "scenarios" && (
+                  <div style={{ maxHeight: 750, overflow: "auto" }}>
+                    <ExpiryScenarioAnalysis
+                      positions={accountState.positions}
+                      equityPrices={equityPrices}
+                      greeksMap={portfolioGreeksMap}
+                      greeksVersion={greeksVersion}
                     />
                   </div>
                 )}
