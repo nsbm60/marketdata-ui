@@ -54,3 +54,48 @@ Vite proxies `/ws` and `/api` to backend (configured via `VITE_BACKEND_HOST`, `V
 
 - **TradeTicket.tsx** - Equity order entry
 - **OptionTradeTicket.tsx** - Option order entry with contract details
+
+## Architectural Principles
+
+### Domain Calculations on Server, Not UI
+
+**Rule**: All domain calculations (Greeks, VIX, P&L, aggregations, derived metrics) MUST be performed on the server side (CalcServer), not in the UI.
+
+The UI's role is to:
+- Subscribe to pre-computed data streams
+- Display values
+- Handle user interactions
+- Send control requests
+
+The UI should NOT:
+- Calculate Greeks or implied volatility
+- Aggregate positions or compute portfolio metrics
+- Derive market indicators (VIX, VWAP, etc.)
+- Perform any calculation that requires domain knowledge
+
+**Rationale**:
+- Single source of truth for calculations
+- Consistent values across all clients
+- Easier to test and audit
+- UI stays simple and fast
+
+### Adding New Report/Data Types
+
+When adding a new report type that flows from CalcServer to UI:
+
+**Backend (Scala) - single file:**
+1. `TopicBuilder.scala` - Add `UiChannel.ReportXxx` constant AND add it to `AllReports` set
+
+The rest is auto-discovered:
+- `UiBusBridge` subscribes to `report.*` and routes dynamically
+- `UiChannelRef` auto-generates from `AllReports`
+- `UiSocket` derives casing from prefix
+
+**Frontend (TypeScript):**
+1. Create `useXxx.ts` hook that subscribes to the channel
+2. Create display component
+
+**Checklist:**
+- [ ] Channel constant in TopicBuilder.UiChannel
+- [ ] Channel added to TopicBuilder.UiChannel.AllReports
+- [ ] Frontend hook subscribes with lowercase symbol (all report channels use lowercase)

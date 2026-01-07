@@ -7,6 +7,7 @@ import FidelityPanel from "./FidelityPanel";
 import ChartPanel from "./ChartPanel";
 import ConnectionStatus from "./components/shared/ConnectionStatus";
 import NotificationBanner from "./components/shared/NotificationBanner";
+import VixTicker from "./components/shared/VixTicker";
 import { socketHub } from "./ws/SocketHub";
 import { useAppState } from "./state/useAppState";
 import { light } from "./theme";
@@ -78,7 +79,10 @@ export default function TwoPane() {
             Chart
           </button>
         </div>
-        <ConnectionStatus connected={wsConnected} label="WebSocket" />
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <VixTicker />
+          <ConnectionStatus connected={wsConnected} label="WebSocket" />
+        </div>
       </div>
 
      {/* Tab content */}
