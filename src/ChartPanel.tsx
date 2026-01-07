@@ -13,6 +13,7 @@ import { useChartData } from "./hooks/useChartData";
 import ChartCanvas from "./components/chart/ChartCanvas";
 import MetricToolbar from "./components/chart/MetricToolbar";
 import { ChartMetricSettings, DEFAULT_METRIC_SETTINGS, calculateWarmupBars } from "./utils/chartMetrics";
+import { dark, semantic } from "./theme";
 
 // Timeframe options
 const TIMEFRAMES = [
@@ -169,7 +170,7 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        backgroundColor: "#1a1a2e",
+        backgroundColor: dark.bg.primary,
       }}
     >
       {/* Header */}
@@ -178,7 +179,7 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
           display: "flex",
           alignItems: "center",
           padding: "12px 16px",
-          borderBottom: "1px solid #2a2a3e",
+          borderBottom: `1px solid ${dark.border.muted}`,
           gap: 16,
           flexWrap: "wrap",
         }}
@@ -193,10 +194,10 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
             style={{
               width: 100,
               padding: "6px 10px",
-              backgroundColor: "#2a2a3e",
-              border: "1px solid #3a3a4e",
+              backgroundColor: dark.bg.secondary,
+              border: `1px solid ${dark.border.primary}`,
               borderRadius: 4,
-              color: "#e5e5e5",
+              color: dark.text.primary,
               fontSize: 14,
               fontWeight: 600,
             }}
@@ -205,7 +206,7 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
             type="submit"
             style={{
               padding: "6px 12px",
-              backgroundColor: "#3b82f6",
+              backgroundColor: dark.accent.primary,
               border: "none",
               borderRadius: 4,
               color: "#fff",
@@ -226,9 +227,9 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
               style={{
                 padding: "6px 10px",
                 borderRadius: 4,
-                border: `1px solid ${timeframe === tf.value ? "#3b82f6" : "#3a3a4e"}`,
-                backgroundColor: timeframe === tf.value ? "#1e3a5f" : "transparent",
-                color: timeframe === tf.value ? "#60a5fa" : "#9ca3af",
+                border: `1px solid ${timeframe === tf.value ? dark.accent.primary : dark.border.primary}`,
+                backgroundColor: timeframe === tf.value ? dark.accent.dark : "transparent",
+                color: timeframe === tf.value ? dark.accent.light : dark.text.secondary,
                 cursor: "pointer",
                 fontSize: 12,
                 fontWeight: 500,
@@ -239,41 +240,41 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
           ))}
         </div>
 
-        {/* Session selector (only for intraday) */}
-        {isIntraday && (
-          <select
-            value={session}
-            onChange={(e) => setSession(e.target.value as SessionType)}
-            style={{
-              padding: "6px 10px",
-              backgroundColor: "#2a2a3e",
-              border: "1px solid #3a3a4e",
-              borderRadius: 4,
-              color: "#e5e5e5",
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
-            {SESSIONS.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        )}
+        {/* Session selector (disabled for daily/weekly) */}
+        <select
+          value={session}
+          onChange={(e) => setSession(e.target.value as SessionType)}
+          disabled={!isIntraday}
+          title={!isIntraday ? "Session filtering only applies to intraday timeframes" : undefined}
+          style={{
+            padding: "6px 10px",
+            backgroundColor: isIntraday ? dark.bg.secondary : dark.bg.tertiary,
+            border: `1px solid ${isIntraday ? dark.border.primary : dark.border.secondary}`,
+            borderRadius: 4,
+            color: isIntraday ? dark.text.primary : dark.text.disabled,
+            fontSize: 12,
+            cursor: isIntraday ? "pointer" : "not-allowed",
+          }}
+        >
+          {SESSIONS.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
 
         {/* Status / refresh */}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
           {(loading || loadingMore) && (
-            <span style={{ fontSize: 12, color: "#6b7280" }}>
+            <span style={{ fontSize: 12, color: dark.text.muted }}>
               {loadingMore ? "Loading more..." : "Loading..."}
             </span>
           )}
           {error && (
-            <span style={{ fontSize: 12, color: "#ef4444" }}>{error}</span>
+            <span style={{ fontSize: 12, color: semantic.error.text }}>{error}</span>
           )}
           {activeSymbol && !loading && (
-            <span style={{ fontSize: 12, color: "#6b7280" }}>
+            <span style={{ fontSize: 12, color: dark.text.muted }}>
               {bars.length} bars{loadingMore ? " (loading...)" : ""}
             </span>
           )}
@@ -283,9 +284,9 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
             style={{
               padding: "4px 8px",
               borderRadius: 4,
-              border: "1px solid #3a3a4e",
+              border: `1px solid ${dark.border.primary}`,
               backgroundColor: "transparent",
-              color: "#9ca3af",
+              color: dark.text.secondary,
               cursor: activeSymbol && !loading && !loadingMore ? "pointer" : "not-allowed",
               fontSize: 12,
               opacity: activeSymbol && !loading && !loadingMore ? 1 : 0.5,
@@ -308,7 +309,7 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
               alignItems: "center",
               justifyContent: "center",
               height: "100%",
-              color: "#6b7280",
+              color: dark.text.muted,
               fontSize: 14,
             }}
           >
@@ -321,7 +322,7 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
               alignItems: "center",
               justifyContent: "center",
               height: "100%",
-              color: "#6b7280",
+              color: dark.text.muted,
               fontSize: 14,
             }}
           >

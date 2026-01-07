@@ -7,6 +7,7 @@
 
 import React, { useState } from "react";
 import { useNotifications, Notification, NotificationType } from "../../hooks/useNotifications";
+import { light, semantic } from "../../theme";
 
 export default function NotificationBanner() {
   const { notifications } = useNotifications();
@@ -84,14 +85,14 @@ const banner: React.CSSProperties = {
   alignItems: "center",
   gap: 8,
   padding: "6px 12px",
-  background: "#f8fafc",
-  borderBottom: "1px solid #e2e8f0",
+  background: light.bg.secondary,
+  borderBottom: `1px solid ${light.border.primary}`,
   fontSize: 12,
   flexWrap: "wrap",
 };
 
 const separator: React.CSSProperties = {
-  color: "#cbd5e1",
+  color: light.border.secondary,
   margin: "0 4px",
 };
 
@@ -105,23 +106,23 @@ const itemBase: React.CSSProperties = {
 
 const itemStyles: Record<NotificationType, React.CSSProperties> = {
   info: {
-    background: "#e0f2fe",
+    background: semantic.highlight.cyan,
     color: "#0369a1",
-    border: "1px solid #7dd3fc",
+    border: `1px solid ${semantic.highlight.cyanBorder}`,
   },
   warning: {
-    background: "#fef3c7",
-    color: "#92400e",
-    border: "1px solid #fcd34d",
+    background: semantic.warning.bg,
+    color: semantic.warning.text,
+    border: `1px solid ${semantic.warning.accent}`,
   },
   error: {
-    background: "#fee2e2",
-    color: "#991b1b",
-    border: "1px solid #fca5a5",
+    background: semantic.error.bgMuted,
+    color: semantic.error.textDark,
+    border: `1px solid ${semantic.error.light}`,
   },
   success: {
-    background: "#dcfce7",
-    color: "#166534",
+    background: semantic.success.bgMuted,
+    color: semantic.success.textDark,
     border: "1px solid #86efac",
   },
 };

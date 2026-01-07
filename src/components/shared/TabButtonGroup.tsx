@@ -1,5 +1,6 @@
 // src/components/shared/TabButtonGroup.tsx
 import type React from "react";
+import { light, semantic } from "../../theme";
 
 interface Tab {
   id: string;
@@ -14,7 +15,7 @@ interface TabButtonGroupProps {
 
 const baseStyle: React.CSSProperties = {
   padding: "4px 12px",
-  border: "1px solid #d1d5db",
+  border: `1px solid ${light.border.secondary}`,
   fontSize: 11,
   fontWeight: 500,
   cursor: "pointer",
@@ -38,15 +39,15 @@ export default function TabButtonGroup({
 
         const style: React.CSSProperties = {
           ...baseStyle,
-          background: isActive ? "#2563eb" : "white",
-          color: isActive ? "white" : "#374151",
+          background: isActive ? semantic.info.text : light.bg.primary,
+          color: isActive ? light.bg.primary : light.text.secondary,
           borderRadius: isFirst
             ? "4px 0 0 4px"
             : isLast
               ? "0 4px 4px 0"
               : "0",
           // Remove right border except on last button to avoid double borders
-          borderRight: isLast ? "1px solid #d1d5db" : "none",
+          borderRight: isLast ? `1px solid ${light.border.secondary}` : "none",
         };
 
         return (

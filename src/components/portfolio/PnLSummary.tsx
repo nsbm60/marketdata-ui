@@ -11,6 +11,7 @@ import {
   PositionSnapshotResponse,
   buildPositionKey,
 } from "../../services/positionSnapshots";
+import { light, semantic, pnl } from "../../theme";
 
 type Props = {
   account: string;
@@ -222,7 +223,7 @@ export default function PnLSummary({
     return `${prefix}${value.toFixed(2)}%`;
   };
 
-  const getPnLColor = (value: number) => (value >= 0 ? "#16a34a" : "#dc2626");
+  const getPnLColor = (value: number) => (value >= 0 ? pnl.positive : pnl.negative);
   const getStatusBadge = (status: "existing" | "new") => {
     if (status === "new") return <span style={newBadge}>NEW</span>;
     return null;
@@ -230,7 +231,7 @@ export default function PnLSummary({
 
   // Show loading/error states
   if (loading) {
-    return <div style={{ padding: 20, color: "#666" }}>Loading snapshot data...</div>;
+    return <div style={{ padding: 20, color: light.text.muted }}>Loading snapshot data...</div>;
   }
 
   // Show message if no snapshot data
@@ -295,7 +296,7 @@ export default function PnLSummary({
         style={{
           ...row,
           gridTemplateColumns: "150px 36px 55px 55px 70px 70px 90px 90px 80px 70px",
-          background: "#f8fafc",
+          background: light.bg.secondary,
           fontWeight: 600,
         }}
       >
@@ -319,7 +320,7 @@ export default function PnLSummary({
 
       {/* Snapshot info footer */}
       {snapshot?.snapshot_date && (
-        <div style={{ padding: "8px 10px", fontSize: 10, color: "#666", borderTop: "1px solid #e5e7eb" }}>
+        <div style={{ padding: "8px 10px", fontSize: 10, color: light.text.muted, borderTop: `1px solid ${light.border.primary}` }}>
           Comparing to snapshot from {snapshot.snapshot_date}
           {!hasSnapshotData && " (no positions in snapshot)"}
         </div>
@@ -327,7 +328,7 @@ export default function PnLSummary({
 
       {/* Warning if no snapshot data */}
       {noSnapshotMessage && (
-        <div style={{ padding: "12px 10px", fontSize: 11, color: "#b45309", background: "#fef3c7", borderTop: "1px solid #fcd34d" }}>
+        <div style={{ padding: "12px 10px", fontSize: 11, color: semantic.warning.textDark, background: semantic.warning.bg, borderTop: `1px solid ${semantic.warning.accent}` }}>
           {noSnapshotMessage}
         </div>
       )}
@@ -368,7 +369,7 @@ function formatDisplaySymbol(p: IbPosition): React.ReactNode {
         <div style={{ fontWeight: 600, fontSize: 11 }}>
           {p.symbol} {p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike} {rightLabel}
         </div>
-        <div style={{ fontSize: 9, color: "#666" }}>{formattedExpiry}</div>
+        <div style={{ fontSize: 9, color: light.text.muted }}>{formattedExpiry}</div>
       </div>
     );
   }
@@ -382,17 +383,17 @@ const hdr: React.CSSProperties = {
   display: "grid",
   fontWeight: 600,
   fontSize: 10.5,
-  color: "#374151",
+  color: light.text.secondary,
   padding: "0 10px",
-  background: "#f8fafc",
+  background: light.bg.secondary,
   height: 26,
   alignItems: "center",
-  borderBottom: "1px solid #e5e7eb",
+  borderBottom: `1px solid ${light.border.primary}`,
   position: "sticky",
   top: 0,
   zIndex: 1,
 };
-const hdrCell: React.CSSProperties = { borderRight: "1px solid #ddd", paddingRight: 4 };
+const hdrCell: React.CSSProperties = { borderRight: `1px solid ${light.border.light}`, paddingRight: 4 };
 const hdrCellRight: React.CSSProperties = { ...hdrCell, textAlign: "right" };
 const row: React.CSSProperties = {
   display: "grid",
@@ -400,17 +401,17 @@ const row: React.CSSProperties = {
   minHeight: 32,
   alignItems: "center",
   padding: "0 10px",
-  borderBottom: "1px solid #f3f4f6",
+  borderBottom: `1px solid ${light.bg.hover}`,
 };
-const cellBorder: React.CSSProperties = { borderRight: "1px solid #eee", paddingRight: 4, paddingLeft: 2 };
+const cellBorder: React.CSSProperties = { borderRight: `1px solid ${light.border.muted}`, paddingRight: 4, paddingLeft: 2 };
 const rightMono: React.CSSProperties = { ...cellBorder, textAlign: "right", fontFamily: "ui-monospace, monospace" };
-const gray10: React.CSSProperties = { ...cellBorder, fontSize: 10, color: "#666" };
+const gray10: React.CSSProperties = { ...cellBorder, fontSize: 10, color: light.text.muted };
 const newBadge: React.CSSProperties = {
   marginLeft: 4,
   padding: "1px 4px",
   fontSize: 8,
   fontWeight: 600,
-  background: "#dbeafe",
-  color: "#1d4ed8",
+  background: semantic.highlight.blue,
+  color: semantic.info.text,
   borderRadius: 2,
 };

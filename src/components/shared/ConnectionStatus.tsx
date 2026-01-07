@@ -1,5 +1,7 @@
 // src/components/shared/ConnectionStatus.tsx
 
+import { semantic } from "../../theme";
+
 interface ConnectionStatusProps {
   connected: boolean;
   label: string;
@@ -20,9 +22,11 @@ export default function ConnectionStatus({ connected, label }: ConnectionStatusP
         borderRadius: 6,
         fontSize: 11,
         fontWeight: 500,
-        border: connected ? "2px solid #16a34a" : "2px solid #dc2626",
-        background: connected ? "#dcfce7" : "#fee2e2",
-        color: connected ? "#166534" : "#991b1b",
+        border: connected
+          ? `2px solid ${semantic.success.text}`
+          : `2px solid ${semantic.error.text}`,
+        background: connected ? semantic.success.bgMuted : semantic.error.bgMuted,
+        color: connected ? semantic.success.textDark : semantic.error.textDark,
       }}
     >
       <span
@@ -30,7 +34,7 @@ export default function ConnectionStatus({ connected, label }: ConnectionStatusP
           width: 8,
           height: 8,
           borderRadius: "50%",
-          background: connected ? "#16a34a" : "#dc2626",
+          background: connected ? semantic.success.text : semantic.error.text,
         }}
       />
       {label} {connected ? "Connected" : "Disconnected"}

@@ -1,6 +1,7 @@
 // src/FidelityPanel.tsx
 import { useEffect, useState, useMemo, useRef } from "react";
 import { socketHub } from "./ws/SocketHub";
+import { light, semantic, pnl, dark } from "./theme";
 import {
   FidelityPosition,
   FidelityImportResult,
@@ -394,7 +395,7 @@ export default function FidelityPanel() {
               {importReminder}
             </span>
           )}
-          <span style={{ fontSize: 12, color: "#666" }}>
+          <span style={{ fontSize: 12, color: light.text.muted }}>
             {importDate && <>Imported: {importDate}</>}
           </span>
         </div>
@@ -405,7 +406,7 @@ export default function FidelityPanel() {
         {positions.length === 0 ? (
           <div style={empty}>
             <p>No positions imported.</p>
-            <p style={{ fontSize: 12, color: "#666" }}>
+            <p style={{ fontSize: 12, color: light.text.muted }}>
               Export positions from Fidelity as CSV and import here.
             </p>
           </div>
@@ -423,14 +424,14 @@ export default function FidelityPanel() {
                 Cash: ${totalCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
               {totalPending !== 0 && (
-                <span style={{ marginRight: 16, color: totalPending >= 0 ? "#16a34a" : "#dc2626" }}>
+                <span style={{ marginRight: 16, color: totalPending >= 0 ? pnl.positive : pnl.negative }}>
                   Pending: {totalPending >= 0 ? "+" : ""}${totalPending.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               )}
-              <span style={{ marginRight: 16, color: totals.unrealizedPL >= 0 ? "#16a34a" : "#dc2626", fontWeight: 600 }}>
+              <span style={{ marginRight: 16, color: totals.unrealizedPL >= 0 ? pnl.positive : pnl.negative, fontWeight: 600 }}>
                 P&L: {totals.unrealizedPL >= 0 ? "+" : ""}${totals.unrealizedPL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
-              <span style={{ color: "#666" }}>
+              <span style={{ color: light.text.muted }}>
                 ({tradeablePositions.length} positions)
               </span>
             </div>
@@ -533,7 +534,7 @@ export default function FidelityPanel() {
                           <div style={{ fontWeight: 600, fontSize: 11 }}>
                             {pos.underlying || pos.symbol} {pos.strike} {rightLabel}
                           </div>
-                          <div style={{ fontSize: 9, color: "#666" }}>
+                          <div style={{ fontSize: 9, color: light.text.muted }}>
                             {formatExpiryShort(pos.expiry)} ({daysToExpiry(pos.expiry)}d)
                           </div>
                         </div>
@@ -568,7 +569,7 @@ export default function FidelityPanel() {
                         <div style={rightMono}>
                           ${(pos.avgCostBasis ?? 0).toFixed(2)}
                         </div>
-                        <div style={{ ...rightMono, color: pl !== null ? (pl >= 0 ? "#16a34a" : "#dc2626") : undefined, fontWeight: pl !== null ? 600 : 400 }}>
+                        <div style={{ ...rightMono, color: pl !== null ? (pl >= 0 ? pnl.positive : pnl.negative) : undefined, fontWeight: pl !== null ? 600 : 400 }}>
                           {pl !== null
                             ? `${pl >= 0 ? "+" : ""}$${pl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                             : "—"}
@@ -580,7 +581,7 @@ export default function FidelityPanel() {
                   {/* Cash section */}
                   {cashPositions.length > 0 && (
                     <>
-                      <div style={{ ...rowStyle, background: "#f0fdf4", borderTop: "2px solid #d1fae5" }}>
+                      <div style={{ ...rowStyle, background: semantic.success.bg, borderTop: `2px solid ${semantic.success.bgMuted}` }}>
                         <div style={{ ...cellEllipsis, fontWeight: 600 }}>Cash & Money Market</div>
                         <div style={gray10}>CASH</div>
                         <div style={rightMono}>—</div>
@@ -594,10 +595,10 @@ export default function FidelityPanel() {
                         <div style={rightMono}>—</div>
                       </div>
                       {cashPositions.map((pos, i) => (
-                        <div key={`cash-${i}`} style={{ ...rowStyle, background: "#f0fdf4", fontSize: 10 }}>
+                        <div key={`cash-${i}`} style={{ ...rowStyle, background: semantic.success.bg, fontSize: 10 }}>
                           <div style={cellEllipsis}>
                             <span style={{ marginLeft: 12 }}>{pos.symbol}</span>
-                            <span style={{ marginLeft: 8, color: "#666" }}>{pos.description}</span>
+                            <span style={{ marginLeft: 8, color: light.text.muted }}>{pos.description}</span>
                           </div>
                           <div style={gray10}></div>
                           <div style={rightMono}></div>
@@ -616,14 +617,14 @@ export default function FidelityPanel() {
 
                   {/* Pending section */}
                   {pendingPositions.length > 0 && totalPending !== 0 && (
-                    <div style={{ ...rowStyle, background: "#fffbeb", borderTop: "2px solid #fde68a" }}>
+                    <div style={{ ...rowStyle, background: semantic.warning.bg, borderTop: `2px solid ${semantic.warning.bgMuted}` }}>
                       <div style={{ ...cellEllipsis, fontWeight: 600 }}>Pending Activity</div>
                       <div style={gray10}></div>
                       <div style={rightMono}>—</div>
                       <div style={rightMono}>—</div>
                       <div style={rightMono}>—</div>
                       <div style={rightMono}>—</div>
-                      <div style={{ ...rightMono, fontWeight: 600, color: totalPending >= 0 ? "#16a34a" : "#dc2626" }}>
+                      <div style={{ ...rightMono, fontWeight: 600, color: totalPending >= 0 ? pnl.positive : pnl.negative }}>
                         {totalPending >= 0 ? "+" : ""}${totalPending.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                       <div style={rightMono}>—</div>
@@ -667,42 +668,42 @@ export default function FidelityPanel() {
 }
 
 /* Styles */
-const shell: React.CSSProperties = { display: "flex", flexDirection: "column", height: "100%", color: "#111", background: "#fff" };
-const header: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e5e7eb", background: "#fff" };
-const body: React.CSSProperties = { flex: 1, overflow: "auto", padding: "12px 14px", background: "#f9fafb" };
-const summary: React.CSSProperties = { fontSize: 11, color: "#4b5563", marginBottom: 10 };
-const section: React.CSSProperties = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" };
-const tabBar: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#f1f5f9", borderBottom: "1px solid #e5e7eb" };
+const shell: React.CSSProperties = { display: "flex", flexDirection: "column", height: "100%", color: light.text.primary, background: light.bg.primary };
+const header: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${light.border.primary}`, background: light.bg.primary };
+const body: React.CSSProperties = { flex: 1, overflow: "auto", padding: "12px 14px", background: light.bg.muted };
+const summary: React.CSSProperties = { fontSize: 11, color: light.text.secondary, marginBottom: 10 };
+const section: React.CSSProperties = { background: light.bg.primary, border: `1px solid ${light.border.primary}`, borderRadius: 8, overflow: "hidden" };
+const tabBar: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: light.bg.tertiary, borderBottom: `1px solid ${light.border.primary}` };
 
 const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
 const gridCols = "180px 45px 70px 70px 70px 65px 100px 70px 75px";
-const hdr: React.CSSProperties = { display: "grid", gridTemplateColumns: gridCols, fontWeight: 600, fontSize: 10.5, color: "#374151", padding: "0 10px", background: "#f8fafc", height: 26, alignItems: "center", borderBottom: "1px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1 };
-const hdrCell: React.CSSProperties = { borderRight: "1px solid #ddd", paddingRight: 4 };
+const hdr: React.CSSProperties = { display: "grid", gridTemplateColumns: gridCols, fontWeight: 600, fontSize: 10.5, color: light.text.secondary, padding: "0 10px", background: light.bg.secondary, height: 26, alignItems: "center", borderBottom: `1px solid ${light.border.primary}`, position: "sticky", top: 0, zIndex: 1 };
+const hdrCell: React.CSSProperties = { borderRight: `1px solid ${light.border.light}`, paddingRight: 4 };
 const hdrCellRight: React.CSSProperties = { ...hdrCell, textAlign: "right" };
 const hdrCellCenter: React.CSSProperties = { ...hdrCell, textAlign: "center" };
-const rowStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: gridCols, fontSize: 11, minHeight: 32, alignItems: "center", padding: "0 10px", borderBottom: "1px solid #f3f4f6" };
+const rowStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: gridCols, fontSize: 11, minHeight: 32, alignItems: "center", padding: "0 10px", borderBottom: `1px solid ${light.bg.hover}` };
 
-const cellBorder: React.CSSProperties = { borderRight: "1px solid #eee", paddingRight: 4, paddingLeft: 2 };
+const cellBorder: React.CSSProperties = { borderRight: `1px solid ${light.border.muted}`, paddingRight: 4, paddingLeft: 2 };
 const cellEllipsis: React.CSSProperties = { ...cellBorder, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const rightMono: React.CSSProperties = { ...cellBorder, textAlign: "right", fontFamily: "ui-monospace, monospace" };
-const gray10: React.CSSProperties = { ...cellBorder, fontSize: 10, color: "#666" };
+const gray10: React.CSSProperties = { ...cellBorder, fontSize: 10, color: light.text.muted };
 
-const empty: React.CSSProperties = { padding: 40, textAlign: "center", color: "#666", fontSize: 14 };
+const empty: React.CSSProperties = { padding: 40, textAlign: "center", color: light.text.muted, fontSize: 14 };
 
 const reminderStyle: React.CSSProperties = {
   fontSize: 11,
   padding: "4px 10px",
-  background: "#fef3c7",
-  border: "1px solid #fcd34d",
+  background: semantic.warning.bg,
+  border: `1px solid ${semantic.warning.accent}`,
   borderRadius: 4,
-  color: "#92400e",
+  color: semantic.warning.text,
 };
 
 const uploadBtn: React.CSSProperties = {
   padding: "4px 12px",
   fontSize: 12,
-  background: "#3b82f6",
-  color: "#fff",
+  background: dark.accent.primary,
+  color: light.bg.primary,
   border: "none",
   borderRadius: 4,
   cursor: "pointer",
@@ -711,8 +712,8 @@ const uploadBtn: React.CSSProperties = {
 const clearBtn: React.CSSProperties = {
   padding: "4px 12px",
   fontSize: 12,
-  background: "#dc2626",
-  color: "#fff",
+  background: semantic.error.text,
+  color: light.bg.primary,
   border: "none",
   borderRadius: 4,
   cursor: "pointer",

@@ -5,6 +5,7 @@ import {
   section, title, table, hdr, rowStyle, hdrCell, hdrCellRight, hdrCellCenter, cellBorder,
   timeHeader, timeCell, centerBold, right, rightMonoBold, center, gray10, emptyRow
 } from "./styles";
+import { light, semantic, pnl } from "../../theme";
 
 type Props = {
   orders: IbOpenOrder[];
@@ -41,7 +42,7 @@ export default function OpenOrdersTable({ orders, onModify, onCancel }: Props) {
                     <div style={{ fontWeight: 600, fontSize: 11 }}>
                       {o.symbol} {o.strike % 1 === 0 ? o.strike.toFixed(0) : o.strike} {rightLabel}
                     </div>
-                    <div style={{ fontSize: 9, color: "#666" }}>
+                    <div style={{ fontSize: 9, color: light.text.muted }}>
                       {formattedExpiry}
                     </div>
                   </div>
@@ -56,7 +57,7 @@ export default function OpenOrdersTable({ orders, onModify, onCancel }: Props) {
                     {new Date(o.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </div>
                   <div style={cellBorder}>{symbolDisplay}</div>
-                  <div style={{ ...centerBold, color: o.side === "BUY" ? "#166534" : "#991b1b" }}>
+                  <div style={{ ...centerBold, color: o.side === "BUY" ? semantic.success.textDark : semantic.error.textDark }}>
                     {o.side}
                   </div>
                   <div style={{ ...right, fontWeight: 600 }}>{o.quantity}</div>
@@ -71,10 +72,10 @@ export default function OpenOrdersTable({ orders, onModify, onCancel }: Props) {
                         onClick={() => onModify(o)}
                         style={{
                           padding: "2px 8px",
-                          border: "1px solid #2563eb",
+                          border: `1px solid ${semantic.info.text}`,
                           borderRadius: "4px",
-                          background: "#eff6ff",
-                          color: "#2563eb",
+                          background: semantic.info.bg,
+                          color: semantic.info.text,
                           fontSize: "10px",
                           fontWeight: 600,
                           cursor: "pointer",
@@ -87,10 +88,10 @@ export default function OpenOrdersTable({ orders, onModify, onCancel }: Props) {
                       onClick={() => onCancel(o)}
                       style={{
                         padding: "2px 8px",
-                        border: "1px solid #dc2626",
+                        border: `1px solid ${semantic.error.text}`,
                         borderRadius: "4px",
-                        background: "#fef2f2",
-                        color: "#dc2626",
+                        background: semantic.error.bg,
+                        color: semantic.error.text,
                         fontSize: "10px",
                         fontWeight: 600,
                         cursor: "pointer",

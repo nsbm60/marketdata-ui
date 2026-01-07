@@ -1,5 +1,6 @@
 // marketdata-ui/src/RawPanel.jsx
 import { useMemo, useState } from "react";
+import { light } from "./theme";
 
 /**
  * RawPanel — shows newest-first raw JSON lines passed from App.jsx.
@@ -20,7 +21,7 @@ export default function RawPanel({ raw = [] }) {
     <div style={wrap}>
       <div style={toolbar}>
         <span style={{ fontWeight: 600 }}>Diagnostics · Raw Messages</span>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "#333" }}>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: light.text.secondary }}>
           showing {Math.min(raw.length, maxLines)}/{raw.length}
         </span>
       </div>
@@ -51,16 +52,16 @@ export default function RawPanel({ raw = [] }) {
 
 import type { CSSProperties } from "react";
 
-const wrap = { border: "1px solid #ddd", borderRadius: 8, overflow: "hidden", display: "grid", gridTemplateRows: "auto auto 1fr", background: "#fff" };
-const toolbar = { padding: "8px 10px", borderBottom: "1px solid #eee", background: "#fafafa", display: "flex", alignItems: "center", gap: 8 };
+const wrap = { border: `1px solid ${light.border.light}`, borderRadius: 8, overflow: "hidden", display: "grid", gridTemplateRows: "auto auto 1fr", background: light.bg.primary };
+const toolbar = { padding: "8px 10px", borderBottom: `1px solid ${light.border.muted}`, background: light.bg.muted, display: "flex", alignItems: "center", gap: 8 };
 const controls: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
   padding: "8px 10px",
-  borderBottom: "1px dashed #eee",
+  borderBottom: `1px dashed ${light.border.muted}`,
   flexWrap: "wrap",
-};const label = { fontSize: 12, color: "#333" };
-const numInput = { width: 90, fontSize: 12, padding: "4px 6px", border: "1px solid #ddd", borderRadius: 6 };
-const preWrap = { overflow: "auto", maxHeight: "70vh", background: "#fff" };
+};const label = { fontSize: 12, color: light.text.secondary };
+const numInput = { width: 90, fontSize: 12, padding: "4px 6px", border: `1px solid ${light.border.light}`, borderRadius: 6 };
+const preWrap = { overflow: "auto", maxHeight: "70vh", background: light.bg.primary };
 const pre = { margin: 0, padding: "8px 10px", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, lineHeight: 1.25, whiteSpace: "pre" };

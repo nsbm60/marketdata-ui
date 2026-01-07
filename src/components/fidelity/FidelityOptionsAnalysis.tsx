@@ -4,6 +4,7 @@ import { FidelityPosition } from "../../utils/fidelity";
 import { PriceData } from "../../hooks/useMarketData";
 import { formatExpiryShort, daysToExpiry, compareOptions, osiToTopicSymbol, parseOptionSymbol } from "../../utils/options";
 import { OptionGreeks, getGreeksForPosition } from "../../hooks/usePortfolioOptionsReports";
+import { light, semantic, pnl } from "../../theme";
 
 type Props = {
   positions: FidelityPosition[];
@@ -265,11 +266,11 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
           {/* Underlying header */}
           <div style={groupHeader}>
             <span style={{ fontWeight: 700, fontSize: 13 }}>{group.underlying}</span>
-            <span style={{ marginLeft: 12, color: "#666", fontSize: 12 }}>
+            <span style={{ marginLeft: 12, color: light.text.muted, fontSize: 12 }}>
               Last: ${equityPrices.get(group.underlying)?.last?.toFixed(2) || "—"}
             </span>
             {group.equityPosition && (
-              <span style={{ marginLeft: 8, color: "#888", fontSize: 11 }}>
+              <span style={{ marginLeft: 8, color: light.text.light, fontSize: 11 }}>
                 ({group.equityShares.toLocaleString()} shares)
               </span>
             )}
@@ -283,7 +284,7 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
               <div style={cellRight}>DTE</div>
               <div style={cellRight}>Qty</div>
               <div style={cellRight}>Price</div>
-              <div style={{ ...cellRight, color: "#2563eb" }}>Theo</div>
+              <div style={{ ...cellRight, color: semantic.info.text }}>Theo</div>
               <div style={cellRight}>Value</div>
               <div style={cellRight}>Delta</div>
               <div style={cellRight}>Theta</div>
@@ -334,25 +335,25 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                 <div key={`${opt.position.osiSymbol}-${i}`} style={optionRow}>
                   <div style={cellLeft}>
                     <span style={{ fontWeight: 600 }}>{strikeStr} {isCall ? "Call" : "Put"}</span>
-                    <span style={{ marginLeft: 8, color: "#666", fontSize: 10 }}>{expiryShort}</span>
+                    <span style={{ marginLeft: 8, color: light.text.muted, fontSize: 10 }}>{expiryShort}</span>
                   </div>
                   <div style={cellRight}>{dte}</div>
                   <div style={cellRight}>{fmtShares(p.quantity)}</div>
                   <div style={cellRight}>{opt.optionPrice !== null ? opt.optionPrice.toFixed(2) : "—"}</div>
-                  <div style={{ ...cellRight, color: "#2563eb" }}>{opt.theoPrice !== null ? opt.theoPrice.toFixed(2) : "—"}</div>
+                  <div style={{ ...cellRight, color: semantic.info.text }}>{opt.theoPrice !== null ? opt.theoPrice.toFixed(2) : "—"}</div>
                   <div style={cellRight}>{positionValue !== null ? `$${fmt(positionValue, 0)}` : "—"}</div>
                   <div style={cellRight}>{fmtDelta(opt.delta)}</div>
                   <div style={cellRight}>{opt.theta !== null ? opt.theta.toFixed(4) : "—"}</div>
                   <div style={cellRight}>
                     {opt.effectiveEquiv !== null ? fmtShares(Math.round(opt.effectiveEquiv)) : "—"}
                   </div>
-                  <div style={{ ...cellRight, color: opt.intrinsicValue > 0 ? "#16a34a" : undefined }}>
+                  <div style={{ ...cellRight, color: opt.intrinsicValue > 0 ? pnl.positive : undefined }}>
                     ${fmt(opt.intrinsicValue, 0)}
                   </div>
-                  <div style={{ ...cellRight, color: opt.timeValue < 0 ? "#dc2626" : opt.timeValue > 0 ? "#16a34a" : undefined }}>
+                  <div style={{ ...cellRight, color: opt.timeValue < 0 ? pnl.negative : opt.timeValue > 0 ? pnl.positive : undefined }}>
                     ${fmt(opt.timeValue, 0)}
                   </div>
-                  <div style={{ ...cellRight, color: opt.thetaDollar !== null && opt.thetaDollar > 0 ? "#16a34a" : opt.thetaDollar !== null && opt.thetaDollar < 0 ? "#dc2626" : undefined }}>
+                  <div style={{ ...cellRight, color: opt.thetaDollar !== null && opt.thetaDollar > 0 ? pnl.positive : opt.thetaDollar !== null && opt.thetaDollar < 0 ? pnl.negative : undefined }}>
                     {opt.thetaDollar !== null ? `$${fmt(opt.thetaDollar, 0)}` : "—"}
                   </div>
                   <div style={cellRight}>{fmtShares(opt.exerciseEffect.shares)}</div>
@@ -373,13 +374,13 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
-                <div style={{ ...cellRight, color: group.callIntrinsicValue > 0 ? "#16a34a" : undefined }}>
+                <div style={{ ...cellRight, color: group.callIntrinsicValue > 0 ? pnl.positive : undefined }}>
                   ${fmt(group.callIntrinsicValue, 0)}
                 </div>
-                <div style={{ ...cellRight, color: group.callTimeValue < 0 ? "#dc2626" : group.callTimeValue > 0 ? "#16a34a" : undefined }}>
+                <div style={{ ...cellRight, color: group.callTimeValue < 0 ? pnl.negative : group.callTimeValue > 0 ? pnl.positive : undefined }}>
                   ${fmt(group.callTimeValue, 0)}
                 </div>
-                <div style={{ ...cellRight, color: group.callThetaDollar > 0 ? "#16a34a" : group.callThetaDollar < 0 ? "#dc2626" : undefined }}>
+                <div style={{ ...cellRight, color: group.callThetaDollar > 0 ? pnl.positive : group.callThetaDollar < 0 ? pnl.negative : undefined }}>
                   ${fmt(group.callThetaDollar, 0)}
                 </div>
                 <div style={cellRight}>—</div>
@@ -399,13 +400,13 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
-                <div style={{ ...cellRight, color: group.putIntrinsicValue > 0 ? "#16a34a" : undefined }}>
+                <div style={{ ...cellRight, color: group.putIntrinsicValue > 0 ? pnl.positive : undefined }}>
                   ${fmt(group.putIntrinsicValue, 0)}
                 </div>
-                <div style={{ ...cellRight, color: group.putTimeValue < 0 ? "#dc2626" : group.putTimeValue > 0 ? "#16a34a" : undefined }}>
+                <div style={{ ...cellRight, color: group.putTimeValue < 0 ? pnl.negative : group.putTimeValue > 0 ? pnl.positive : undefined }}>
                   ${fmt(group.putTimeValue, 0)}
                 </div>
-                <div style={{ ...cellRight, color: group.putThetaDollar > 0 ? "#16a34a" : group.putThetaDollar < 0 ? "#dc2626" : undefined }}>
+                <div style={{ ...cellRight, color: group.putThetaDollar > 0 ? pnl.positive : group.putThetaDollar < 0 ? pnl.negative : undefined }}>
                   ${fmt(group.putThetaDollar, 0)}
                 </div>
                 <div style={cellRight}>—</div>
@@ -425,13 +426,13 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>—</div>
                 <div style={cellRight}>{fmtShares(Math.round(group.totalEffectiveEquiv))}</div>
-                <div style={{ ...cellRight, color: group.totalIntrinsicValue > 0 ? "#16a34a" : undefined }}>
+                <div style={{ ...cellRight, color: group.totalIntrinsicValue > 0 ? pnl.positive : undefined }}>
                   ${fmt(group.totalIntrinsicValue, 0)}
                 </div>
-                <div style={{ ...cellRight, color: group.totalTimeValue < 0 ? "#dc2626" : group.totalTimeValue > 0 ? "#16a34a" : undefined }}>
+                <div style={{ ...cellRight, color: group.totalTimeValue < 0 ? pnl.negative : group.totalTimeValue > 0 ? pnl.positive : undefined }}>
                   ${fmt(group.totalTimeValue, 0)}
                 </div>
-                <div style={{ ...cellRight, color: group.totalThetaDollar > 0 ? "#16a34a" : group.totalThetaDollar < 0 ? "#dc2626" : undefined }}>
+                <div style={{ ...cellRight, color: group.totalThetaDollar > 0 ? pnl.positive : group.totalThetaDollar < 0 ? pnl.negative : undefined }}>
                   ${fmt(group.totalThetaDollar, 0)}
                 </div>
                 <div style={cellRight}>{fmtShares(group.totalExerciseShares)}</div>
@@ -480,16 +481,16 @@ const container: React.CSSProperties = {
 };
 
 const groupContainer: React.CSSProperties = {
-  background: "white",
+  background: light.bg.primary,
   borderRadius: 8,
-  border: "1px solid #e5e7eb",
+  border: `1px solid ${light.border.primary}`,
   overflow: "hidden",
 };
 
 const groupHeader: React.CSSProperties = {
   padding: "10px 12px",
-  background: "#f8fafc",
-  borderBottom: "1px solid #e5e7eb",
+  background: light.bg.secondary,
+  borderBottom: `1px solid ${light.border.primary}`,
 };
 
 const table: React.CSSProperties = {
@@ -504,9 +505,9 @@ const headerRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   padding: "8px 12px",
-  background: "#f1f5f9",
+  background: light.bg.tertiary,
   fontWeight: 600,
-  borderBottom: "1px solid #e5e7eb",
+  borderBottom: `1px solid ${light.border.primary}`,
   position: "sticky",
   top: 0,
   zIndex: 1,
@@ -516,51 +517,51 @@ const equityRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   padding: "6px 12px",
-  background: "#f0fdf4",
-  borderBottom: "1px solid #e5e7eb",
+  background: semantic.success.bg,
+  borderBottom: `1px solid ${light.border.primary}`,
 };
 
 const optionRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   padding: "6px 12px",
-  borderBottom: "1px solid #f3f4f6",
+  borderBottom: `1px solid ${light.bg.hover}`,
 };
 
 const callSubtotalRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   padding: "6px 12px",
-  background: "#dcfce7",
+  background: semantic.success.bgMuted,
   fontWeight: 500,
   fontSize: 10,
-  borderBottom: "1px solid #e5e7eb",
+  borderBottom: `1px solid ${light.border.primary}`,
 };
 
 const putSubtotalRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   padding: "6px 12px",
-  background: "#fce7f3",
+  background: semantic.highlight.pink,
   fontWeight: 500,
   fontSize: 10,
-  borderBottom: "1px solid #e5e7eb",
+  borderBottom: `1px solid ${light.border.primary}`,
 };
 
 const subtotalRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   padding: "8px 12px",
-  background: "#fef3c7",
+  background: semantic.warning.bg,
   fontWeight: 600,
-  borderBottom: "1px solid #e5e7eb",
+  borderBottom: `1px solid ${light.border.primary}`,
 };
 
 const netRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   padding: "8px 12px",
-  background: "#dbeafe",
+  background: semantic.info.bg,
   fontWeight: 500,
 };
 
@@ -569,20 +570,20 @@ const cellLeft: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  borderRight: "1px solid #eee",
+  borderRight: `1px solid ${light.border.muted}`,
   paddingRight: 4,
 };
 
 const cellRight: React.CSSProperties = {
   textAlign: "right",
   fontFamily: "ui-monospace, monospace",
-  borderRight: "1px solid #eee",
+  borderRight: `1px solid ${light.border.muted}`,
   paddingRight: 4,
 };
 
 const emptyStyle: React.CSSProperties = {
   padding: 40,
   textAlign: "center",
-  color: "#666",
+  color: light.text.muted,
   fontSize: 14,
 };

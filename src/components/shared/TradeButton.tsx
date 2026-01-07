@@ -2,6 +2,7 @@
 // Reusable BUY/SELL button component for trading interfaces
 
 import { CSSProperties, MouseEvent } from "react";
+import { semantic } from "../../theme";
 
 type Side = "BUY" | "SELL";
 
@@ -16,14 +17,14 @@ interface TradeButtonProps {
 
 const colors = {
   BUY: {
-    background: "#dcfce7",
-    color: "#166534",
+    background: semantic.success.bgMuted,
+    color: semantic.success.textDark,
     border: "1px solid #86efac",
   },
   SELL: {
-    background: "#fce7f3",
+    background: semantic.highlight.pink,
     color: "#831843",
-    border: "1px solid #fda4af",
+    border: `1px solid ${semantic.error.light}`,
   },
 };
 

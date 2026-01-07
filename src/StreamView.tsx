@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { light } from "./theme";
 
 export default function StreamView({ rows }) {
   const columns = useMemo(
@@ -18,12 +19,12 @@ export default function StreamView({ rows }) {
   );
 
   return (
-    <div style={{ overflow: "auto", border: "1px solid #ddd", borderRadius: 8 }}>
+    <div style={{ overflow: "auto", border: `1px solid ${light.border.light}`, borderRadius: 8 }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-        <thead style={{ position: "sticky", top: 0, background: "#fafafa" }}>
+        <thead style={{ position: "sticky", top: 0, background: light.bg.muted }}>
           <tr>
             {columns.map((c) => (
-              <th key={c.key} style={{ textAlign: "left", padding: "8px 10px", borderBottom: "1px solid #eee" }}>
+              <th key={c.key} style={{ textAlign: "left", padding: "8px 10px", borderBottom: `1px solid ${light.border.muted}` }}>
                 {c.label}
               </th>
             ))}
@@ -32,15 +33,15 @@ export default function StreamView({ rows }) {
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={columns.length} style={{ padding: 12, color: "#666" }}>
-                Connected — waiting for option frames that include a symbol/price…
+              <td colSpan={columns.length} style={{ padding: 12, color: light.text.muted }}>
+                Connected — waiting for option frames that include a symbol/price...
               </td>
             </tr>
           ) : (
             rows.map((r, i) => (
               <tr key={i}>
                 {columns.map((c) => (
-                  <td key={c.key} style={{ padding: "6px 10px", borderBottom: "1px solid #f3f3f3" }}>
+                  <td key={c.key} style={{ padding: "6px 10px", borderBottom: `1px solid ${light.bg.hover}` }}>
                     {r[c.key]}
                   </td>
                 ))}

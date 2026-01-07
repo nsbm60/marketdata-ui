@@ -5,6 +5,7 @@ import { socketHub } from "../../ws/SocketHub";
 import { modalOverlay, modalContent } from "./styles";
 import { buildTopicSymbol } from "../../utils/options";
 import Select from "../shared/Select";
+import { light, semantic } from "../../theme";
 
 const THROTTLE_MS = 200;
 
@@ -242,11 +243,11 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
         <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
           Modify Order #{order.orderId}
         </div>
-        <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>
+        <div style={{ fontSize: 13, color: light.text.muted, marginBottom: 4 }}>
           {order.symbol} {order.side} {order.orderType}
         </div>
         {optionDetails && (
-          <div style={{ fontSize: 12, color: "#888", marginBottom: 12 }}>
+          <div style={{ fontSize: 12, color: light.text.light, marginBottom: 12 }}>
             {optionDetails}
           </div>
         )}
@@ -254,7 +255,7 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
         {/* Live Prices - click bid/mid/ask to populate limit price */}
         <div style={{
           padding: "8px 12px",
-          background: "#f0fdf4",
+          background: semantic.success.bg,
           borderRadius: 6,
           marginBottom: 12,
           fontSize: 12,
@@ -285,7 +286,7 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
         {isOption && (
           <div style={{
             padding: "6px 12px",
-            background: "#fef3c7",
+            background: semantic.warning.bg,
             borderRadius: 6,
             marginBottom: 12,
             fontSize: 10,
@@ -313,7 +314,7 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
             style={{
               width: "100%",
               padding: "6px 10px",
-              border: "1px solid #d1d5db",
+              border: `1px solid ${light.border.secondary}`,
               borderRadius: 6,
               fontSize: 13,
               boxSizing: "border-box",
@@ -334,7 +335,7 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
               style={{
                 width: "100%",
                 padding: "6px 10px",
-                border: "1px solid #d1d5db",
+                border: `1px solid ${light.border.secondary}`,
                 borderRadius: 6,
                 fontSize: 13,
                 boxSizing: "border-box",
@@ -348,9 +349,9 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
           <div style={{
             marginBottom: 10,
             padding: "8px 10px",
-            background: "#f8fafc",
+            background: light.bg.secondary,
             borderRadius: 6,
-            border: "1px solid #e2e8f0"
+            border: `1px solid ${light.border.primary}`
           }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
               <input
@@ -382,9 +383,9 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
             style={{
               flex: 1,
               padding: "8px 12px",
-              border: "1px solid #d1d5db",
+              border: `1px solid ${light.border.secondary}`,
               borderRadius: 6,
-              background: "white",
+              background: light.bg.primary,
               fontSize: 13,
               cursor: "pointer",
             }}
@@ -398,8 +399,8 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
               padding: "8px 12px",
               border: "none",
               borderRadius: 6,
-              background: "#2563eb",
-              color: "white",
+              background: semantic.info.text,
+              color: light.bg.primary,
               fontSize: 13,
               fontWeight: 600,
               cursor: "pointer",

@@ -1,5 +1,6 @@
 // src/components/shared/Select.tsx
 import { SelectHTMLAttributes, forwardRef } from "react";
+import { light } from "../../theme";
 
 type SelectSize = "sm" | "md" | "form";
 
@@ -25,10 +26,10 @@ const sizeStyles: Record<SelectSize, React.CSSProperties> = {
 };
 
 const baseStyle: React.CSSProperties = {
-  border: "1px solid #d1d5db",
+  border: `1px solid ${light.border.secondary}`,
   borderRadius: 4,
-  background: "white",
-  color: "#111",
+  background: light.bg.primary,
+  color: light.text.primary,
   colorScheme: "light",
   cursor: "pointer",
   appearance: "none",

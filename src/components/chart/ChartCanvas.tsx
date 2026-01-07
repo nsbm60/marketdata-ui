@@ -31,6 +31,7 @@ import {
   RIBBON_COLORS,
   TimeValue,
 } from "../../utils/chartMetrics";
+import { dark, semantic } from "../../theme";
 
 interface ChartCanvasProps {
   bars: Bar[];
@@ -50,23 +51,23 @@ interface ChartCanvasProps {
   warmupBars?: number;
 }
 
-// Dark theme colors
-const CHART_BG = "#1a1a2e";
-const CHART_TEXT = "#d1d5db";
-const CHART_GRID = "#2a2a3e";
-const UP_COLOR = "#26a69a";
-const DOWN_COLOR = "#ef5350";
+// Dark theme colors (from centralized theme)
+const CHART_BG = dark.bg.primary;
+const CHART_TEXT = dark.text.secondary;
+const CHART_GRID = dark.bg.secondary;
+const UP_COLOR = semantic.teal;
+const DOWN_COLOR = semantic.error.alt;
 
 // Target number of visible bars (for initial display)
 const TARGET_VISIBLE_BARS = 200;
 const LINE_COLORS = {
-  sma: "#2196f3",
-  ema: "#ff9800",
-  rsi: "#9c27b0",
-  macdLine: "#2196f3",
-  macdSignal: "#ff9800",
-  macdHistUp: "#26a69a",
-  macdHistDown: "#ef5350",
+  sma: semantic.info.alt,
+  ema: semantic.warning.alt,
+  rsi: semantic.purple,
+  macdLine: semantic.info.alt,
+  macdSignal: semantic.warning.alt,
+  macdHistUp: semantic.teal,
+  macdHistDown: semantic.error.alt,
 };
 
 // Timeframe categories for formatting
@@ -646,8 +647,8 @@ export default function ChartCanvas({
                   transform: "translateX(-50%)",
                   fontSize: 10,
                   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                  color: "#d1d5db",
-                  backgroundColor: "rgba(26, 26, 46, 0.85)",
+                  color: dark.text.secondary,
+                  backgroundColor: `${dark.bg.primary}d9`,
                   padding: "2px 6px",
                   borderRadius: 3,
                   whiteSpace: "nowrap",
@@ -668,7 +669,7 @@ export default function ChartCanvas({
                 transform: "translateX(-50%)",
                 fontSize: 10,
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                color: "#9ca3af",
+                color: dark.text.secondary,
                 whiteSpace: "nowrap",
               }}
             >
@@ -763,13 +764,13 @@ function RsiPane({
     // Add horizontal lines at 30 and 70
     series.createPriceLine({
       price: 70,
-      color: "#ef5350",
+      color: semantic.error.alt,
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
     });
     series.createPriceLine({
       price: 30,
-      color: "#26a69a",
+      color: semantic.teal,
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
     });

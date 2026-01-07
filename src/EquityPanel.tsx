@@ -13,6 +13,7 @@ import { useWatchlistReport, WatchlistReportRow } from "./hooks/useWatchlistRepo
 import { PriceData } from "./services/MarketDataBus";
 import { isNum, fmtPrice } from "./utils/formatters";
 import { useAppState } from "./state/useAppState";
+import { light, semantic } from "./theme";
 
 // Feature flag for report-based data (vs tick-based)
 // Set to true to use pre-computed reports from CalcServer
@@ -371,13 +372,13 @@ export default function EquityPanel({
               ))}
             </Select>
           ) : (
-            <span style={{ fontSize: 12, color: "#666", fontStyle: "italic" }}>None</span>
+            <span style={{ fontSize: 12, color: light.text.muted, fontStyle: "italic" }}>None</span>
           )}
           <button onClick={createNewWatchlist} style={linkBtn() as any} title="Create new watchlist">+ New</button>
           {watchlistName && availableLists.length > 0 && (
-            <button onClick={deleteCurrentWatchlist} style={{ ...linkBtn(), color: "#dc2626" } as any} title="Delete this watchlist">Delete</button>
+            <button onClick={deleteCurrentWatchlist} style={{ ...linkBtn(), color: semantic.error.text } as any} title="Delete this watchlist">Delete</button>
           )}
-          {saving && <span style={{ fontSize: 10, color: "#666" }}>Saving...</span>}
+          {saving && <span style={{ fontSize: 10, color: light.text.muted }}>Saving...</span>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <input
@@ -414,7 +415,7 @@ export default function EquityPanel({
                 key={sym}
                 style={{
                   ...chip(),
-                  ...(selectedSym === sym ? { background: "#e0ecff", borderColor: "#93c5fd" } : {}),
+                  ...(selectedSym === sym ? { background: semantic.highlight.blue, borderColor: semantic.highlight.blueBorder } : {}),
                   cursor: "pointer",
                 } as any}
                 onClick={() => { setSelectedSym(sym); onSelect?.(sym); }}
@@ -426,11 +427,11 @@ export default function EquityPanel({
             ))}
           </div>
         )}
-        <div style={{ fontSize: 11, color: "#333", display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ fontSize: 11, color: light.text.primary, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
           <span><b>symbols:</b> {stats.total}</span>
           <span><b>quotes:</b> {stats.withQuote}</span>
           <span><b>trades:</b> {stats.withTrade}</span>
-          {paused && <span style={{ color: "#b45309" }}>Paused — unsubscribed</span>}
+          {paused && <span style={{ color: semantic.warning.textDark }}>Paused — unsubscribed</span>}
           <TimeframeSelector
             value={timeframe}
             onChange={setTimeframe}
@@ -473,7 +474,7 @@ export default function EquityPanel({
           <tbody>
             {symbols.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ padding: 6, color: "#666", textAlign: "center", borderTop: "1px solid #eee", fontSize: 12 }}>
+                <td colSpan={8} style={{ padding: 6, color: light.text.muted, textAlign: "center", borderTop: `1px solid ${light.border.muted}`, fontSize: 12 }}>
                   No tickers selected.
                 </td>
               </tr>
@@ -585,28 +586,28 @@ function isStale(ts: any, ms: number) {
 /* ---- visuals ---- */
 const shell = {
   margin: 0,
-  background: "#fff",
-  color: "#111",
-  border: "1px solid #ddd",
+  background: light.bg.primary,
+  color: light.text.primary,
+  border: `1px solid ${light.border.light}`,
   borderRadius: 8,
   overflow: "hidden",
   maxWidth: "100%",
 };
 const header = {
   padding: "8px 10px",
-  borderBottom: "1px solid #eee",
+  borderBottom: `1px solid ${light.border.muted}`,
   display: "grid",
   gap: 6,
-  background: "#fff",
+  background: light.bg.primary,
 };
 const inputStyle = {
   fontSize: 12,
   padding: "5px 8px",
   minWidth: 320,
-  border: "1px solid #ddd",
+  border: `1px solid ${light.border.light}`,
   borderRadius: 6,
-  color: "#111",
-  background: "#fff",
+  color: light.text.primary,
+  background: light.bg.primary,
 };
 const tableWrap = { overflowX: "auto", maxWidth: "100%" as const };
 const tableStyle = {
@@ -614,7 +615,7 @@ const tableStyle = {
   borderCollapse: "separate" as const,
   borderSpacing: 0,
   tableLayout: "fixed" as const,
-  background: "#fff",
+  background: light.bg.primary,
   fontSize: 12,
   lineHeight: 1.2,
 };
@@ -623,11 +624,11 @@ function btn({ variant }: { variant?: "secondary" } = {}) {
   return {
     fontSize: 12,
     padding: "5px 8px",
-    border: `1px solid ${variant === "secondary" ? "#e3e3e3" : "#ccc"}`,
+    border: `1px solid ${variant === "secondary" ? light.border.muted : light.border.lighter}`,
     borderRadius: 6,
-    background: variant === "secondary" ? "#fff" : "#f7f7f7",
+    background: variant === "secondary" ? light.bg.primary : light.bg.tertiary,
     cursor: "pointer",
-    color: "#111",
+    color: light.text.primary,
   };
 }
 function linkBtn() {
@@ -636,7 +637,7 @@ function linkBtn() {
     padding: "3px 4px",
     border: "none",
     background: "transparent",
-    color: "#2563eb",
+    color: semantic.info.text,
     cursor: "pointer",
     textDecoration: "underline",
   };
@@ -650,9 +651,9 @@ function feedButton(wsStatus: string, paused: boolean) {
       fontSize: 11,
       padding: "4px 10px",
       borderRadius: 6,
-      border: "1px solid #ccc",
-      background: isConnecting ? "#fef3c7" : "#fee2e2",
-      color: isConnecting ? "#92400e" : "#991b1b",
+      border: `1px solid ${light.border.lighter}`,
+      background: isConnecting ? semantic.warning.bg : semantic.error.bgMuted,
+      color: isConnecting ? semantic.warning.text : semantic.error.textDark,
       cursor: "not-allowed",
       opacity: 0.8,
     };
@@ -662,9 +663,9 @@ function feedButton(wsStatus: string, paused: boolean) {
     fontSize: 11,
     padding: "4px 10px",
     borderRadius: 6,
-    border: paused ? "1px solid #d97706" : "2px solid #16a34a",
-    background: paused ? "#fef3c7" : "#dcfce7",
-    color: paused ? "#92400e" : "#166534",
+    border: paused ? `1px solid ${semantic.warning.alt}` : `2px solid ${semantic.success.text}`,
+    background: paused ? semantic.warning.bg : semantic.success.bgMuted,
+    color: paused ? semantic.warning.text : semantic.success.textDark,
     cursor: "pointer",
     fontWeight: 500,
   };
@@ -676,9 +677,9 @@ function chip() {
     gap: 6,
     padding: "3px 6px",
     borderRadius: 999,
-    border: "1px solid #e5e7eb",
-    background: "#f8fafc",
-    color: "#111",
+    border: `1px solid ${light.border.primary}`,
+    background: light.bg.secondary,
+    color: light.text.primary,
     fontSize: 11,
   };
 }
@@ -686,7 +687,7 @@ function chipX() {
   return {
     border: "none",
     background: "transparent",
-    color: "#444",
+    color: light.text.secondary,
     cursor: "pointer",
     fontSize: 13,
     lineHeight: 1,
@@ -699,14 +700,14 @@ function Th({ children, center, colSpan }: { children: any; center?: boolean; co
       colSpan={colSpan}
       style={{
         padding: "4px 6px",
-        borderTop: "1px solid #eee",
-        borderBottom: "1px solid #eee",
-        borderRight: "1px solid #eee",
+        borderTop: `1px solid ${light.border.muted}`,
+        borderBottom: `1px solid ${light.border.muted}`,
+        borderRight: `1px solid ${light.border.muted}`,
         textAlign: center ? "center" : "left",
         fontSize: 11,
         fontWeight: 600,
-        color: "#333",
-        background: "#f6f6f6",
+        color: light.text.secondary,
+        background: light.bg.tertiary,
         whiteSpace: "nowrap",
       }}
     >
@@ -722,17 +723,17 @@ function Td(
     <td
       style={{
         padding: "4px 6px",
-        borderBottom: "1px solid #eee",
-        borderRight: "1px solid #eee",
+        borderBottom: `1px solid ${light.border.muted}`,
+        borderRight: `1px solid ${light.border.muted}`,
         fontFamily: mono ? "ui-monospace, SFMono-Regular, Menlo, monospace" : "inherit",
         textAlign: center ? "center" : num ? "right" : "left",
         whiteSpace: "nowrap",
         overflow: "hidden",
         textOverflow: "ellipsis",
-        color: "#111",
+        color: light.text.primary,
         fontWeight: strong ? 700 : 600,
-        background: selected ? "#dbeafe" : "#fff",
-        ...(selected && first ? { borderLeft: "3px solid #1e90ff" } : {}),
+        background: selected ? semantic.highlight.blue : light.bg.primary,
+        ...(selected && first ? { borderLeft: `3px solid ${semantic.info.textLight}` } : {}),
       }}
       title={typeof children === "string" ? children : undefined}
     >

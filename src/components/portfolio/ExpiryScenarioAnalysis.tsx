@@ -5,6 +5,7 @@ import { PriceData } from "../../hooks/useMarketData";
 import { OptionGreeks, getGreeksForPosition } from "../../hooks/usePortfolioOptionsReports";
 import { buildOsiSymbol } from "../../utils/options";
 import { socketHub } from "../../ws/SocketHub";
+import { light, dark, semantic, pnl, rowHighlight } from "../../theme";
 
 type Props = {
   positions: IbPosition[];
@@ -176,8 +177,8 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
 
   // Color based on value (green for positive, red for negative)
   const valueColor = (n: number) => {
-    if (n > 0) return "#16a34a";
-    if (n < 0) return "#dc2626";
+    if (n > 0) return pnl.positive;
+    if (n < 0) return pnl.negative;
     return undefined;
   };
 
@@ -190,10 +191,10 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
       <div style={headerSection}>
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Expiry Scenario Analysis</h3>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {loading && <span style={{ fontSize: 11, color: "#666" }}>Loading...</span>}
-          {error && <span style={{ fontSize: 11, color: "#dc2626" }}>{error}</span>}
+          {loading && <span style={{ fontSize: 11, color: light.text.muted }}>Loading...</span>}
+          {error && <span style={{ fontSize: 11, color: semantic.error.text }}>{error}</span>}
           {lastRefresh > 0 && !loading && (
-            <span style={{ fontSize: 10, color: "#999" }}>
+            <span style={{ fontSize: 10, color: light.text.disabled }}>
               Updated {new Date(lastRefresh).toLocaleTimeString()}
             </span>
           )}
@@ -207,7 +208,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
         <div key={result.underlying} style={resultContainer}>
           <div style={resultHeader}>
             <span style={{ fontWeight: 700 }}>{result.underlying}</span>
-            <span style={{ marginLeft: 12, color: "#666", fontSize: 12 }}>
+            <span style={{ marginLeft: 12, color: light.text.muted, fontSize: 12 }}>
               Current: ${fmtPrice(result.currentPrice)}
             </span>
           </div>
@@ -216,18 +217,18 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
           <div style={scenarioHeaderRow}>
             <div style={positionLabelCell}>Position</div>
             <div style={scenarioHeaderCell}>
-              <div style={{ fontWeight: 600, color: "#2563eb" }}>Current</div>
-              <div style={{ fontSize: 9, color: "#666" }}>Value</div>
+              <div style={{ fontWeight: 600, color: semantic.info.text }}>Current</div>
+              <div style={{ fontSize: 9, color: light.text.muted }}>Value</div>
             </div>
             {DEFAULT_SCENARIOS.map(pct => {
               const price = result.currentPrice * (1 + pct);
               return (
                 <div key={pct} style={scenarioHeaderCell}>
-                  <div style={{ fontWeight: 600, color: pct === 0 ? "#2563eb" : undefined }}>
+                  <div style={{ fontWeight: 600, color: pct === 0 ? semantic.info.text : undefined }}>
                     {fmtPercent(pct)}
                   </div>
-                  <div style={{ fontSize: 9, color: "#666" }}>${fmtPrice(price)}</div>
-                  <div style={{ fontSize: 8, color: "#999" }}>Δ</div>
+                  <div style={{ fontSize: 9, color: light.text.muted }}>${fmtPrice(price)}</div>
+                  <div style={{ fontSize: 8, color: light.text.disabled }}>Δ</div>
                 </div>
               );
             })}
@@ -241,7 +242,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                 <span style={{ fontWeight: 600, fontSize: 11 }}>
                   {formatExpiry(expiryRow.expiry)}
                 </span>
-                <span style={{ marginLeft: 8, fontSize: 10, color: "#888" }}>
+                <span style={{ marginLeft: 8, fontSize: 10, color: light.text.light }}>
                   ({expiryRow.positions.filter(p => p.isExpiring).length} expiring)
                 </span>
               </div>
@@ -252,29 +253,29 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                   key={pos.osiSymbol}
                   style={{
                     ...positionRow,
-                    background: pos.isExpiring ? "#fef3c7" : posIdx % 2 === 0 ? "#fafafa" : "#fff"
+                    background: pos.isExpiring ? rowHighlight.expiring : posIdx % 2 === 0 ? light.bg.muted : light.bg.primary
                   }}
                 >
                   <div style={positionLabelCell}>
                     <span style={{ fontWeight: 500 }}>
                       {pos.right === "S" ? "Stock" : `${pos.strike} ${pos.right === "C" ? "Call" : "Put"}`}
                     </span>
-                    <span style={{ marginLeft: 6, fontSize: 9, color: "#888" }}>
+                    <span style={{ marginLeft: 6, fontSize: 9, color: light.text.light }}>
                       {pos.quantity > 0 ? "+" : ""}{pos.quantity}{pos.right === "S" ? " sh" : ""}
                     </span>
                     {pos.right !== "S" && pos.isExpiring && (
-                      <span style={{ marginLeft: 6, fontSize: 8, color: "#b45309", fontWeight: 600 }}>
+                      <span style={{ marginLeft: 6, fontSize: 8, color: semantic.warning.textDark, fontWeight: 600 }}>
                         EXP
                       </span>
                     )}
                     {pos.right !== "S" && !pos.isExpiring && (
-                      <span style={{ marginLeft: 6, fontSize: 8, color: "#6b7280" }}>
+                      <span style={{ marginLeft: 6, fontSize: 8, color: dark.text.muted }}>
                         {formatExpiry(pos.expiry)}
                       </span>
                     )}
                   </div>
                   <div style={valueCell}>
-                    <span style={{ fontSize: 11, color: "#666" }}>
+                    <span style={{ fontSize: 11, color: light.text.muted }}>
                       ${fmt(pos.currentValue)}
                     </span>
                   </div>
@@ -294,7 +295,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                   <span style={{ fontWeight: 700, fontSize: 11 }}>Subtotal</span>
                 </div>
                 <div style={subtotalCell}>
-                  <span style={{ fontWeight: 600, fontSize: 12, color: "#666" }}>
+                  <span style={{ fontWeight: 600, fontSize: 12, color: light.text.muted }}>
                     ${fmt(expiryRow.subtotals[0]?.currentValue ?? 0)}
                   </span>
                 </div>
@@ -319,7 +320,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                 <span style={{ fontWeight: 700, fontSize: 12 }}>Final P&L</span>
               </div>
               <div style={grandTotalCell}>
-                <span style={{ fontWeight: 700, fontSize: 13, color: "#666" }}>
+                <span style={{ fontWeight: 700, fontSize: 13, color: light.text.muted }}>
                   ${fmt(result.expiryRows[result.expiryRows.length - 1].subtotals[0]?.currentValue ?? 0)}
                 </span>
               </div>
@@ -364,23 +365,23 @@ const headerSection: React.CSSProperties = {
 const refreshButton: React.CSSProperties = {
   padding: "4px 12px",
   fontSize: 11,
-  background: "#f1f5f9",
-  border: "1px solid #e2e8f0",
+  background: light.bg.tertiary,
+  border: `1px solid ${light.border.primary}`,
   borderRadius: 4,
   cursor: "pointer",
 };
 
 const resultContainer: React.CSSProperties = {
-  background: "white",
+  background: light.bg.primary,
   borderRadius: 8,
-  border: "1px solid #e5e7eb",
+  border: `1px solid ${light.border.primary}`,
   overflow: "hidden",
 };
 
 const resultHeader: React.CSSProperties = {
   padding: "10px 12px",
-  background: "#f8fafc",
-  borderBottom: "1px solid #e5e7eb",
+  background: light.bg.secondary,
+  borderBottom: `1px solid ${light.border.primary}`,
   fontSize: 13,
 };
 
@@ -389,8 +390,8 @@ const gridCols = "minmax(140px, 180px) 80px repeat(7, 1fr)";
 const scenarioHeaderRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
-  background: "#f1f5f9",
-  borderBottom: "1px solid #e5e7eb",
+  background: light.bg.tertiary,
+  borderBottom: `1px solid ${light.border.primary}`,
   padding: "8px 0",
 };
 
@@ -409,8 +410,8 @@ const positionLabelCell: React.CSSProperties = {
 
 const expiryLabelRow: React.CSSProperties = {
   padding: "6px 12px",
-  background: "#e0f2fe",
-  borderBottom: "1px solid #bae6fd",
+  background: semantic.highlight.cyan,
+  borderBottom: `1px solid ${semantic.highlight.cyanBorder}`,
   fontSize: 11,
 };
 
@@ -418,7 +419,7 @@ const positionRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   padding: "4px 0",
-  borderBottom: "1px solid #f3f4f6",
+  borderBottom: `1px solid ${light.bg.hover}`,
 };
 
 const valueCell: React.CSSProperties = {
@@ -431,8 +432,8 @@ const subtotalRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   padding: "6px 0",
-  background: "#fef9c3",
-  borderBottom: "1px solid #fde047",
+  background: semantic.warning.bgMuted,
+  borderBottom: `1px solid ${semantic.highlight.yellowBorder}`,
 };
 
 const subtotalCell: React.CSSProperties = {
@@ -444,8 +445,8 @@ const grandTotalRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   padding: "10px 0",
-  background: "#dbeafe",
-  borderTop: "2px solid #93c5fd",
+  background: semantic.highlight.blue,
+  borderTop: `2px solid ${semantic.highlight.blueBorder}`,
 };
 
 const grandTotalCell: React.CSSProperties = {
@@ -456,6 +457,6 @@ const grandTotalCell: React.CSSProperties = {
 const emptyStyle: React.CSSProperties = {
   padding: 40,
   textAlign: "center",
-  color: "#666",
+  color: light.text.muted,
   fontSize: 14,
 };

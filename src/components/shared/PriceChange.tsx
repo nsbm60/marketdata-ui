@@ -1,13 +1,14 @@
 // src/components/shared/PriceChange.tsx
 import { formatPctChange } from "../../services/closePrices";
+import { pnl } from "../../theme";
 
 // Shared color constants for price changes
-export const CHANGE_COLOR_UP = "#16a34a";
-export const CHANGE_COLOR_DOWN = "#dc2626";
+export const CHANGE_COLOR_UP = pnl.positive;
+export const CHANGE_COLOR_DOWN = pnl.negative;
 
 export function getChangeColor(value: number | undefined): string | undefined {
   if (value === undefined) return undefined;
-  return value >= 0 ? CHANGE_COLOR_UP : CHANGE_COLOR_DOWN;
+  return value >= 0 ? pnl.positive : pnl.negative;
 }
 
 interface PriceChangePercentProps {

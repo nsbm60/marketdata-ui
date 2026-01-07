@@ -2,6 +2,7 @@
 import { IbOpenOrder } from "../../types/portfolio";
 import { socketHub } from "../../ws/SocketHub";
 import { modalOverlay, modalContent } from "./styles";
+import { light, semantic, pnl } from "../../theme";
 
 type Props = {
   order: IbOpenOrder;
@@ -25,39 +26,39 @@ export default function CancelOrderModal({ order, onClose }: Props) {
         style={{ ...modalContent, minWidth: 340 }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: "#dc2626" }}>
+        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: semantic.error.text }}>
           Cancel Order?
         </div>
 
-        <div style={{ background: "#f8fafc", borderRadius: 8, padding: 12, marginBottom: 16 }}>
+        <div style={{ background: light.bg.secondary, borderRadius: 8, padding: 12, marginBottom: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 8, fontSize: 13 }}>
-            <div style={{ color: "#666" }}>Order ID:</div>
+            <div style={{ color: light.text.muted }}>Order ID:</div>
             <div style={{ fontWeight: 600 }}>#{order.orderId}</div>
 
-            <div style={{ color: "#666" }}>Symbol:</div>
+            <div style={{ color: light.text.muted }}>Symbol:</div>
             <div style={{ fontWeight: 600 }}>
               {order.symbol}
               {order.secType === "OPT" && order.strike && (
-                <span style={{ fontWeight: 400, color: "#666" }}>
+                <span style={{ fontWeight: 400, color: light.text.muted }}>
                   {" "}{order.strike} {order.right === "C" || order.right === "Call" ? "Call" : "Put"}
                 </span>
               )}
             </div>
 
-            <div style={{ color: "#666" }}>Side:</div>
-            <div style={{ fontWeight: 600, color: order.side === "BUY" ? "#16a34a" : "#dc2626" }}>
+            <div style={{ color: light.text.muted }}>Side:</div>
+            <div style={{ fontWeight: 600, color: order.side === "BUY" ? pnl.positive : pnl.negative }}>
               {order.side}
             </div>
 
-            <div style={{ color: "#666" }}>Quantity:</div>
+            <div style={{ color: light.text.muted }}>Quantity:</div>
             <div style={{ fontWeight: 600 }}>{order.quantity}</div>
 
-            <div style={{ color: "#666" }}>Type:</div>
+            <div style={{ color: light.text.muted }}>Type:</div>
             <div style={{ fontWeight: 600 }}>{order.orderType}</div>
 
             {order.lmtPrice !== undefined && (
               <>
-                <div style={{ color: "#666" }}>Limit Price:</div>
+                <div style={{ color: light.text.muted }}>Limit Price:</div>
                 <div style={{ fontWeight: 600 }}>${order.lmtPrice.toFixed(2)}</div>
               </>
             )}
@@ -70,9 +71,9 @@ export default function CancelOrderModal({ order, onClose }: Props) {
             style={{
               flex: 1,
               padding: "10px 16px",
-              border: "1px solid #d1d5db",
+              border: `1px solid ${light.border.secondary}`,
               borderRadius: 6,
-              background: "white",
+              background: light.bg.primary,
               fontSize: 14,
               cursor: "pointer",
             }}
@@ -86,8 +87,8 @@ export default function CancelOrderModal({ order, onClose }: Props) {
               padding: "10px 16px",
               border: "none",
               borderRadius: 6,
-              background: "#dc2626",
-              color: "white",
+              background: semantic.error.text,
+              color: light.bg.primary,
               fontSize: 14,
               fontWeight: 600,
               cursor: "pointer",

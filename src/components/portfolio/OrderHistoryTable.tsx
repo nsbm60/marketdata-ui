@@ -5,6 +5,7 @@ import {
   section, title, table, hdr, rowStyle, hdrCell, hdrCellRight, hdrCellCenter, cellBorder,
   timeHeader, timeCell, centerBold, right, rightMonoBold, emptyRow
 } from "./styles";
+import { light, semantic, pnl } from "../../theme";
 
 type Props = {
   orders: IbOrderHistory[];
@@ -37,7 +38,7 @@ export default function OrderHistoryTable({ orders }: Props) {
                     <div style={{ fontWeight: 600, fontSize: 11 }}>
                       {h.symbol} {h.strike % 1 === 0 ? h.strike.toFixed(0) : h.strike} {rightLabel}
                     </div>
-                    <div style={{ fontSize: 9, color: "#666" }}>
+                    <div style={{ fontSize: 9, color: light.text.muted }}>
                       {formattedExpiry}
                     </div>
                   </div>
@@ -46,7 +47,7 @@ export default function OrderHistoryTable({ orders }: Props) {
                 symbolDisplay = <div style={{ fontWeight: 600 }}>{h.symbol}</div>;
               }
 
-              const statusColor = h.status === "Cancelled" ? "#dc2626" : h.status === "Filled" ? "#16a34a" : "#666";
+              const statusColor = h.status === "Cancelled" ? semantic.error.text : h.status === "Filled" ? semantic.success.text : light.text.muted;
               // Show fill price for Filled, limit price for Cancelled
               // Only show price if > 0 (market orders have 0 price)
               const rawPrice = h.status === "Filled" && h.price !== undefined && h.price > 0
@@ -61,7 +62,7 @@ export default function OrderHistoryTable({ orders }: Props) {
                     {new Date(h.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </div>
                   <div style={cellBorder}>{symbolDisplay}</div>
-                  <div style={{ ...centerBold, color: h.side === "BUY" ? "#166534" : "#991b1b" }}>
+                  <div style={{ ...centerBold, color: h.side === "BUY" ? semantic.success.textDark : semantic.error.textDark }}>
                     {h.side}
                   </div>
                   <div style={{ ...right, fontWeight: 600 }}>{h.quantity !== "0" ? h.quantity : "—"}</div>

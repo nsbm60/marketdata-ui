@@ -11,6 +11,7 @@ import {
   MovingAverageSetting,
   generateMAId,
 } from "../../utils/chartMetrics";
+import { dark, semantic } from "../../theme";
 
 interface MetricToolbarProps {
   settings: ChartMetricSettings;
@@ -57,8 +58,8 @@ function Popover({
         top: "100%",
         left: 0,
         marginTop: 4,
-        backgroundColor: "#1e1e2e",
-        border: "1px solid #3a3a4e",
+        backgroundColor: dark.bg.tertiary,
+        border: `1px solid ${dark.border.primary}`,
         borderRadius: 6,
         padding: 12,
         zIndex: 100,
@@ -90,7 +91,7 @@ function AddMAPopover({
   return (
     <div>
       <div style={{ marginBottom: 8 }}>
-        <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>
+        <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>
           Type
         </label>
         <div style={{ display: "flex", gap: 4 }}>
@@ -100,9 +101,9 @@ function AddMAPopover({
               flex: 1,
               padding: "4px 8px",
               borderRadius: 4,
-              border: `1px solid ${type === "sma" ? "#3b82f6" : "#3a3a4e"}`,
-              backgroundColor: type === "sma" ? "#1e3a5f" : "#2a2a3e",
-              color: type === "sma" ? "#60a5fa" : "#9ca3af",
+              border: `1px solid ${type === "sma" ? dark.accent.primary : dark.border.primary}`,
+              backgroundColor: type === "sma" ? dark.accent.dark : dark.bg.secondary,
+              color: type === "sma" ? dark.accent.light : dark.text.secondary,
               cursor: "pointer",
               fontSize: 12,
             }}
@@ -115,9 +116,9 @@ function AddMAPopover({
               flex: 1,
               padding: "4px 8px",
               borderRadius: 4,
-              border: `1px solid ${type === "ema" ? "#3b82f6" : "#3a3a4e"}`,
-              backgroundColor: type === "ema" ? "#1e3a5f" : "#2a2a3e",
-              color: type === "ema" ? "#60a5fa" : "#9ca3af",
+              border: `1px solid ${type === "ema" ? dark.accent.primary : dark.border.primary}`,
+              backgroundColor: type === "ema" ? dark.accent.dark : dark.bg.secondary,
+              color: type === "ema" ? dark.accent.light : dark.text.secondary,
               cursor: "pointer",
               fontSize: 12,
             }}
@@ -127,7 +128,7 @@ function AddMAPopover({
         </div>
       </div>
       <div style={{ marginBottom: 10 }}>
-        <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>
+        <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>
           Period
         </label>
         <input
@@ -139,16 +140,16 @@ function AddMAPopover({
           style={{
             width: "100%",
             padding: "4px 8px",
-            backgroundColor: "#2a2a3e",
-            border: `1px solid ${isValid ? "#3a3a4e" : "#ef4444"}`,
+            backgroundColor: dark.bg.secondary,
+            border: `1px solid ${isValid ? dark.border.primary : semantic.error.text}`,
             borderRadius: 4,
-            color: "#e5e5e5",
+            color: dark.text.primary,
             fontSize: 13,
           }}
         />
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <span style={{ fontSize: 11, color: "#9ca3af" }}>Color:</span>
+        <span style={{ fontSize: 11, color: dark.text.secondary }}>Color:</span>
         <span
           style={{
             width: 16,
@@ -171,7 +172,7 @@ function AddMAPopover({
           padding: "6px 12px",
           borderRadius: 4,
           border: "none",
-          backgroundColor: isValid ? "#3b82f6" : "#4b5563",
+          backgroundColor: isValid ? dark.accent.primary : dark.text.muted,
           color: "#fff",
           cursor: isValid ? "pointer" : "not-allowed",
           fontSize: 12,
@@ -256,17 +257,17 @@ function MAChip({
           style={{
             width: 40,
             padding: "1px 4px",
-            backgroundColor: "#2a2a3e",
-            border: "1px solid #3a3a4e",
+            backgroundColor: dark.bg.secondary,
+            border: `1px solid ${dark.border.primary}`,
             borderRadius: 3,
-            color: "#e5e5e5",
+            color: dark.text.primary,
             fontSize: 11,
           }}
         />
       ) : (
         <span
           onClick={() => setEditing(true)}
-          style={{ fontSize: 11, color: "#d1d5db", cursor: "pointer" }}
+          style={{ fontSize: 11, color: dark.text.secondary, cursor: "pointer" }}
           title="Click to edit period"
         >
           ({ma.period})
@@ -278,7 +279,7 @@ function MAChip({
           padding: "0 2px",
           border: "none",
           backgroundColor: "transparent",
-          color: "#6b7280",
+          color: dark.text.muted,
           cursor: "pointer",
           fontSize: 12,
           lineHeight: 1,
@@ -354,8 +355,8 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
         display: "flex",
         alignItems: "center",
         padding: "6px 12px",
-        backgroundColor: "#252538",
-        borderBottom: "1px solid #3a3a4e",
+        backgroundColor: dark.bg.tertiary,
+        borderBottom: `1px solid ${dark.border.primary}`,
         flexWrap: "wrap",
         gap: 6,
         minHeight: 36,
@@ -369,9 +370,9 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
           style={{
             padding: "4px 10px",
             borderRadius: 4,
-            border: "1px solid #3b82f6",
-            backgroundColor: "#1e3a5f",
-            color: "#60a5fa",
+            border: `1px solid ${dark.accent.primary}`,
+            backgroundColor: dark.accent.dark,
+            color: dark.accent.light,
             cursor: "pointer",
             fontSize: 11,
             fontWeight: 500,
@@ -407,12 +408,12 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
       ))}
 
       {settings.movingAverages.length === 0 && (
-        <span style={{ fontSize: 11, color: "#6b7280", fontStyle: "italic" }}>
+        <span style={{ fontSize: 11, color: dark.text.muted, fontStyle: "italic" }}>
           Click +MA to add indicators
         </span>
       )}
 
-      <div style={{ width: 1, height: 16, backgroundColor: "#3a3a4e", margin: "0 4px" }} />
+      <div style={{ width: 1, height: 16, backgroundColor: dark.border.primary, margin: "0 4px" }} />
 
       {/* Ribbon (EMA-based) */}
       <div style={{ position: "relative", display: "inline-flex" }}>
@@ -422,9 +423,9 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
           style={{
             padding: "4px 8px",
             borderRadius: "4px 0 0 4px",
-            border: `1px solid ${settings.ribbon.enabled ? "#3b82f6" : "#3a3a4e"}`,
-            backgroundColor: settings.ribbon.enabled ? "#1e3a5f" : "#2a2a3e",
-            color: settings.ribbon.enabled ? "#60a5fa" : "#9ca3af",
+            border: `1px solid ${settings.ribbon.enabled ? dark.accent.primary : dark.border.primary}`,
+            backgroundColor: settings.ribbon.enabled ? dark.accent.dark : dark.bg.secondary,
+            color: settings.ribbon.enabled ? dark.accent.light : dark.text.secondary,
             cursor: "pointer",
             fontSize: 11,
           }}
@@ -436,10 +437,10 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
           style={{
             padding: "4px 6px",
             borderRadius: "0 4px 4px 0",
-            border: `1px solid ${settings.ribbon.enabled ? "#3b82f6" : "#3a3a4e"}`,
+            border: `1px solid ${settings.ribbon.enabled ? dark.accent.primary : dark.border.primary}`,
             borderLeft: "none",
-            backgroundColor: settings.ribbon.enabled ? "#1e3a5f" : "#2a2a3e",
-            color: settings.ribbon.enabled ? "#60a5fa" : "#9ca3af",
+            backgroundColor: settings.ribbon.enabled ? dark.accent.dark : dark.bg.secondary,
+            color: settings.ribbon.enabled ? dark.accent.light : dark.text.secondary,
             cursor: "pointer",
             fontSize: 9,
           }}
@@ -448,39 +449,39 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
         </button>
         <Popover isOpen={showRibbon} onClose={() => setShowRibbon(false)} anchorRef={ribbonRef}>
           <div style={{ marginBottom: 8 }}>
-            <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>Number of EMAs</label>
+            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Number of EMAs</label>
             <input
               type="number"
               value={settings.ribbon.count}
               onChange={(e) => updateSetting("ribbon", { count: parseInt(e.target.value) || 3 })}
               min={2}
               max={12}
-              style={{ width: "100%", padding: "4px 8px", backgroundColor: "#2a2a3e", border: "1px solid #3a3a4e", borderRadius: 4, color: "#e5e5e5", fontSize: 13 }}
+              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
             />
           </div>
           <div style={{ marginBottom: 8 }}>
-            <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>Base Period</label>
+            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Base Period</label>
             <input
               type="number"
               value={settings.ribbon.base}
               onChange={(e) => updateSetting("ribbon", { base: parseInt(e.target.value) || 9 })}
               min={1}
               max={200}
-              style={{ width: "100%", padding: "4px 8px", backgroundColor: "#2a2a3e", border: "1px solid #3a3a4e", borderRadius: 4, color: "#e5e5e5", fontSize: 13 }}
+              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
             />
           </div>
           <div style={{ marginBottom: 8 }}>
-            <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>Step Between EMAs</label>
+            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Step Between EMAs</label>
             <input
               type="number"
               value={settings.ribbon.step}
               onChange={(e) => updateSetting("ribbon", { step: parseInt(e.target.value) || 3 })}
               min={1}
               max={50}
-              style={{ width: "100%", padding: "4px 8px", backgroundColor: "#2a2a3e", border: "1px solid #3a3a4e", borderRadius: 4, color: "#e5e5e5", fontSize: 13 }}
+              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
             />
           </div>
-          <div style={{ fontSize: 10, color: "#6b7280", marginTop: 4 }}>
+          <div style={{ fontSize: 10, color: dark.text.muted, marginTop: 4 }}>
             EMAs: {Array.from({ length: settings.ribbon.count }, (_, i) => settings.ribbon.base + i * settings.ribbon.step).join(", ")}
           </div>
         </Popover>
@@ -494,9 +495,9 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
           style={{
             padding: "4px 8px",
             borderRadius: "4px 0 0 4px",
-            border: `1px solid ${settings.rsi.enabled ? "#9c27b0" : "#3a3a4e"}`,
-            backgroundColor: settings.rsi.enabled ? "#3d1f47" : "#2a2a3e",
-            color: settings.rsi.enabled ? "#ce93d8" : "#9ca3af",
+            border: `1px solid ${settings.rsi.enabled ? semantic.purple : dark.border.primary}`,
+            backgroundColor: settings.rsi.enabled ? "#3d1f47" : dark.bg.secondary,
+            color: settings.rsi.enabled ? "#ce93d8" : dark.text.secondary,
             cursor: "pointer",
             fontSize: 11,
           }}
@@ -508,10 +509,10 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
           style={{
             padding: "4px 6px",
             borderRadius: "0 4px 4px 0",
-            border: `1px solid ${settings.rsi.enabled ? "#9c27b0" : "#3a3a4e"}`,
+            border: `1px solid ${settings.rsi.enabled ? semantic.purple : dark.border.primary}`,
             borderLeft: "none",
-            backgroundColor: settings.rsi.enabled ? "#3d1f47" : "#2a2a3e",
-            color: settings.rsi.enabled ? "#ce93d8" : "#9ca3af",
+            backgroundColor: settings.rsi.enabled ? "#3d1f47" : dark.bg.secondary,
+            color: settings.rsi.enabled ? "#ce93d8" : dark.text.secondary,
             cursor: "pointer",
             fontSize: 9,
           }}
@@ -520,14 +521,14 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
         </button>
         <Popover isOpen={showRSI} onClose={() => setShowRSI(false)} anchorRef={rsiRef}>
           <div>
-            <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>Period</label>
+            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Period</label>
             <input
               type="number"
               value={settings.rsi.period}
               onChange={(e) => updateSetting("rsi", { period: parseInt(e.target.value) || 14 })}
               min={2}
               max={100}
-              style={{ width: "100%", padding: "4px 8px", backgroundColor: "#2a2a3e", border: "1px solid #3a3a4e", borderRadius: 4, color: "#e5e5e5", fontSize: 13 }}
+              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
             />
           </div>
         </Popover>
@@ -541,9 +542,9 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
           style={{
             padding: "4px 8px",
             borderRadius: "4px 0 0 4px",
-            border: `1px solid ${settings.macd.enabled ? "#2196f3" : "#3a3a4e"}`,
-            backgroundColor: settings.macd.enabled ? "#1e3a5f" : "#2a2a3e",
-            color: settings.macd.enabled ? "#64b5f6" : "#9ca3af",
+            border: `1px solid ${settings.macd.enabled ? semantic.info.alt : dark.border.primary}`,
+            backgroundColor: settings.macd.enabled ? dark.accent.dark : dark.bg.secondary,
+            color: settings.macd.enabled ? semantic.info.textLight : dark.text.secondary,
             cursor: "pointer",
             fontSize: 11,
           }}
@@ -555,10 +556,10 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
           style={{
             padding: "4px 6px",
             borderRadius: "0 4px 4px 0",
-            border: `1px solid ${settings.macd.enabled ? "#2196f3" : "#3a3a4e"}`,
+            border: `1px solid ${settings.macd.enabled ? semantic.info.alt : dark.border.primary}`,
             borderLeft: "none",
-            backgroundColor: settings.macd.enabled ? "#1e3a5f" : "#2a2a3e",
-            color: settings.macd.enabled ? "#64b5f6" : "#9ca3af",
+            backgroundColor: settings.macd.enabled ? dark.accent.dark : dark.bg.secondary,
+            color: settings.macd.enabled ? semantic.info.textLight : dark.text.secondary,
             cursor: "pointer",
             fontSize: 9,
           }}
@@ -567,36 +568,36 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
         </button>
         <Popover isOpen={showMACD} onClose={() => setShowMACD(false)} anchorRef={macdRef}>
           <div style={{ marginBottom: 8 }}>
-            <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>Fast EMA</label>
+            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Fast EMA</label>
             <input
               type="number"
               value={settings.macd.fast}
               onChange={(e) => updateSetting("macd", { fast: parseInt(e.target.value) || 12 })}
               min={1}
               max={100}
-              style={{ width: "100%", padding: "4px 8px", backgroundColor: "#2a2a3e", border: "1px solid #3a3a4e", borderRadius: 4, color: "#e5e5e5", fontSize: 13 }}
+              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
             />
           </div>
           <div style={{ marginBottom: 8 }}>
-            <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>Slow EMA</label>
+            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Slow EMA</label>
             <input
               type="number"
               value={settings.macd.slow}
               onChange={(e) => updateSetting("macd", { slow: parseInt(e.target.value) || 26 })}
               min={1}
               max={100}
-              style={{ width: "100%", padding: "4px 8px", backgroundColor: "#2a2a3e", border: "1px solid #3a3a4e", borderRadius: 4, color: "#e5e5e5", fontSize: 13 }}
+              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
             />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>Signal Line</label>
+            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Signal Line</label>
             <input
               type="number"
               value={settings.macd.signal}
               onChange={(e) => updateSetting("macd", { signal: parseInt(e.target.value) || 9 })}
               min={1}
               max={100}
-              style={{ width: "100%", padding: "4px 8px", backgroundColor: "#2a2a3e", border: "1px solid #3a3a4e", borderRadius: 4, color: "#e5e5e5", fontSize: 13 }}
+              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
             />
           </div>
         </Popover>
@@ -610,9 +611,9 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
             marginLeft: "auto",
             padding: "4px 8px",
             borderRadius: 4,
-            border: "1px solid #3a3a4e",
+            border: `1px solid ${dark.border.primary}`,
             backgroundColor: "transparent",
-            color: "#6b7280",
+            color: dark.text.muted,
             cursor: "pointer",
             fontSize: 11,
           }}

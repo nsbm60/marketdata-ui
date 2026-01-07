@@ -9,6 +9,7 @@ import ConnectionStatus from "./components/shared/ConnectionStatus";
 import NotificationBanner from "./components/shared/NotificationBanner";
 import { socketHub } from "./ws/SocketHub";
 import { useAppState } from "./state/useAppState";
+import { light } from "./theme";
 
 type TabId = "market" | "portfolio" | "fidelity" | "chart";
 
@@ -149,8 +150,8 @@ const tabBar = {
   alignItems: "center",
   justifyContent: "space-between",
   padding: "8px 12px 0 12px",
-  borderBottom: "1px solid #e5e7eb",
-  background: "#f9fafb",
+  borderBottom: `1px solid ${light.border.primary}`,
+  background: light.bg.secondary,
 };
 
 function tabButton(active: boolean) {
@@ -158,11 +159,11 @@ function tabButton(active: boolean) {
     padding: "6px 10px",
     fontSize: 13,
     borderRadius: "6px 6px 0 0",
-    border: active ? "1px solid #d1d5db" : "1px solid transparent",
-    borderBottomColor: active ? "#ffffff" : "transparent",
-    background: active ? "#ffffff" : "transparent",
+    border: active ? `1px solid ${light.border.secondary}` : "1px solid transparent",
+    borderBottomColor: active ? light.bg.primary : "transparent",
+    background: active ? light.bg.primary : "transparent",
     cursor: "pointer",
-    color: active ? "#111827" : "#4b5563",
+    color: active ? light.text.primary : light.text.secondary,
     fontWeight: active ? 600 : 500,
   };
 }

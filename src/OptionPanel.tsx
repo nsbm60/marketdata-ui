@@ -8,6 +8,7 @@ import { useOptionsReport } from "./hooks/useOptionsReport";
 import { isNum, fmtPrice, fmtGreek } from "./utils/formatters";
 import { parseOptionSymbol, formatExpiryWithDTE } from "./utils/options";
 import Select from "./components/shared/Select";
+import { light, dark, semantic } from "./theme";
 
 // Feature flag: use pre-computed report from CalcServer instead of per-tick updates
 const USE_REPORT_DATA = true;
@@ -298,7 +299,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                 <b>{underlying}</b>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <label style={{ fontSize: 11, color: "#666" }}>Limit:</label>
+                <label style={{ fontSize: 11, color: light.text.muted }}>Limit:</label>
                 <Select
                   value={limit}
                   onChange={(e) => {
@@ -331,7 +332,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
               )}
             </>
           ) : (
-            <span style={{ color: "#666" }}>Select a symbol on the left to load options…</span>
+            <span style={{ color: light.text.muted }}>Select a symbol on the left to load options...</span>
           )}
         </div>
 
@@ -415,7 +416,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
 
                 const baseCell = {
                   ...td,
-                  background: isSelected ? "#fef3c7" : "#fff",
+                  background: isSelected ? semantic.highlight.yellow : light.bg.primary,
                 } as any;
 
                 return (
@@ -554,15 +555,15 @@ const shell = {
   display: "flex",
   flexDirection: "column" as const,
   height: "100%",
-  background: "#fff",
-  color: "#111",
-  borderLeft: "1px solid #e5e7eb",
+  background: light.bg.primary,
+  color: light.text.primary,
+  borderLeft: `1px solid ${light.border.primary}`,
 };
 
 const panelHeader = {
   padding: "6px 8px",
-  borderBottom: "1px solid #eee",
-  background: "#fff",
+  borderBottom: `1px solid ${light.border.muted}`,
+  background: light.bg.primary,
   display: "grid",
   gap: 4,
 };
@@ -579,35 +580,35 @@ const expiryTabs = {
 const expiryTab = {
   padding: "4px 12px",
   fontSize: 11,
-  background: "#f3f4f6",
-  border: "1px solid #d1d5db",
+  background: light.bg.hover,
+  border: `1px solid ${light.border.secondary}`,
   borderRadius: 4,
   cursor: "pointer",
   whiteSpace: "nowrap" as const,
-  color: "#111",
+  color: light.text.primary,
 };
 
 const expiryTabActive = {
   ...expiryTab,
-  background: "#dbeafe",
-  border: "1px solid #3b82f6",
+  background: semantic.highlight.blue,
+  border: `1px solid ${dark.accent.primary}`,
   fontWeight: 600,
-  color: "#111",
+  color: light.text.primary,
 };
 
 const bodyScroll = {
   flex: 1,
   overflow: "auto",
   position: "relative" as const,
-  background: "#fff",
+  background: light.bg.primary,
 };
 
 const stickyHeader = {
   position: "sticky" as const,
   top: 0,
   zIndex: 5,
-  background: "white",
-  borderBottom: "1px solid #e5e7eb",
+  background: light.bg.primary,
+  borderBottom: `1px solid ${light.border.primary}`,
 };
 
 const hdrRow1 = {
@@ -621,10 +622,10 @@ const hdrRow1 = {
 const thBlock = {
   fontSize: 11,
   fontWeight: 700,
-  color: "#333",
-  background: "#f6f6f6",
+  color: light.text.secondary,
+  background: light.bg.tertiary,
   padding: "2px 4px",
-  border: "1px solid #e5e7eb",
+  border: `1px solid ${light.border.primary}`,
   borderRadius: 0,
   whiteSpace: "nowrap" as const,
   textAlign: "center" as const,
@@ -636,7 +637,7 @@ const hdrRow2 = {
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
-  borderBottom: "1px solid #f0f0f0",
+  borderBottom: `1px solid ${light.bg.hover}`,
 };
 
 const subgrid9 = {
@@ -648,10 +649,10 @@ const subgrid9 = {
 const subTh = {
   fontSize: 10,
   fontWeight: 600,
-  color: "#555",
-  background: "#fafafa",
+  color: light.text.secondary,
+  background: light.bg.muted,
   padding: "1px 2px",
-  border: "1px solid #ddd",
+  border: `1px solid ${light.border.light}`,
   borderRadius: 0,
   whiteSpace: "nowrap" as const,
   textAlign: "center" as const,
@@ -672,13 +673,13 @@ const td = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   fontVariantNumeric: "tabular-nums",
-  border: "1px solid #e5e7eb",
+  border: `1px solid ${light.border.primary}`,
   borderRadius: 0,
-  background: "#fff",
+  background: light.bg.primary,
 };
 
 const atmDivider = {
-  borderTop: "2px solid #9ca3af",
+  borderTop: `2px solid ${dark.text.secondary}`,
   margin: 0,
   height: 0,
 };
@@ -686,6 +687,6 @@ const atmDivider = {
 const empty = {
   padding: "10px",
   fontSize: 12,
-  color: "#666",
+  color: light.text.muted,
   textAlign: "center" as const,
 };

@@ -26,6 +26,7 @@ import { useTradeTicket } from "./hooks/useTradeTicket";
 import { useAppState } from "./state/useAppState";
 import { usePortfolioOptionsReports, PortfolioOptionPosition } from "./hooks/usePortfolioOptionsReports";
 import type { TimeframeOption } from "./services/marketState";
+import { light, semantic, table as tableTheme } from "./theme";
 
 // Default timeframes used when marketState hasn't loaded yet
 const defaultTimeframes: TimeframeOption[] = [
@@ -369,9 +370,9 @@ export default function PortfolioPanel() {
                 border: "1px solid",
                 borderRadius: 4,
                 cursor: "pointer",
-                background: ibErrors.some(e => e.severity === "error") ? "#fee2e2" : "#fef3c7",
-                borderColor: ibErrors.some(e => e.severity === "error") ? "#fca5a5" : "#fcd34d",
-                color: ibErrors.some(e => e.severity === "error") ? "#991b1b" : "#92400e",
+                background: ibErrors.some(e => e.severity === "error") ? semantic.error.bgMuted : semantic.warning.bg,
+                borderColor: ibErrors.some(e => e.severity === "error") ? semantic.error.light : semantic.warning.accent,
+                color: ibErrors.some(e => e.severity === "error") ? semantic.error.textDark : semantic.warning.text,
               }}
               title={showErrors ? "Hide IB errors" : "Show IB errors"}
             >
@@ -381,9 +382,9 @@ export default function PortfolioPanel() {
             </button>
           )}
         </div>
-        <div style={{ fontSize: 12, color: "#666" }}>
-          {loading && !accountState && "Loading…"}
-          {error && <span style={{ color: "#dc2626" }}>{error}</span>}
+        <div style={{ fontSize: 12, color: light.text.muted }}>
+          {loading && !accountState && "Loading..."}
+          {error && <span style={{ color: semantic.error.text }}>{error}</span>}
           {lastUpdated && <>Updated <b>{lastUpdated}</b></>}
         </div>
       </div>
@@ -391,23 +392,23 @@ export default function PortfolioPanel() {
       {/* Expandable IB Errors Panel */}
       {showErrors && ibErrors.length > 0 && (
         <div style={{
-          background: "#fefce8",
-          borderBottom: "1px solid #fcd34d",
+          background: semantic.highlight.yellow,
+          borderBottom: `1px solid ${semantic.warning.accent}`,
           padding: "8px 12px",
           maxHeight: 200,
           overflowY: "auto",
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: "#92400e" }}>IB Errors & Warnings</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: semantic.warning.text }}>IB Errors & Warnings</span>
             <button
               onClick={clearErrors}
               style={{
                 fontSize: 10,
                 padding: "2px 6px",
-                border: "1px solid #d1d5db",
+                border: `1px solid ${light.border.secondary}`,
                 borderRadius: 3,
-                background: "#fff",
-                color: "#666",
+                background: light.bg.primary,
+                color: light.text.muted,
                 cursor: "pointer",
               }}
             >
@@ -423,23 +424,23 @@ export default function PortfolioPanel() {
                   gap: 8,
                   fontSize: 11,
                   padding: "4px 6px",
-                  background: err.severity === "error" ? "#fee2e2" : "#fff",
+                  background: err.severity === "error" ? semantic.error.bgMuted : light.bg.primary,
                   border: "1px solid",
-                  borderColor: err.severity === "error" ? "#fca5a5" : "#e5e7eb",
+                  borderColor: err.severity === "error" ? semantic.error.light : light.border.primary,
                   borderRadius: 3,
                 }}
               >
-                <span style={{ color: "#999", whiteSpace: "nowrap" }}>
+                <span style={{ color: light.text.disabled, whiteSpace: "nowrap" }}>
                   {new Date(err.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                 </span>
                 <span style={{
-                  color: err.severity === "error" ? "#991b1b" : "#92400e",
+                  color: err.severity === "error" ? semantic.error.textDark : semantic.warning.text,
                   fontWeight: err.severity === "error" ? 600 : 400,
                 }}>
                   [{err.code}] {err.message}
                 </span>
                 {err.id !== -1 && (
-                  <span style={{ color: "#999" }}>(id: {err.id})</span>
+                  <span style={{ color: light.text.disabled }}>(id: {err.id})</span>
                 )}
               </div>
             ))}
@@ -460,7 +461,7 @@ export default function PortfolioPanel() {
               <span style={{ marginRight: 16, fontWeight: 600 }}>
                 Cash: ${totalCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
-              <span style={{ color: "#666", fontWeight: 500 }}>
+              <span style={{ color: light.text.muted, fontWeight: 500 }}>
                 ({accountState.positions.length} positions)
               </span>
             </div>
@@ -493,7 +494,7 @@ export default function PortfolioPanel() {
                 {/* Positions Table */}
                 {positionsTab === "positions" && (
                 <div style={{ maxHeight: 750, overflow: "auto" }}>
-                <div style={table}>
+                <div style={tableStyles}>
                   <div style={{ ...hdr, gridTemplateColumns: "75px 140px 36px 36px 65px 80px 75px 65px 100px 80px 120px" }}>
                     <div style={hdrCell}>Account</div>
                     <div style={hdrCell}>Symbol</div>
@@ -597,7 +598,7 @@ export default function PortfolioPanel() {
                           <div style={{ fontWeight: 600, fontSize: 11 }}>
                             {p.symbol} {p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike} {rightLabel}
                           </div>
-                          <div style={{ fontSize: 9, color: "#666" }}>
+                          <div style={{ fontSize: 9, color: light.text.muted }}>
                             {formattedExpiry}
                           </div>
                         </div>
@@ -655,7 +656,7 @@ export default function PortfolioPanel() {
                               } : undefined;
                               openTradeTicket(p.symbol, p.account, "BUY", p.secType, optionDetails, marketData);
                             }}
-                            style={{ ...iconBtn, background: "#dcfce7", color: "#166534" }}
+                            style={{ ...iconBtn, background: semantic.success.bgMuted, color: semantic.success.textDark }}
                           >
                             BUY
                           </button>
@@ -678,7 +679,7 @@ export default function PortfolioPanel() {
                               } : undefined;
                               openTradeTicket(p.symbol, p.account, "SELL", p.secType, optionDetails, marketData);
                             }}
-                            style={{ ...iconBtn, background: "#fce7f3", color: "#831843" }}
+                            style={{ ...iconBtn, background: semantic.highlight.pink, color: semantic.error.textDark }}
                           >
                             SELL
                           </button>
@@ -814,36 +815,36 @@ export default function PortfolioPanel() {
 }
 
 /* Styles */
-const shell = { display: "flex", flexDirection: "column" as const, height: "100%", color: "#111", background: "#fff" };
-const header = { padding: "10px 14px", borderBottom: "1px solid #e5e7eb", background: "#fff" };
-const body = { flex: 1, overflow: "auto", padding: "12px 14px", background: "#f9fafb" };
-const summary = { fontSize: 11, color: "#4b5563", marginBottom: 10 };
+const shell = { display: "flex", flexDirection: "column" as const, height: "100%", color: light.text.primary, background: light.bg.primary };
+const header = { padding: "10px 14px", borderBottom: `1px solid ${light.border.primary}`, background: light.bg.primary };
+const body = { flex: 1, overflow: "auto", padding: "12px 14px", background: light.bg.secondary };
+const summary = { fontSize: 11, color: light.text.secondary, marginBottom: 10 };
 const gridWrap = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 };
-const section = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" };
-const title = { fontSize: 12, fontWeight: 600, padding: "8px 10px", background: "#f1f5f9", borderBottom: "1px solid #e5e7eb" };
-const table = { display: "flex", flexDirection: "column" as const };
-const hdr = { display: "grid", fontWeight: 600, fontSize: 10.5, color: "#374151", padding: "0 10px", background: "#f8fafc", height: 26, alignItems: "center", borderBottom: "1px solid #e5e7eb", position: "sticky" as const, top: 0, zIndex: 1 };
-const hdrCell = { borderRight: "1px solid #ddd", paddingRight: 4 };
+const section = { background: light.bg.primary, border: `1px solid ${light.border.primary}`, borderRadius: 8, overflow: "hidden" };
+const title = { fontSize: 12, fontWeight: 600, padding: "8px 10px", background: light.bg.tertiary, borderBottom: `1px solid ${light.border.primary}` };
+const tableStyles = { display: "flex", flexDirection: "column" as const };
+const hdr = { display: "grid", fontWeight: 600, fontSize: 10.5, color: light.text.secondary, padding: "0 10px", background: tableTheme.headerBg, height: 26, alignItems: "center", borderBottom: `1px solid ${light.border.primary}`, position: "sticky" as const, top: 0, zIndex: 1 };
+const hdrCell = { borderRight: `1px solid ${light.border.light}`, paddingRight: 4 };
 const hdrCellRight = { ...hdrCell, textAlign: "right" as const };
 const hdrCellCenter = { ...hdrCell, textAlign: "center" as const };
-const rowStyle = { display: "grid", fontSize: 11, minHeight: 32, alignItems: "center", padding: "0 10px", borderBottom: "1px solid #f3f4f6" };
+const rowStyle = { display: "grid", fontSize: 11, minHeight: 32, alignItems: "center", padding: "0 10px", borderBottom: `1px solid ${tableTheme.rowBorder}` };
 
 // Cell border for column dividers
-const cellBorder = { borderRight: "1px solid #eee", paddingRight: 4, paddingLeft: 2 };
+const cellBorder = { borderRight: `1px solid ${light.border.muted}`, paddingRight: 4, paddingLeft: 2 };
 const cellEllipsis = { ...cellBorder, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, monospace", fontSize: 10 };
 const right = { ...cellBorder, textAlign: "right" as const };
 const rightMono = { ...right, fontFamily: "ui-monospace, monospace" };
 const center = { ...cellBorder, textAlign: "center" as const };
 const centerBold = { ...center, fontWeight: 600 };
-const gray10 = { ...cellBorder, fontSize: 10, color: "#666" };
+const gray10 = { ...cellBorder, fontSize: 10, color: light.text.muted };
 
-const empty = { padding: 40, textAlign: "center" as const, color: "#666", fontSize: 14 };
+const empty = { padding: 40, textAlign: "center" as const, color: light.text.muted, fontSize: 14 };
 
 const iconBtn = {
   padding: "4px 10px",
-  border: "1px solid #ccc",
+  border: `1px solid ${light.border.lighter}`,
   borderRadius: "6px",
-  background: "white",
+  background: light.bg.primary,
   fontSize: "12px",
   fontWeight: 600,
   cursor: "pointer",

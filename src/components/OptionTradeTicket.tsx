@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { socketHub } from "../ws/SocketHub";
 import { formatExpiryWithWeekday } from "../utils/options";
 import Select from "./shared/Select";
+import { light, semantic, pnl } from "../theme";
 
 const THROTTLE_MS = 200; // 5 updates/sec for trade tickets
 
@@ -226,16 +227,16 @@ export default function OptionTradeTicket({
   return (
     <div style={{
       width: 380,
-      background: "white",
+      background: light.bg.primary,
       borderRadius: 12,
       boxShadow: "0 20px 40px rgba(0,0,0,0.15)",
-      border: "1px solid #e5e7eb",
+      border: `1px solid ${light.border.primary}`,
       fontFamily: "system-ui, sans-serif",
     }}>
       {/* Header */}
       <div style={{
         padding: "12px 16px",
-        borderBottom: "1px solid #e5e7eb",
+        borderBottom: `1px solid ${light.border.primary}`,
         fontWeight: 600,
         fontSize: 15,
         display: "flex",
@@ -249,13 +250,13 @@ export default function OptionTradeTicket({
       {/* Option Details */}
       <div style={{
         padding: "12px 16px",
-        background: "#f8fafc",
-        borderBottom: "1px solid #e5e7eb",
+        background: light.bg.secondary,
+        borderBottom: `1px solid ${light.border.primary}`,
       }}>
         <div style={{ fontSize: 13, marginBottom: 6 }}>
           <strong>{underlying}</strong> ${strike.toFixed(2)} {rightLabel}
         </div>
-        <div style={{ fontSize: 12, color: "#666" }}>
+        <div style={{ fontSize: 12, color: light.text.muted }}>
           Expires: {formattedExpiry}
         </div>
       </div>
@@ -263,8 +264,8 @@ export default function OptionTradeTicket({
       {/* Live Prices - click bid/mid/ask to populate limit price */}
       <div style={{
         padding: "10px 16px",
-        background: "#f0fdf4",
-        borderBottom: "1px solid #bbf7d0",
+        background: semantic.success.bg,
+        borderBottom: `1px solid ${semantic.success.bgMuted}`,
         fontSize: 12,
         display: "grid",
         gridTemplateColumns: "1fr 1fr 1fr 1fr",
@@ -292,8 +293,8 @@ export default function OptionTradeTicket({
       {/* Greeks (always shown, updates live) */}
       <div style={{
         padding: "10px 16px",
-        background: "#fef3c7",
-        borderBottom: "1px solid #fde68a",
+        background: semantic.warning.bg,
+        borderBottom: `1px solid ${semantic.warning.bgMuted}`,
         fontSize: 11,
         display: "grid",
         gridTemplateColumns: "repeat(5, 1fr)",
@@ -316,24 +317,24 @@ export default function OptionTradeTicket({
             borderRadius: 8,
             border: "none",
             fontWeight: 600,
-            background: side === "BUY" ? "#16a34a" : "#f0fdf4",
-            color: side === "BUY" ? "white" : "#166534",
+            background: side === "BUY" ? pnl.positive : semantic.success.bg,
+            color: side === "BUY" ? light.bg.primary : semantic.success.textDark,
           }}>BUY</button>
           <button onClick={() => setSide("SELL")} style={{
             padding: 10,
             borderRadius: 8,
             border: "none",
             fontWeight: 600,
-            background: side === "SELL" ? "#dc2626" : "#fef2f2",
-            color: side === "SELL" ? "white" : "#991b1b",
+            background: side === "SELL" ? pnl.negative : semantic.error.bg,
+            color: side === "SELL" ? light.bg.primary : semantic.error.textDark,
           }}>SELL</button>
         </div>
 
-        <input 
-          placeholder="Quantity (contracts)" 
-          value={quantity} 
-          onChange={e => setQuantity(e.target.value.replace(/[^\d]/g, ""))} 
-          style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: "1px solid #ccc" }} 
+        <input
+          placeholder="Quantity (contracts)"
+          value={quantity}
+          onChange={e => setQuantity(e.target.value.replace(/[^\d]/g, ""))}
+          style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: `1px solid ${light.border.lighter}` }}
         />
 
         <Select
@@ -353,9 +354,9 @@ export default function OptionTradeTicket({
           <div style={{
             marginBottom: 10,
             padding: "8px 10px",
-            background: "#f8fafc",
+            background: light.bg.secondary,
             borderRadius: 8,
-            border: "1px solid #e2e8f0"
+            border: `1px solid ${light.border.secondary}`
           }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
               <input
@@ -382,46 +383,46 @@ export default function OptionTradeTicket({
         )}
 
         {(orderType === "LMT" || orderType === "STPLMT") && (
-          <input 
-            placeholder="Limit Price" 
-            value={limitPrice} 
-            onChange={e => setLimitPrice(e.target.value)} 
-            style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: "1px solid #ccc" }} 
+          <input
+            placeholder="Limit Price"
+            value={limitPrice}
+            onChange={e => setLimitPrice(e.target.value)}
+            style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: `1px solid ${light.border.lighter}` }}
           />
         )}
 
         {(orderType === "STP" || orderType === "STPLMT") && (
-          <input 
-            placeholder="Stop Price" 
-            value={stopPrice} 
-            onChange={e => setStopPrice(e.target.value)} 
-            style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: "1px solid #ccc" }} 
+          <input
+            placeholder="Stop Price"
+            value={stopPrice}
+            onChange={e => setStopPrice(e.target.value)}
+            style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: `1px solid ${light.border.lighter}` }}
           />
         )}
 
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-          <button 
-            onClick={sendOrder} 
-            style={{ 
-              flex: 1, 
-              padding: 12, 
-              background: side === "BUY" ? "#16a34a" : "#dc2626", 
-              color: "white", 
-              border: "none", 
-              borderRadius: 8, 
-              fontWeight: 600 
+          <button
+            onClick={sendOrder}
+            style={{
+              flex: 1,
+              padding: 12,
+              background: side === "BUY" ? pnl.positive : pnl.negative,
+              color: light.bg.primary,
+              border: "none",
+              borderRadius: 8,
+              fontWeight: 600
             }}
           >
             Submit {side}
           </button>
-          <button 
-            onClick={onClose} 
-            style={{ 
-              padding: 12, 
-              border: "1px solid #ccc", 
-              background: "white", 
+          <button
+            onClick={onClose}
+            style={{
+              padding: 12,
+              border: `1px solid ${light.border.lighter}`,
+              background: light.bg.primary,
               borderRadius: 8,
-              color: "#111"
+              color: light.text.primary
             }}
           >
             Cancel

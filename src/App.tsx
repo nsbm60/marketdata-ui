@@ -4,6 +4,7 @@ import { socketHub } from "./ws/SocketHub";
 import { getMarketState } from "./services/marketState";
 import { AppStateProvider } from "./state/AppStateContext";
 import TwoPane from "./TwoPane";
+import { light } from "./theme";
 
 export default function App() {
   useEffect(() => {
@@ -28,7 +29,7 @@ const root = {
   height: "100vh",
   display: "flex",
   flexDirection: "column",
-  background: "#f4f4f4",
+  background: light.bg.tertiary,
   overflow: "hidden",
   fontFamily:
     'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
