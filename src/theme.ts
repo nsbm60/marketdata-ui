@@ -170,3 +170,24 @@ export const rowHighlight = {
   selected: semantic.highlight.blue,
   selectedBorder: semantic.highlight.blueBorder,
 };
+
+// ─────────────────────────────────────────────────────────────
+// Typography
+// ─────────────────────────────────────────────────────────────
+
+export const fonts = {
+  /** Standard table/grid sizes */
+  table: {
+    header: 11,      // Column headers
+    cell: 11,        // Data cells
+    label: 11,       // Row labels
+    small: 9,        // Secondary info (e.g., @$6.40)
+  },
+  /** UI elements */
+  ui: {
+    heading: 14,     // Section headings
+    body: 12,        // Body text
+    button: 11,      // Buttons
+    caption: 10,     // Captions, timestamps
+  },
+};

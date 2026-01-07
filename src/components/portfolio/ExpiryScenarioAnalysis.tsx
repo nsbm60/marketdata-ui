@@ -5,7 +5,7 @@ import { PriceData } from "../../hooks/useMarketData";
 import { OptionGreeks, getGreeksForPosition } from "../../hooks/usePortfolioOptionsReports";
 import { buildOsiSymbol } from "../../utils/options";
 import { socketHub } from "../../ws/SocketHub";
-import { light, dark, semantic, pnl, rowHighlight } from "../../theme";
+import { light, dark, semantic, pnl, rowHighlight, fonts } from "../../theme";
 
 type Props = {
   positions: IbPosition[];
@@ -147,8 +147,11 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
       });
 
       // Handle double-nested data: response.data.data.results (UiSocket wraps the response)
-      const outerData = response.data as { data?: { results?: AnalysisResult[] }; results?: AnalysisResult[] } | undefined;
-      const results = outerData?.data?.results ?? outerData?.results;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const outerData = response.data as any;
+      const innerData = outerData?.data ?? outerData;
+      const results = innerData?.results;
+
       if (response.ok && results) {
         setResults(results);
         setLastRefresh(Date.now());
@@ -170,6 +173,16 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
     return () => clearTimeout(timer);
   }, [fetchAnalysis]);
 
+  // Retry when prices become available (handles case where initial fetch returned early)
+  const hasPrices = Object.keys(analysisInput.underlyingPrices).length > 0;
+  const hasPositions = analysisInput.positions.length > 0 || analysisInput.equityPositions.length > 0;
+  useEffect(() => {
+    const shouldRetry = hasPrices && hasPositions && results.length === 0 && !loading;
+    if (shouldRetry) {
+      fetchAnalysis();
+    }
+  }, [hasPrices, hasPositions, results.length, loading, fetchAnalysis]);
+
   // Format helpers
   const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   const fmtPrice = (n: number) => n.toFixed(2);
@@ -189,12 +202,12 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
   return (
     <div style={container}>
       <div style={headerSection}>
-        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Expiry Scenario Analysis</h3>
+        <h3 style={{ margin: 0, fontSize: fonts.ui.heading, fontWeight: 600 }}>Expiry Scenario Analysis</h3>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {loading && <span style={{ fontSize: 11, color: light.text.muted }}>Loading...</span>}
-          {error && <span style={{ fontSize: 11, color: semantic.error.text }}>{error}</span>}
+          {loading && <span style={{ fontSize: fonts.table.cell, color: light.text.muted }}>Loading...</span>}
+          {error && <span style={{ fontSize: fonts.table.cell, color: semantic.error.text }}>{error}</span>}
           {lastRefresh > 0 && !loading && (
-            <span style={{ fontSize: 10, color: light.text.disabled }}>
+            <span style={{ fontSize: fonts.ui.caption, color: light.text.disabled }}>
               Updated {new Date(lastRefresh).toLocaleTimeString()}
             </span>
           )}
@@ -208,7 +221,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
         <div key={result.underlying} style={resultContainer}>
           <div style={resultHeader}>
             <span style={{ fontWeight: 700 }}>{result.underlying}</span>
-            <span style={{ marginLeft: 12, color: light.text.muted, fontSize: 12 }}>
+            <span style={{ marginLeft: 12, color: light.text.muted, fontSize: fonts.ui.body }}>
               Current: ${fmtPrice(result.currentPrice)}
             </span>
           </div>
@@ -216,19 +229,17 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
           {/* Scenario header row */}
           <div style={scenarioHeaderRow}>
             <div style={positionLabelCell}>Position</div>
-            <div style={scenarioHeaderCell}>
+            <div style={{ ...scenarioHeaderCell, borderLeft: `1px solid ${light.border.primary}` }}>
               <div style={{ fontWeight: 600, color: semantic.info.text }}>Current</div>
-              <div style={{ fontSize: 9, color: light.text.muted }}>Value</div>
             </div>
-            {DEFAULT_SCENARIOS.map(pct => {
+            {DEFAULT_SCENARIOS.map((pct, i) => {
               const price = result.currentPrice * (1 + pct);
               return (
-                <div key={pct} style={scenarioHeaderCell}>
+                <div key={pct} style={{ ...scenarioHeaderCell, borderLeft: `1px solid ${light.border.primary}` }}>
                   <div style={{ fontWeight: 600, color: pct === 0 ? semantic.info.text : undefined }}>
                     {fmtPercent(pct)}
                   </div>
-                  <div style={{ fontSize: 9, color: light.text.muted }}>${fmtPrice(price)}</div>
-                  <div style={{ fontSize: 8, color: light.text.disabled }}>Δ</div>
+                  <div style={{ fontSize: fonts.table.small, color: light.text.muted }}>${fmtPrice(price)}</div>
                 </div>
               );
             })}
@@ -239,77 +250,136 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
             <div key={expiryRow.expiry}>
               {/* Expiry date label */}
               <div style={expiryLabelRow}>
-                <span style={{ fontWeight: 600, fontSize: 11 }}>
+                <span style={{ fontWeight: 600, fontSize: fonts.ui.body }}>
                   {formatExpiry(expiryRow.expiry)}
                 </span>
-                <span style={{ marginLeft: 8, fontSize: 10, color: light.text.light }}>
+                <span style={{ marginLeft: 8, fontSize: fonts.table.cell, color: light.text.light }}>
                   ({expiryRow.positions.filter(p => p.isExpiring).length} expiring)
                 </span>
               </div>
 
               {/* Position rows */}
-              {expiryRow.positions.map((pos, posIdx) => (
-                <div
-                  key={pos.osiSymbol}
-                  style={{
-                    ...positionRow,
-                    background: pos.isExpiring ? rowHighlight.expiring : posIdx % 2 === 0 ? light.bg.muted : light.bg.primary
-                  }}
-                >
-                  <div style={positionLabelCell}>
-                    <span style={{ fontWeight: 500 }}>
-                      {pos.right === "S" ? "Stock" : `${pos.strike} ${pos.right === "C" ? "Call" : "Put"}`}
-                    </span>
-                    <span style={{ marginLeft: 6, fontSize: 9, color: light.text.light }}>
-                      {pos.quantity > 0 ? "+" : ""}{pos.quantity}{pos.right === "S" ? " sh" : ""}
-                    </span>
-                    {pos.right !== "S" && pos.isExpiring && (
-                      <span style={{ marginLeft: 6, fontSize: 8, color: semantic.warning.textDark, fontWeight: 600 }}>
-                        EXP
+              {expiryRow.positions.map((pos, posIdx) => {
+                const isEquity = pos.right === "S";
+                const isCash = pos.right === "$";
+                const isOption = !isEquity && !isCash;
+                return (
+                  <div
+                    key={pos.osiSymbol}
+                    style={{
+                      ...positionRow,
+                      background: pos.isExpiring ? rowHighlight.expiring : posIdx % 2 === 0 ? light.bg.muted : light.bg.primary
+                    }}
+                  >
+                    <div style={positionLabelCell}>
+                      <span style={{ fontWeight: 500 }}>
+                        {isEquity ? "Stock" : isCash ? "Cash" : `${pos.strike} ${pos.right === "C" ? "C" : "P"}`}
                       </span>
-                    )}
-                    {pos.right !== "S" && !pos.isExpiring && (
-                      <span style={{ marginLeft: 6, fontSize: 8, color: dark.text.muted }}>
-                        {formatExpiry(pos.expiry)}
-                      </span>
-                    )}
-                  </div>
-                  <div style={valueCell}>
-                    <span style={{ fontSize: 11, color: light.text.muted }}>
-                      ${fmt(pos.currentValue)}
-                    </span>
-                  </div>
-                  {pos.values.map((sv, i) => (
-                    <div key={i} style={valueCell}>
-                      <span style={{ color: valueColor(sv.pnl), fontSize: 11 }}>
-                        {sv.pnl >= 0 ? "+" : ""}{fmt(sv.pnl)}
-                      </span>
+                      {isOption && (
+                        <span style={{ marginLeft: 2, color: light.text.light }}>
+                          {pos.quantity > 0 ? "+" : ""}{pos.quantity}
+                        </span>
+                      )}
+                      {isOption && pos.isExpiring && (
+                        <span style={{ marginLeft: 2, fontSize: fonts.table.small, color: semantic.warning.textDark, fontWeight: 600 }}>
+                          EXP
+                        </span>
+                      )}
+                      {isOption && !pos.isExpiring && (
+                        <span style={{ marginLeft: 2, fontSize: fonts.table.small, color: dark.text.muted }}>
+                          {formatExpiry(pos.expiry)}
+                        </span>
+                      )}
+                      {isCash && (
+                        <span style={{ marginLeft: 2, fontSize: fonts.table.small, color: light.text.muted }}>
+                          (from assignments)
+                        </span>
+                      )}
                     </div>
-                  ))}
-                </div>
-              ))}
+                    {/* Current column */}
+                    <div style={{ ...valueCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                      {isEquity ? (
+                        <>
+                          <div>{pos.quantity > 0 ? "+" : ""}{pos.quantity}sh</div>
+                          <div style={{ fontSize: fonts.table.small, color: light.text.light }}>
+                            ${fmt(pos.currentValue)}
+                          </div>
+                        </>
+                      ) : isCash ? (
+                        <span style={{ color: light.text.muted }}>$0</span>
+                      ) : (
+                        <>${fmt(pos.currentValue)}</>
+                      )}
+                    </div>
+                    {/* Scenario columns */}
+                    {pos.values.map((sv, i) => {
+                      if (isEquity) {
+                        // For equity: show adjusted share count based on value / projected price
+                        const projectedPrice = expiryRow.subtotals[i]?.price ?? result.currentPrice;
+                        const adjustedShares = projectedPrice > 0 ? Math.round(sv.value / projectedPrice) : pos.quantity;
+                        const sharesChanged = adjustedShares !== pos.quantity;
+                        return (
+                          <div key={i} style={{ ...valueCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                            <div style={{ color: sharesChanged ? semantic.info.text : undefined, fontWeight: sharesChanged ? 600 : undefined }}>
+                              {adjustedShares > 0 ? "+" : ""}{adjustedShares}sh
+                            </div>
+                            <div style={{ fontSize: fonts.table.small, color: light.text.light }}>
+                              ${fmt(sv.value)}
+                            </div>
+                          </div>
+                        );
+                      } else if (isCash) {
+                        // For cash: show cash amount with color coding
+                        const hasCash = sv.value !== 0;
+                        return (
+                          <div key={i} style={{ ...valueCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                            <div style={{
+                              color: hasCash ? (sv.value > 0 ? pnl.positive : pnl.negative) : light.text.muted,
+                              fontWeight: hasCash ? 600 : undefined
+                            }}>
+                              {sv.value >= 0 ? "+" : ""}{fmt(sv.value)}
+                            </div>
+                          </div>
+                        );
+                      } else {
+                        // For options: show value and per-contract price
+                        const optionPrice = pos.quantity !== 0
+                          ? Math.abs(sv.value) / (Math.abs(pos.quantity) * 100)
+                          : 0;
+                        return (
+                          <div key={i} style={{ ...valueCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                            <div>${fmt(sv.value)}</div>
+                            <div style={{ color: light.text.light, fontSize: fonts.table.small }}>
+                              @${optionPrice.toFixed(2)}
+                            </div>
+                          </div>
+                        );
+                      }
+                    })}
+                  </div>
+                );
+              })}
 
               {/* Subtotal row for this expiry */}
               <div style={subtotalRow}>
                 <div style={positionLabelCell}>
-                  <span style={{ fontWeight: 700, fontSize: 11 }}>Subtotal</span>
+                  <span style={{ fontWeight: 700 }}>Subtotal</span>
                 </div>
-                <div style={subtotalCell}>
-                  <span style={{ fontWeight: 600, fontSize: 12, color: light.text.muted }}>
-                    ${fmt(expiryRow.subtotals[0]?.currentValue ?? 0)}
-                  </span>
+                <div style={{ ...subtotalCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                  ${fmt(expiryRow.subtotals[0]?.currentValue ?? 0)}
                 </div>
                 {expiryRow.subtotals.map((sv, i) => (
-                  <div key={i} style={subtotalCell}>
-                    <span style={{ color: valueColor(sv.pnl), fontWeight: 600, fontSize: 12 }}>
+                  <div key={i} style={{ ...subtotalCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                    <div style={{ fontWeight: 600 }}>${fmt(sv.total)}</div>
+                    <div style={{ color: valueColor(sv.pnl), fontWeight: 600 }}>
                       {sv.pnl >= 0 ? "+" : ""}{fmt(sv.pnl)}
-                    </span>
+                    </div>
                   </div>
                 ))}
               </div>
 
               {/* Spacer between expiry sections */}
-              {rowIdx < result.expiryRows.length - 1 && <div style={{ height: 8 }} />}
+              {rowIdx < result.expiryRows.length - 1 && <div style={{ height: 2 }} />}
             </div>
           ))}
 
@@ -317,18 +387,17 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
           {result.expiryRows.length > 0 && (
             <div style={grandTotalRow}>
               <div style={positionLabelCell}>
-                <span style={{ fontWeight: 700, fontSize: 12 }}>Final P&L</span>
+                <span style={{ fontWeight: 700 }}>Final</span>
               </div>
-              <div style={grandTotalCell}>
-                <span style={{ fontWeight: 700, fontSize: 13, color: light.text.muted }}>
-                  ${fmt(result.expiryRows[result.expiryRows.length - 1].subtotals[0]?.currentValue ?? 0)}
-                </span>
+              <div style={{ ...grandTotalCell, borderLeft: `1px solid ${semantic.highlight.blueBorder}` }}>
+                ${fmt(result.expiryRows[result.expiryRows.length - 1].subtotals[0]?.currentValue ?? 0)}
               </div>
               {result.expiryRows[result.expiryRows.length - 1].subtotals.map((sv, i) => (
-                <div key={i} style={grandTotalCell}>
-                  <span style={{ color: valueColor(sv.pnl), fontWeight: 700, fontSize: 13 }}>
+                <div key={i} style={{ ...grandTotalCell, borderLeft: `1px solid ${semantic.highlight.blueBorder}` }}>
+                  <div style={{ fontWeight: 700 }}>${fmt(sv.total)}</div>
+                  <div style={{ color: valueColor(sv.pnl), fontWeight: 700 }}>
                     {sv.pnl >= 0 ? "+" : ""}{fmt(sv.pnl)}
-                  </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -351,23 +420,23 @@ function formatExpiry(dateStr: string): string {
 const container: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 16,
-  padding: 12,
+  gap: 8,
+  padding: 4,
 };
 
 const headerSection: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  marginBottom: 8,
+  marginBottom: 4,
 };
 
 const refreshButton: React.CSSProperties = {
-  padding: "4px 12px",
-  fontSize: 11,
+  padding: "2px 8px",
+  fontSize: fonts.ui.button,
   background: light.bg.tertiary,
   border: `1px solid ${light.border.primary}`,
-  borderRadius: 4,
+  borderRadius: 3,
   cursor: "pointer",
 };
 
@@ -379,59 +448,59 @@ const resultContainer: React.CSSProperties = {
 };
 
 const resultHeader: React.CSSProperties = {
-  padding: "10px 12px",
+  padding: "4px 6px",
   background: light.bg.secondary,
   borderBottom: `1px solid ${light.border.primary}`,
-  fontSize: 13,
+  fontSize: fonts.table.header,
 };
 
-const gridCols = "minmax(140px, 180px) 80px repeat(7, 1fr)";
+const gridCols = "minmax(90px, 120px) 55px repeat(7, minmax(52px, 1fr))";
 
 const scenarioHeaderRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
   background: light.bg.tertiary,
   borderBottom: `1px solid ${light.border.primary}`,
-  padding: "8px 0",
+  padding: "2px 0",
 };
 
 const scenarioHeaderCell: React.CSSProperties = {
   textAlign: "center",
-  fontSize: 11,
+  fontSize: fonts.table.header,
 };
 
 const positionLabelCell: React.CSSProperties = {
-  paddingLeft: 12,
+  paddingLeft: 4,
   display: "flex",
   alignItems: "center",
-  fontSize: 11,
-  gap: 4,
+  fontSize: fonts.table.label,
+  gap: 2,
 };
 
 const expiryLabelRow: React.CSSProperties = {
-  padding: "6px 12px",
+  padding: "2px 4px",
   background: semantic.highlight.cyan,
   borderBottom: `1px solid ${semantic.highlight.cyanBorder}`,
-  fontSize: 11,
+  fontSize: fonts.table.label,
 };
 
 const positionRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
-  padding: "4px 0",
+  padding: "1px 0",
   borderBottom: `1px solid ${light.bg.hover}`,
 };
 
 const valueCell: React.CSSProperties = {
   textAlign: "center",
   fontFamily: "ui-monospace, monospace",
-  fontSize: 11,
+  fontSize: fonts.table.cell,
 };
 
 const subtotalRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
-  padding: "6px 0",
+  padding: "2px 0",
   background: semantic.warning.bgMuted,
   borderBottom: `1px solid ${semantic.highlight.yellowBorder}`,
 };
@@ -439,24 +508,26 @@ const subtotalRow: React.CSSProperties = {
 const subtotalCell: React.CSSProperties = {
   textAlign: "center",
   fontFamily: "ui-monospace, monospace",
+  fontSize: fonts.table.cell,
 };
 
 const grandTotalRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
-  padding: "10px 0",
+  padding: "2px 0",
   background: semantic.highlight.blue,
-  borderTop: `2px solid ${semantic.highlight.blueBorder}`,
+  borderTop: `1px solid ${semantic.highlight.blueBorder}`,
 };
 
 const grandTotalCell: React.CSSProperties = {
   textAlign: "center",
   fontFamily: "ui-monospace, monospace",
+  fontSize: fonts.table.cell,
 };
 
 const emptyStyle: React.CSSProperties = {
   padding: 40,
   textAlign: "center",
   color: light.text.muted,
-  fontSize: 14,
+  fontSize: fonts.ui.heading,
 };
