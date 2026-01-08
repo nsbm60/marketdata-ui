@@ -186,6 +186,104 @@ function AddMAPopover({
   );
 }
 
+// Ribbon popover content with local state to allow proper text editing
+function RibbonPopoverContent({
+  settings,
+  updateSetting,
+}: {
+  settings: ChartMetricSettings;
+  updateSetting: <K extends "ribbon" | "rsi" | "macd">(key: K, updates: Partial<ChartMetricSettings[K]>) => void;
+}) {
+  const [countStr, setCountStr] = useState(settings.ribbon.count.toString());
+  const [baseStr, setBaseStr] = useState(settings.ribbon.base.toString());
+  const [stepStr, setStepStr] = useState(settings.ribbon.step.toString());
+
+  // Sync local state when settings change externally
+  useEffect(() => {
+    setCountStr(settings.ribbon.count.toString());
+    setBaseStr(settings.ribbon.base.toString());
+    setStepStr(settings.ribbon.step.toString());
+  }, [settings.ribbon.count, settings.ribbon.base, settings.ribbon.step]);
+
+  const commitCount = () => {
+    const v = parseInt(countStr, 10);
+    if (!isNaN(v) && v >= 2 && v <= 12) {
+      updateSetting("ribbon", { count: v });
+    } else {
+      setCountStr(settings.ribbon.count.toString());
+    }
+  };
+
+  const commitBase = () => {
+    const v = parseInt(baseStr, 10);
+    if (!isNaN(v) && v >= 1 && v <= 200) {
+      updateSetting("ribbon", { base: v });
+    } else {
+      setBaseStr(settings.ribbon.base.toString());
+    }
+  };
+
+  const commitStep = () => {
+    const v = parseInt(stepStr, 10);
+    if (!isNaN(v) && v >= 1 && v <= 50) {
+      updateSetting("ribbon", { step: v });
+    } else {
+      setStepStr(settings.ribbon.step.toString());
+    }
+  };
+
+  const previewCount = parseInt(countStr, 10) || settings.ribbon.count;
+  const previewBase = parseInt(baseStr, 10) || settings.ribbon.base;
+  const previewStep = parseInt(stepStr, 10) || settings.ribbon.step;
+
+  return (
+    <>
+      <div style={{ marginBottom: 8 }}>
+        <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Number of EMAs</label>
+        <input
+          type="number"
+          value={countStr}
+          onChange={(e) => setCountStr(e.target.value)}
+          onBlur={commitCount}
+          onKeyDown={(e) => e.key === "Enter" && commitCount()}
+          min={2}
+          max={12}
+          style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
+        />
+      </div>
+      <div style={{ marginBottom: 8 }}>
+        <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Base Period</label>
+        <input
+          type="number"
+          value={baseStr}
+          onChange={(e) => setBaseStr(e.target.value)}
+          onBlur={commitBase}
+          onKeyDown={(e) => e.key === "Enter" && commitBase()}
+          min={1}
+          max={200}
+          style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
+        />
+      </div>
+      <div style={{ marginBottom: 8 }}>
+        <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Step Between EMAs</label>
+        <input
+          type="number"
+          value={stepStr}
+          onChange={(e) => setStepStr(e.target.value)}
+          onBlur={commitStep}
+          onKeyDown={(e) => e.key === "Enter" && commitStep()}
+          min={1}
+          max={50}
+          style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
+        />
+      </div>
+      <div style={{ fontSize: 10, color: dark.text.muted, marginTop: 4 }}>
+        EMAs: {Array.from({ length: previewCount }, (_, i) => previewBase + i * previewStep).join(", ")}
+      </div>
+    </>
+  );
+}
+
 // MA chip with delete button
 function MAChip({
   ma,
@@ -448,42 +546,7 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
           ▼
         </button>
         <Popover isOpen={showRibbon} onClose={() => setShowRibbon(false)} anchorRef={ribbonRef}>
-          <div style={{ marginBottom: 8 }}>
-            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Number of EMAs</label>
-            <input
-              type="number"
-              value={settings.ribbon.count}
-              onChange={(e) => updateSetting("ribbon", { count: parseInt(e.target.value) || 3 })}
-              min={2}
-              max={12}
-              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
-            />
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Base Period</label>
-            <input
-              type="number"
-              value={settings.ribbon.base}
-              onChange={(e) => updateSetting("ribbon", { base: parseInt(e.target.value) || 9 })}
-              min={1}
-              max={200}
-              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
-            />
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Step Between EMAs</label>
-            <input
-              type="number"
-              value={settings.ribbon.step}
-              onChange={(e) => updateSetting("ribbon", { step: parseInt(e.target.value) || 3 })}
-              min={1}
-              max={50}
-              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
-            />
-          </div>
-          <div style={{ fontSize: 10, color: dark.text.muted, marginTop: 4 }}>
-            EMAs: {Array.from({ length: settings.ribbon.count }, (_, i) => settings.ribbon.base + i * settings.ribbon.step).join(", ")}
-          </div>
+          <RibbonPopoverContent settings={settings} updateSetting={updateSetting} />
         </Popover>
       </div>
 
