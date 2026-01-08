@@ -41,6 +41,7 @@ const pendingFetches = new Map<string, Promise<ClosePriceData | null>>();
 // Multi-timeframe cache
 let multiTimeframeCache: MultiTimeframeClosePrices | null = null;
 let multiTimeframePending: Promise<MultiTimeframeClosePrices | null> | null = null;
+let multiTimeframePendingSymbols: Set<string> = new Set();
 
 // Cache TTL: 5 minutes for active market, longer for closed
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -173,10 +174,26 @@ export async function fetchAllTimeframeClosePrices(symbols: string[]): Promise<M
     }
   }
 
-  // Check if already fetching
+  // Check if already fetching - only reuse if pending fetch includes all our symbols
   if (multiTimeframePending) {
-    return multiTimeframePending;
+    const pendingHasAll = syms.every(s => multiTimeframePendingSymbols.has(s));
+    if (pendingHasAll) {
+      return multiTimeframePending;
+    }
+    // Wait for current fetch to complete, then check cache/retry
+    await multiTimeframePending;
+    // Check cache again after pending completes
+    if (multiTimeframeCache && now - multiTimeframeCache.fetchedAt < CACHE_TTL_MS) {
+      const allCached = syms.every(s => multiTimeframeCache!.prices.has(s));
+      if (allCached) {
+        return multiTimeframeCache;
+      }
+    }
+    // Fall through to start our own fetch with our symbols
   }
+
+  // Track which symbols this fetch is for
+  multiTimeframePendingSymbols = new Set(syms);
 
   // Fetch all timeframes
   const promise = (async () => {
@@ -233,6 +250,7 @@ export async function fetchAllTimeframeClosePrices(symbols: string[]): Promise<M
       return null;
     } finally {
       multiTimeframePending = null;
+      multiTimeframePendingSymbols.clear();
     }
   })();
 
@@ -278,6 +296,7 @@ export function clearCache(): void {
   console.log("[ClosePrices] Cache cleared");
   cache.clear();
   multiTimeframeCache = null;
+  multiTimeframePendingSymbols.clear();
 }
 
 // Track the last known prevTradingDay to detect date changes
@@ -294,6 +313,7 @@ export function checkAndClearCacheOnDateChange(prevTradingDay: string | null): v
     console.log(`[ClosePrices] Trading day changed from ${lastKnownPrevTradingDay} to ${prevTradingDay}, clearing cache`);
     cache.clear();
     multiTimeframeCache = null;
+    multiTimeframePendingSymbols.clear();
   }
   lastKnownPrevTradingDay = prevTradingDay;
 }

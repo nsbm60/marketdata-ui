@@ -152,24 +152,35 @@ export default function FidelityPanel() {
   const [multiClosePrices, setMultiClosePrices] = useState<MultiTimeframeClosePrices | null>(null);
 
   // Fetch close prices for all timeframes (single fetch, local timeframe switching)
-  // Retry after 2s if we get empty data (server may not be ready)
+  // Retry with backoff if we get empty data (server may not be ready)
   useEffect(() => {
     if (subscriptionSymbols.equities.length === 0 || !wsConnected) return;
 
+    let cancelled = false;
     let retryTimeout: number | undefined;
 
-    fetchAllTimeframeClosePrices(subscriptionSymbols.equities).then((result) => {
-      setMultiClosePrices(result);
-      // If we got null or empty, retry after a delay
-      if (!result || result.prices.size === 0) {
-        console.log("[FidelityPanel] Close prices empty, retrying in 2s...");
-        retryTimeout = window.setTimeout(() => {
-          fetchAllTimeframeClosePrices(subscriptionSymbols.equities).then(setMultiClosePrices);
-        }, 2000);
+    const fetchWithRetry = async (attempt: number = 1) => {
+      if (cancelled) return;
+      const result = await fetchAllTimeframeClosePrices(subscriptionSymbols.equities);
+      if (cancelled) return;
+
+      if (result && result.prices.size > 0) {
+        setMultiClosePrices(result);
+      } else if (attempt < 4) {
+        // Retry with backoff: 1s, 2s, 4s
+        const delay = Math.pow(2, attempt - 1) * 1000;
+        console.log(`[FidelityPanel] Close prices empty (attempt ${attempt}), retrying in ${delay}ms...`);
+        retryTimeout = window.setTimeout(() => fetchWithRetry(attempt + 1), delay);
+      } else {
+        console.warn("[FidelityPanel] Close prices still empty after 4 attempts");
+        setMultiClosePrices(result); // Set whatever we got
       }
-    });
+    };
+
+    fetchWithRetry();
 
     return () => {
+      cancelled = true;
       if (retryTimeout) clearTimeout(retryTimeout);
     };
   }, [subscriptionSymbols.equities.join(","), wsConnected, marketState?.lastUpdated]);
