@@ -10,11 +10,21 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { socketHub } from "../ws/SocketHub";
 import type { TickEnvelope } from "../ws/ws-types";
 
+/** Change data for a single timeframe */
+export interface TimeframeChange {
+  change: number;
+  pct: number;
+}
+
 // Row shape from CalcServer's WatchlistReportBuilder
 export interface WatchlistReportRow {
   symbol: string;
   last: number;
+  /** Pre-computed changes for each timeframe (0d, 1d, 2d, 1w, 1m) */
+  changes: Partial<Record<string, TimeframeChange>>;
+  /** @deprecated Use changes["1d"] instead - kept for backward compatibility */
   change: number;
+  /** @deprecated Use changes["1d"] instead - kept for backward compatibility */
   pctChange: number;
   bid?: number;
   ask?: number;
@@ -26,6 +36,9 @@ export interface WatchlistReportRow {
 export interface WatchlistReport {
   name: string;
   asOf: number;
+  /** Reference dates for all timeframes: { "0d": "2025-01-08", "1d": "2025-01-07", ... } */
+  referenceDates: Partial<Record<string, string>>;
+  /** @deprecated Use referenceDates["1d"] instead - kept for backward compatibility */
   referenceDate?: string;
   rowCount: number;
   rows: WatchlistReportRow[];
@@ -98,12 +111,14 @@ export function useWatchlistReport(
           const reportData: WatchlistReport = {
             name: payload.name || watchlistName,
             asOf: payload.asOf || Date.now(),
+            referenceDates: payload.referenceDates || {},
             referenceDate: payload.referenceDate,
             rowCount: payload.rowCount || 0,
             rows: Array.isArray(payload.rows)
               ? payload.rows.map((r: any) => ({
                   symbol: r.symbol || "",
                   last: r.last ?? 0,
+                  changes: r.changes || {},
                   change: r.change ?? 0,
                   pctChange: r.pctChange ?? 0,
                   bid: r.bid,

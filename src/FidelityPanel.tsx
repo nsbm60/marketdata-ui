@@ -12,7 +12,7 @@ import {
   clearPositions,
 } from "./utils/fidelity";
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
-import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort } from "./services/closePrices";
+import { fetchAllTimeframeClosePrices, MultiTimeframeClosePrices, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { formatExpiryShort, daysToExpiry, osiToTopicSymbol, parseOptionSymbol } from "./utils/options";
 import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalysis";
@@ -148,17 +148,31 @@ export default function FidelityPanel() {
     return () => socketHub.offConnect(handleReconnect);
   }, [subscriptionSymbols.options.join(",")]);
 
-  // Close prices for equities
-  const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
+  // Close prices for equities - all timeframes in one response
+  const [multiClosePrices, setMultiClosePrices] = useState<MultiTimeframeClosePrices | null>(null);
 
-  // Fetch close prices when symbols, timeframe, or connection change
-  // Wait for marketState.timeframes to be loaded to ensure correct date interpretation
-  // Also re-fetch when marketState.lastUpdated changes (visibility change, reconnect, etc.)
+  // Fetch close prices for all timeframes (single fetch, local timeframe switching)
+  // Retry after 2s if we get empty data (server may not be ready)
   useEffect(() => {
-    if (subscriptionSymbols.equities.length > 0 && wsConnected && marketState?.timeframes?.length) {
-      fetchClosePrices(subscriptionSymbols.equities, timeframe).then(setClosePrices);
-    }
-  }, [subscriptionSymbols.equities.join(","), timeframe, wsConnected, marketState?.timeframes, marketState?.lastUpdated]);
+    if (subscriptionSymbols.equities.length === 0 || !wsConnected) return;
+
+    let retryTimeout: number | undefined;
+
+    fetchAllTimeframeClosePrices(subscriptionSymbols.equities).then((result) => {
+      setMultiClosePrices(result);
+      // If we got null or empty, retry after a delay
+      if (!result || result.prices.size === 0) {
+        console.log("[FidelityPanel] Close prices empty, retrying in 2s...");
+        retryTimeout = window.setTimeout(() => {
+          fetchAllTimeframeClosePrices(subscriptionSymbols.equities).then(setMultiClosePrices);
+        }, 2000);
+      }
+    });
+
+    return () => {
+      if (retryTimeout) clearTimeout(retryTimeout);
+    };
+  }, [subscriptionSymbols.equities.join(","), wsConnected, marketState?.lastUpdated]);
 
   // Option close prices for % change display
   type OptionPriceData = { prevClose: number; todayClose?: number };
@@ -311,9 +325,8 @@ export default function FidelityPanel() {
       }
 
       if (pos.type === "equity") {
-        const closeData = closePrices.get(pos.symbol);
-        if (closeData && currentPrice !== null) {
-          const prevPrice = closeData.prevClose;
+        const prevPrice = multiClosePrices?.prices.get(pos.symbol.toUpperCase())?.closes[timeframe];
+        if (prevPrice && currentPrice !== null) {
           dayChange += (currentPrice - prevPrice) * qty * (pos.quantity < 0 ? -1 : 1);
         }
       }
@@ -326,7 +339,7 @@ export default function FidelityPanel() {
       dayChange,
       totalAccountValue: marketValue + totalCash + totalPending,
     };
-  }, [tradeablePositions, equityPrices, optionPrices, closePrices, totalCash, totalPending]);
+  }, [tradeablePositions, equityPrices, optionPrices, multiClosePrices, timeframe, totalCash, totalPending]);
 
   // Convert Fidelity positions to IbPosition format for ExpiryScenarioAnalysis
   const ibFormatPositions = useMemo((): IbPosition[] => {
@@ -469,9 +482,11 @@ export default function FidelityPanel() {
                     <div style={hdrCellRight}>Qty</div>
                     <div style={hdrCellRight}>Last</div>
                     <div style={{ ...hdrCellCenter, gridColumn: "span 2" }}>
-                      {currentTimeframeInfo
-                        ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
-                        : "Change"}
+                      {multiClosePrices?.referenceDates?.[timeframe]
+                        ? `Chg (${formatCloseDateShort(multiClosePrices.referenceDates[timeframe]!)})`
+                        : currentTimeframeInfo
+                          ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
+                          : "Change"}
                     </div>
                     <div style={hdrCellRight}>Mkt Value</div>
                     <div style={hdrCellRight}>Avg Cost</div>
@@ -507,15 +522,15 @@ export default function FidelityPanel() {
                         : mktValue - pos.costBasisTotal;
                     }
 
-                    // Change calculation
+                    // Change calculation (using selected timeframe for equities)
                     let pctChange: number | undefined;
                     let dollarChange: number | undefined;
                     if (currentPrice !== null) {
                       if (pos.type === "equity") {
-                        const closeData = closePrices.get(pos.symbol);
-                        if (closeData?.prevClose && closeData.prevClose > 0) {
-                          pctChange = calcPctChange(currentPrice, closeData.prevClose);
-                          dollarChange = currentPrice - closeData.prevClose;
+                        const prevClose = multiClosePrices?.prices.get(pos.symbol.toUpperCase())?.closes[timeframe];
+                        if (prevClose && prevClose > 0) {
+                          pctChange = calcPctChange(currentPrice, prevClose);
+                          dollarChange = currentPrice - prevClose;
                         }
                       } else if (pos.type === "option" && pos.osiSymbol) {
                         const optCloseData = optionClosePrices.get(pos.osiSymbol.toUpperCase());
@@ -673,7 +688,7 @@ const header: React.CSSProperties = { display: "flex", justifyContent: "space-be
 const body: React.CSSProperties = { flex: 1, overflow: "auto", padding: "12px 14px", background: light.bg.muted };
 const summary: React.CSSProperties = { fontSize: 11, color: light.text.secondary, marginBottom: 10 };
 const section: React.CSSProperties = { background: light.bg.primary, border: `1px solid ${light.border.primary}`, borderRadius: 8, overflow: "hidden" };
-const tabBar: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: light.bg.tertiary, borderBottom: `1px solid ${light.border.primary}` };
+const tabBar: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: light.bg.tertiary, borderBottom: `1px solid ${light.border.primary}`, maxWidth: 745 };
 
 const table: React.CSSProperties = { display: "flex", flexDirection: "column" };
 const gridCols = "180px 45px 70px 70px 70px 65px 100px 70px 75px";

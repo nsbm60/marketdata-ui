@@ -18,10 +18,29 @@ export interface ClosePriceData {
   fetchedAt: number;          // Timestamp when fetched
 }
 
+/** Standard timeframes supported by the server */
+export type Timeframe = "0d" | "1d" | "2d" | "1w" | "1m";
+
+/** Close prices for all timeframes for a single symbol */
+export interface MultiTimeframeCloses {
+  closes: Partial<Record<Timeframe, number>>;  // timeframe -> close price
+}
+
+/** Response structure for multi-timeframe close prices */
+export interface MultiTimeframeClosePrices {
+  referenceDates: Partial<Record<Timeframe, string>>;  // timeframe -> date
+  prices: Map<string, MultiTimeframeCloses>;            // symbol -> closes per timeframe
+  fetchedAt: number;
+}
+
 // ---- Module state ----
 
 const cache = new Map<string, ClosePriceData>();
 const pendingFetches = new Map<string, Promise<ClosePriceData | null>>();
+
+// Multi-timeframe cache
+let multiTimeframeCache: MultiTimeframeClosePrices | null = null;
+let multiTimeframePending: Promise<MultiTimeframeClosePrices | null> | null = null;
 
 // Cache TTL: 5 minutes for active market, longer for closed
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -131,6 +150,97 @@ export async function fetchClosePrices(symbols: string[], timeframe: string = "1
 }
 
 /**
+ * Fetch close prices for all standard timeframes (0d, 1d, 2d, 1w, 1m) in one call.
+ * More efficient than multiple single-timeframe calls.
+ * Used by Portfolio/Fidelity panels for local timeframe switching.
+ *
+ * @param symbols List of equity symbols
+ * @returns Map of symbol -> closes for all timeframes, plus reference dates
+ */
+export async function fetchAllTimeframeClosePrices(symbols: string[]): Promise<MultiTimeframeClosePrices | null> {
+  const syms = symbols.map(s => s.toUpperCase()).filter(s => s.length > 0);
+  if (syms.length === 0) {
+    return { referenceDates: {}, prices: new Map(), fetchedAt: Date.now() };
+  }
+
+  const now = Date.now();
+
+  // Check if cache is valid and contains all requested symbols
+  if (multiTimeframeCache && now - multiTimeframeCache.fetchedAt < CACHE_TTL_MS) {
+    const allCached = syms.every(s => multiTimeframeCache!.prices.has(s));
+    if (allCached) {
+      return multiTimeframeCache;
+    }
+  }
+
+  // Check if already fetching
+  if (multiTimeframePending) {
+    return multiTimeframePending;
+  }
+
+  // Fetch all timeframes
+  const promise = (async () => {
+    try {
+      const request = { symbols: syms, allTimeframes: true };
+      const ack = await socketHub.sendControl("close_prices", request, { timeoutMs: 15000 });
+
+      if (!ack.ok) {
+        console.error(`[ClosePrices] Multi-timeframe fetch failed: ${ack.error || "unknown error"}`);
+        return null;
+      }
+
+      if (!ack.data) {
+        console.error("[ClosePrices] Multi-timeframe fetch returned no data");
+        return null;
+      }
+
+      const data = (ack.data as any).data || ack.data;
+      const referenceDates = data.referenceDates || {};
+      const pricesData = data.prices || {};
+
+      if (!pricesData || Object.keys(pricesData).length === 0) {
+        console.warn(`[ClosePrices] No price data returned for symbols: ${syms.join(", ")}`);
+      }
+
+      const prices = new Map<string, MultiTimeframeCloses>();
+      Object.entries(pricesData).forEach(([symbol, tfData]: [string, any]) => {
+        if (tfData && tfData.closes) {
+          prices.set(symbol.toUpperCase(), { closes: tfData.closes });
+        } else {
+          console.warn(`[ClosePrices] Missing closes for ${symbol}:`, tfData);
+        }
+      });
+
+      // Warn about symbols we requested but didn't get
+      const missing = syms.filter(s => !prices.has(s));
+      if (missing.length > 0) {
+        console.warn(`[ClosePrices] Missing data for: ${missing.join(", ")}`);
+      }
+
+      // If we got no data at all, don't cache and return null so caller can retry
+      if (prices.size === 0) {
+        console.warn(`[ClosePrices] Got empty response, not caching (will retry on next call)`);
+        return null;
+      }
+
+      console.log(`[ClosePrices] Fetched ${prices.size}/${syms.length} symbols (all timeframes), dates:`, referenceDates);
+
+      const result: MultiTimeframeClosePrices = { referenceDates, prices, fetchedAt: now };
+      multiTimeframeCache = result;
+      return result;
+    } catch (err) {
+      console.error("[ClosePrices] Multi-timeframe fetch failed:", err);
+      return null;
+    } finally {
+      multiTimeframePending = null;
+    }
+  })();
+
+  multiTimeframePending = promise;
+  return promise;
+}
+
+/**
  * Calculate percentage change from previous close.
  *
  * @param currentPrice Current price
@@ -162,11 +272,12 @@ export function getCachedClosePrice(symbol: string): ClosePriceData | null {
 }
 
 /**
- * Clear the cache (useful for testing or forced refresh).
+ * Clear all caches (useful for testing or forced refresh).
  */
 export function clearCache(): void {
   console.log("[ClosePrices] Cache cleared");
   cache.clear();
+  multiTimeframeCache = null;
 }
 
 // Track the last known prevTradingDay to detect date changes
@@ -182,6 +293,7 @@ export function checkAndClearCacheOnDateChange(prevTradingDay: string | null): v
   if (lastKnownPrevTradingDay !== null && lastKnownPrevTradingDay !== prevTradingDay) {
     console.log(`[ClosePrices] Trading day changed from ${lastKnownPrevTradingDay} to ${prevTradingDay}, clearing cache`);
     cache.clear();
+    multiTimeframeCache = null;
   }
   lastKnownPrevTradingDay = prevTradingDay;
 }

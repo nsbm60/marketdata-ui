@@ -17,7 +17,7 @@ import ConnectionStatus from "./components/shared/ConnectionStatus";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
 import TabButtonGroup from "./components/shared/TabButtonGroup";
 import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
-import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort } from "./services/closePrices";
+import { fetchAllTimeframeClosePrices, MultiTimeframeClosePrices, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
 import { buildOsiSymbol, buildTopicSymbolFromYYYYMMDD, formatExpiryYYYYMMDD } from "./utils/options";
@@ -130,26 +130,36 @@ export default function PortfolioPanel() {
   // Throttle to 250ms for consistency
   const optionVersion = useChannelUpdates("option", 250);
 
-  // Close prices for % change display (equities)
-  const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
+  // Close prices for % change display (equities) - all timeframes in one response
+  const [multiClosePrices, setMultiClosePrices] = useState<MultiTimeframeClosePrices | null>(null);
 
   // Option close prices for % change display
   type OptionPriceData = { prevClose: number; todayClose?: number };
   const [optionClosePrices, setOptionClosePrices] = useState<Map<string, OptionPriceData>>(new Map());
 
-  // Fetch close prices for equity positions when positions, timeframe, or connection change
-  // Wait for marketState.timeframes to be loaded to ensure correct date interpretation
-  // Also re-fetch when marketState.lastUpdated changes (visibility change, reconnect, etc.)
+  // Fetch close prices for all equity symbols (includes option underlyings)
+  // Single fetch provides all timeframes - timeframe switching is local
+  // Retry after 2s if we get empty data (server may not be ready)
   useEffect(() => {
-    if (!accountState?.positions || !wsConnected || !marketState?.timeframes?.length) return;
-    const equitySymbols = accountState.positions
-      .filter(p => p.secType === "STK")
-      .map(p => p.symbol);
-    if (equitySymbols.length > 0) {
-      // Pass timeframe for date calculation
-      fetchClosePrices(equitySymbols, timeframe).then(setClosePrices);
-    }
-  }, [accountState?.positions, timeframe, wsConnected, marketState?.timeframes, marketState?.lastUpdated]);
+    if (equitySymbols.length === 0 || !wsConnected) return;
+
+    let retryTimeout: number | undefined;
+
+    fetchAllTimeframeClosePrices(equitySymbols).then((result) => {
+      setMultiClosePrices(result);
+      // If we got null or empty, retry after a delay
+      if (!result || result.prices.size === 0) {
+        console.log("[PortfolioPanel] Close prices empty, retrying in 2s...");
+        retryTimeout = window.setTimeout(() => {
+          fetchAllTimeframeClosePrices(equitySymbols).then(setMultiClosePrices);
+        }, 2000);
+      }
+    });
+
+    return () => {
+      if (retryTimeout) clearTimeout(retryTimeout);
+    };
+  }, [equitySymbols, wsConnected, marketState?.lastUpdated]);
 
   // Fetch close prices for option positions when positions, timeframe, or connection change
   useEffect(() => {
@@ -327,8 +337,9 @@ export default function PortfolioPanel() {
           const optPriceData = optionClosePrices.get(priceKey);
           if (optPriceData?.todayClose) displayPrice = optPriceData.todayClose;
         } else if (p.secType === "STK") {
-          const equityCloseData = closePrices.get(p.symbol);
-          if (equityCloseData?.todayClose) displayPrice = equityCloseData.todayClose;
+          // Use "0d" (today's close) as fallback when no live price
+          const todayClose = multiClosePrices?.prices.get(p.symbol.toUpperCase())?.closes["0d"];
+          if (todayClose) displayPrice = todayClose;
         }
       }
       const contractMultiplier = p.secType === "OPT" ? 100 : 1;
@@ -346,7 +357,7 @@ export default function PortfolioPanel() {
       totalPortfolio: mktValue + cash,
       primaryAccount: account,
     };
-  }, [accountState, equityPrices, optionClosePrices, closePrices]);
+  }, [accountState, equityPrices, optionClosePrices, multiClosePrices]);
 
   return (
     <div style={shell}>
@@ -503,9 +514,11 @@ export default function PortfolioPanel() {
                     <div style={hdrCellRight}>Qty</div>
                     <div style={hdrCellRight}>Last</div>
                     <div style={{ ...hdrCellCenter, gridColumn: "span 2" }}>
-                      {currentTimeframeInfo
-                        ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
-                        : "Change"}
+                      {multiClosePrices?.referenceDates?.[timeframe]
+                        ? `Chg (${formatCloseDateShort(multiClosePrices.referenceDates[timeframe]!)})`
+                        : currentTimeframeInfo
+                          ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
+                          : "Change"}
                     </div>
                     <div style={hdrCellRight}>Mkt Value</div>
                     <div style={hdrCellRight}>Avg Cost</div>
@@ -550,13 +563,13 @@ export default function PortfolioPanel() {
 
                     // Use todayClose as fallback when no live price (after market close / no post-market trades)
                     const optPriceData = p.secType === "OPT" ? optionClosePrices.get(osiKey) : undefined;
-                    const equityCloseData = p.secType === "STK" ? closePrices.get(p.symbol) : undefined;
+                    const equityCloses = p.secType === "STK" ? multiClosePrices?.prices.get(p.symbol.toUpperCase())?.closes : undefined;
                     let displayPrice = lastPrice;
                     if (lastPrice === 0) {
                       if (p.secType === "OPT" && optPriceData?.todayClose) {
                         displayPrice = optPriceData.todayClose;
-                      } else if (p.secType === "STK" && equityCloseData?.todayClose) {
-                        displayPrice = equityCloseData.todayClose;
+                      } else if (p.secType === "STK" && equityCloses?.["0d"]) {
+                        displayPrice = equityCloses["0d"];
                       }
                     }
 
@@ -573,13 +586,14 @@ export default function PortfolioPanel() {
                     // For options, display avg cost per share (divide by 100)
                     const displayAvgCost = p.secType === "OPT" ? p.avgCost / 100 : p.avgCost;
 
-                    // Calculate % and $ change for equities and options
+                    // Calculate % and $ change for equities (using selected timeframe) and options
                     let pctChange: number | undefined;
                     let dollarChange: number | undefined;
                     if (p.secType === "STK") {
-                      if (displayPrice > 0 && equityCloseData?.prevClose && equityCloseData.prevClose > 0) {
-                        pctChange = calcPctChange(displayPrice, equityCloseData.prevClose);
-                        dollarChange = displayPrice - equityCloseData.prevClose;
+                      const prevClose = equityCloses?.[timeframe];
+                      if (displayPrice > 0 && prevClose && prevClose > 0) {
+                        pctChange = calcPctChange(displayPrice, prevClose);
+                        dollarChange = displayPrice - prevClose;
                       }
                     } else if (p.secType === "OPT") {
                       if (displayPrice > 0 && optPriceData?.prevClose && optPriceData.prevClose > 0) {

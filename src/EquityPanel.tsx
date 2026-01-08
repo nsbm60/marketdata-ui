@@ -138,37 +138,20 @@ export default function EquityPanel({
   const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem(LS_TIMEFRAME) ?? "1d");
 
-  // Persist timeframe selection and notify CalcServer when using report data
+  // Persist timeframe selection locally (server embeds all timeframes, no notification needed)
   useEffect(() => {
     localStorage.setItem(LS_TIMEFRAME, timeframe);
-
-    // When using report data, tell CalcServer to use the new timeframe
-    if (USE_REPORT_DATA && wsConnected && watchlistLoaded) {
-      socketHub.sendControl("refresh_watchlist", {
-        target: "calc",
-        name: watchlistName,
-        timeframe,
-      }).then((ack) => {
-        if (ack.ok) {
-          console.log(`[EquityPanel] CalcServer updated to timeframe=${timeframe}`);
-        } else {
-          console.warn(`[EquityPanel] CalcServer timeframe update failed: ${ack.error}`);
-        }
-      }).catch((err) => {
-        console.error("[EquityPanel] Failed to update CalcServer timeframe:", err);
-      });
-    }
-  }, [timeframe, wsConnected, watchlistLoaded, watchlistName]);
+  }, [timeframe]);
 
   // Get current timeframe info for display
   const currentTimeframeInfo = useMemo(() => {
     return marketState?.timeframes?.find(t => t.id === timeframe);
   }, [marketState?.timeframes, timeframe]);
 
-  // Fetch close prices when symbols, timeframe, or connection change
-  // Wait for marketState.timeframes to be loaded to ensure correct date interpretation
-  // Also re-fetch when marketState.lastUpdated changes (visibility change, reconnect, etc.)
+  // Fetch close prices only when NOT using report data (tick-based mode)
+  // Report data already embeds all timeframe changes
   useEffect(() => {
+    if (USE_REPORT_DATA) return; // Report embeds all changes, no separate fetch needed
     if (symbols.length === 0 || !wsConnected || !marketState?.timeframes?.length) return;
     fetchClosePrices(symbols, timeframe).then(setClosePrices);
   }, [symbols.join(","), timeframe, wsConnected, marketState?.timeframes, marketState?.lastUpdated]);
@@ -213,14 +196,11 @@ export default function EquityPanel({
         .then(() => {
           console.log(`[EquityPanel] Saved watchlist '${name}'`);
           setSaving(false);
-          // Notify CalcServer to refresh its WatchlistReportBuilder
+          // Notify CalcServer to refresh its WatchlistReportBuilder with new symbols
           if (USE_REPORT_DATA) {
-            // Get current timeframe from localStorage since we may not have it in closure
-            const currentTimeframe = localStorage.getItem(LS_TIMEFRAME) ?? "1d";
             socketHub.sendControl("refresh_watchlist", {
               target: "calc",
               name,
-              timeframe: currentTimeframe,
             }).then((ack) => {
               if (ack.ok) {
                 console.log(`[EquityPanel] CalcServer refreshed watchlist`);
@@ -311,18 +291,20 @@ export default function EquityPanel({
   /* ---------------- view model ---------------- */
   const list = useMemo(() => {
     if (USE_REPORT_DATA) {
-      // Report-based: data comes pre-computed from CalcServer
+      // Report-based: data comes pre-computed from CalcServer for all timeframes
       return symbols.map((s) => {
         const row = reportRows.get(s);
+        // Get change for currently selected timeframe
+        const tfChange = row?.changes?.[timeframe];
         return {
           symbol: s,
           last: row?.last,
           bid: row?.bid,
           ask: row?.ask,
           updatedAt: row?.timestamp,
-          // Pre-computed from CalcServer
-          change: row?.change,
-          pctChange: row?.pctChange,
+          // Pre-computed from CalcServer for the selected timeframe
+          change: tfChange?.change,
+          pctChange: tfChange?.pct,
         };
       });
     } else {
@@ -341,7 +323,7 @@ export default function EquityPanel({
         };
       });
     }
-  }, [symbols, prices, reportRows]);
+  }, [symbols, prices, reportRows, timeframe]);
 
   const stats = useMemo(() => {
     let withQuote = 0, withTrade = 0;
@@ -459,8 +441,8 @@ export default function EquityPanel({
               <Th>Symbol</Th>
               <Th center>Last</Th>
               <Th center colSpan={2}>
-                {USE_REPORT_DATA && report?.referenceDate
-                  ? `Chg (${formatCloseDateShort(report.referenceDate)})`
+                {USE_REPORT_DATA && report?.referenceDates?.[timeframe]
+                  ? `Chg (${formatCloseDateShort(report.referenceDates[timeframe]!)})`
                   : currentTimeframeInfo
                     ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
                     : "Change"}

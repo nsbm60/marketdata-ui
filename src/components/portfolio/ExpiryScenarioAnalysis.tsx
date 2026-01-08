@@ -195,6 +195,14 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
     return undefined;
   };
 
+  // Border style for scenario columns - bold borders around 0% column (index 3)
+  const scenarioBorder = (idx: number) => {
+    const zeroIdx = DEFAULT_SCENARIOS.indexOf(0);
+    if (idx === zeroIdx) return `2px solid ${light.border.secondary}`;  // Left border of 0%
+    if (idx === zeroIdx + 1) return `2px solid ${light.border.secondary}`;  // Left border of column after 0%
+    return `1px solid ${light.border.primary}`;
+  };
+
   if (analysisInput.positions.length === 0 && analysisInput.equityPositions.length === 0) {
     return <div style={emptyStyle}>No positions to analyze</div>;
   }
@@ -235,7 +243,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
             {DEFAULT_SCENARIOS.map((pct, i) => {
               const price = result.currentPrice * (1 + pct);
               return (
-                <div key={pct} style={{ ...scenarioHeaderCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                <div key={pct} style={{ ...scenarioHeaderCell, borderLeft: scenarioBorder(i) }}>
                   <div style={{ fontWeight: 600, color: pct === 0 ? semantic.info.text : undefined }}>
                     {fmtPercent(pct)}
                   </div>
@@ -319,7 +327,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                         const adjustedShares = projectedPrice > 0 ? Math.round(sv.value / projectedPrice) : pos.quantity;
                         const sharesChanged = adjustedShares !== pos.quantity;
                         return (
-                          <div key={i} style={{ ...valueCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                          <div key={i} style={{ ...valueCell, borderLeft: scenarioBorder(i) }}>
                             <div style={{ color: sharesChanged ? semantic.info.text : undefined, fontWeight: sharesChanged ? 600 : undefined }}>
                               {adjustedShares > 0 ? "+" : ""}{adjustedShares}sh
                             </div>
@@ -332,7 +340,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                         // For cash: show cash amount with color coding
                         const hasCash = sv.value !== 0;
                         return (
-                          <div key={i} style={{ ...valueCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                          <div key={i} style={{ ...valueCell, borderLeft: scenarioBorder(i) }}>
                             <div style={{
                               color: hasCash ? (sv.value > 0 ? pnl.positive : pnl.negative) : light.text.muted,
                               fontWeight: hasCash ? 600 : undefined
@@ -347,7 +355,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                           ? Math.abs(sv.value) / (Math.abs(pos.quantity) * 100)
                           : 0;
                         return (
-                          <div key={i} style={{ ...valueCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                          <div key={i} style={{ ...valueCell, borderLeft: scenarioBorder(i) }}>
                             <div>${fmt(sv.value)}</div>
                             <div style={{ color: light.text.light, fontSize: fonts.table.small }}>
                               @${optionPrice.toFixed(2)}
@@ -369,7 +377,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                   ${fmt(expiryRow.subtotals[0]?.currentValue ?? 0)}
                 </div>
                 {expiryRow.subtotals.map((sv, i) => (
-                  <div key={i} style={{ ...subtotalCell, borderLeft: `1px solid ${light.border.primary}` }}>
+                  <div key={i} style={{ ...subtotalCell, borderLeft: scenarioBorder(i) }}>
                     <div style={{ fontWeight: 600 }}>${fmt(sv.total)}</div>
                     <div style={{ color: valueColor(sv.pnl), fontWeight: 600 }}>
                       {sv.pnl >= 0 ? "+" : ""}{fmt(sv.pnl)}
@@ -392,14 +400,18 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
               <div style={{ ...grandTotalCell, borderLeft: `1px solid ${semantic.highlight.blueBorder}` }}>
                 ${fmt(result.expiryRows[result.expiryRows.length - 1].subtotals[0]?.currentValue ?? 0)}
               </div>
-              {result.expiryRows[result.expiryRows.length - 1].subtotals.map((sv, i) => (
-                <div key={i} style={{ ...grandTotalCell, borderLeft: `1px solid ${semantic.highlight.blueBorder}` }}>
-                  <div style={{ fontWeight: 700 }}>${fmt(sv.total)}</div>
-                  <div style={{ color: valueColor(sv.pnl), fontWeight: 700 }}>
-                    {sv.pnl >= 0 ? "+" : ""}{fmt(sv.pnl)}
+              {result.expiryRows[result.expiryRows.length - 1].subtotals.map((sv, i) => {
+                const zeroIdx = DEFAULT_SCENARIOS.indexOf(0);
+                const isZeroBorder = i === zeroIdx || i === zeroIdx + 1;
+                return (
+                  <div key={i} style={{ ...grandTotalCell, borderLeft: isZeroBorder ? `2px solid ${semantic.info.text}` : `1px solid ${semantic.highlight.blueBorder}` }}>
+                    <div style={{ fontWeight: 700 }}>${fmt(sv.total)}</div>
+                    <div style={{ color: valueColor(sv.pnl), fontWeight: 700 }}>
+                      {sv.pnl >= 0 ? "+" : ""}{fmt(sv.pnl)}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -454,7 +466,7 @@ const resultHeader: React.CSSProperties = {
   fontSize: fonts.table.header,
 };
 
-const gridCols = "minmax(90px, 120px) 55px repeat(7, minmax(52px, 1fr))";
+const gridCols = "110px 62px repeat(7, 68px)";
 
 const scenarioHeaderRow: React.CSSProperties = {
   display: "grid",
