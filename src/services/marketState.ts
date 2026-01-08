@@ -67,7 +67,7 @@ async function initialize() {
 
   // Refresh on WebSocket reconnect
   socketHub.onConnect(() => {
-    console.log("[MarketState] WebSocket reconnected, refreshing and clearing caches...");
+    console.log("[MarketState] WebSocket reconnected, clearing caches...");
     clearClosePricesCache(); // Clear stale close prices on reconnect
     refetchMarketState();
   });
@@ -75,20 +75,14 @@ async function initialize() {
   // Refresh when page becomes visible (e.g., after sleeping overnight)
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && initialized) {
-      console.log("[MarketState] Page visible, refreshing and clearing caches...");
+      console.log("[MarketState] Page visible, clearing caches...");
       clearClosePricesCache(); // Clear stale close prices on visibility change
       refetchMarketState();
     }
   });
 
-  // Periodic refresh every 5 minutes to catch session transitions
-  // (backup in case cal.market.* events are missed)
-  setInterval(() => {
-    if (initialized) {
-      console.log("[MarketState] Periodic refresh...");
-      refetchMarketState();
-    }
-  }, 5 * 60 * 1000);
+  // No periodic refresh needed - server embeds all timeframes in close prices responses
+  // Calendar events (cal.market.open/close) handle session transitions
 
   // Query current state with retry on failure
   let retries = 3;
@@ -151,11 +145,11 @@ function handleCalendarEvent(tick: TickEnvelope) {
 }
 
 async function refetchMarketState() {
-  console.log("[MarketState] Re-fetching market state after session transition...");
   try {
     const ack = await socketHub.sendControl("market_state", {}, { timeoutMs: 5000 });
     if (ack.ok && ack.data) {
       const d = (ack.data as any).data || ack.data;
+      const prevState = currentState?.state;
       currentState = {
         state: d.state as SessionState,
         isTradingDay: d.isTradingDay ?? true,
@@ -166,8 +160,10 @@ async function refetchMarketState() {
         timeframes: d.timeframes ?? [],
         lastUpdated: Date.now(),
       };
-      console.log("[MarketState] Updated:", currentState.state,
-        "timeframes:", currentState.timeframes.map((t: TimeframeOption) => `${t.id}=${t.date}`).join(", "));
+      // Only log if state actually changed
+      if (prevState !== currentState.state) {
+        console.log("[MarketState] Session changed:", prevState, "→", currentState.state);
+      }
       // Clear close prices cache if trading day changed
       checkAndClearCacheOnDateChange(currentState.prevTradingDay);
       notify();
