@@ -6,19 +6,12 @@ import TradeButton, { tradeButtonContainer } from "./components/shared/TradeButt
 import Select from "./components/shared/Select";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
 import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
-import { fetchClosePrices, ClosePriceData, calcPctChange, formatCloseDateShort } from "./services/closePrices";
-import { useMarketState, TimeframeOption } from "./services/marketState";
-import { useThrottledMarketPrices } from "./hooks/useMarketData";
-import { useWatchlistReport, WatchlistReportRow } from "./hooks/useWatchlistReport";
-import { PriceData } from "./services/MarketDataBus";
+import { formatCloseDateShort } from "./services/closePrices";
+import { useMarketState } from "./services/marketState";
+import { useWatchlistReport } from "./hooks/useWatchlistReport";
 import { isNum, fmtPrice } from "./utils/formatters";
 import { useAppState } from "./state/useAppState";
 import { light, semantic } from "./theme";
-
-// Feature flag for report-based data (vs tick-based)
-// Set to true to use pre-computed reports from CalcServer
-// NOTE: Requires WatchlistReportBuilder running in CalcServer
-const USE_REPORT_DATA = true;
 
 const LS_INPUT = "wl.input";
 const LS_TIMEFRAME = "wl.timeframe";
@@ -133,9 +126,8 @@ export default function EquityPanel({
     setShowTradeTicket(true);
   };
 
-  /* ---------------- MARKET STATE & CLOSE PRICES ---------------- */
+  /* ---------------- MARKET STATE ---------------- */
   const marketState = useMarketState();
-  const [closePrices, setClosePrices] = useState<Map<string, ClosePriceData>>(new Map());
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem(LS_TIMEFRAME) ?? "1d");
 
   // Persist timeframe selection locally (server embeds all timeframes, no notification needed)
@@ -148,14 +140,6 @@ export default function EquityPanel({
     return marketState?.timeframes?.find(t => t.id === timeframe);
   }, [marketState?.timeframes, timeframe]);
 
-  // Fetch close prices only when NOT using report data (tick-based mode)
-  // Report data already embeds all timeframe changes
-  useEffect(() => {
-    if (USE_REPORT_DATA) return; // Report embeds all changes, no separate fetch needed
-    if (symbols.length === 0 || !wsConnected || !marketState?.timeframes?.length) return;
-    fetchClosePrices(symbols, timeframe).then(setClosePrices);
-  }, [symbols.join(","), timeframe, wsConnected, marketState?.timeframes, marketState?.lastUpdated]);
-
   /* ---------------- WS status for display ---------------- */
   const wsStatus = wsConnected
     ? "open"
@@ -163,26 +147,12 @@ export default function EquityPanel({
       ? "connecting"
       : "closed";
 
-  /* ---------------- MARKET DATA via MarketDataBus OR Reports ---------------- */
-  // When paused, pass empty array to avoid subscriptions
-  // Throttle to 250ms (4 updates/sec) for readability
-  const activeSymbols = paused ? [] : symbols;
-
-  // Tick-based approach (traditional)
-  const tickPrices = useThrottledMarketPrices(
-    USE_REPORT_DATA ? [] : activeSymbols,
-    "equity",
-    250
-  );
-
-  // Report-based approach (pre-computed from CalcServer)
+  /* ---------------- MARKET DATA via CalcServer Report ---------------- */
+  // Pre-computed data from CalcServer's WatchlistReportBuilder
   const { rowsBySymbol: reportRows, report } = useWatchlistReport(
     watchlistName,
-    USE_REPORT_DATA && !paused && wsConnected
+    !paused && wsConnected
   );
-
-  // Unified prices map for downstream use
-  const prices = USE_REPORT_DATA ? new Map<string, PriceData>() : tickPrices;
 
   /* ---------------- actions ---------------- */
   // Debounced save to backend
@@ -197,20 +167,18 @@ export default function EquityPanel({
           console.log(`[EquityPanel] Saved watchlist '${name}'`);
           setSaving(false);
           // Notify CalcServer to refresh its WatchlistReportBuilder with new symbols
-          if (USE_REPORT_DATA) {
-            socketHub.sendControl("refresh_watchlist", {
-              target: "calc",
-              name,
-            }).then((ack) => {
-              if (ack.ok) {
-                console.log(`[EquityPanel] CalcServer refreshed watchlist`);
-              } else {
-                console.warn(`[EquityPanel] CalcServer refresh failed: ${ack.error}`);
-              }
-            }).catch((err) => {
-              console.error("[EquityPanel] Failed to refresh watchlist on CalcServer:", err);
-            });
-          }
+          socketHub.sendControl("refresh_watchlist", {
+            target: "calc",
+            name,
+          }).then((ack) => {
+            if (ack.ok) {
+              console.log(`[EquityPanel] CalcServer refreshed watchlist`);
+            } else {
+              console.warn(`[EquityPanel] CalcServer refresh failed: ${ack.error}`);
+            }
+          }).catch((err) => {
+            console.error("[EquityPanel] Failed to refresh watchlist on CalcServer:", err);
+          });
         })
         .catch((err) => {
           console.error("[EquityPanel] Failed to save watchlist:", err);
@@ -289,41 +257,24 @@ export default function EquityPanel({
   };
 
   /* ---------------- view model ---------------- */
+  // Data comes pre-computed from CalcServer for all timeframes
   const list = useMemo(() => {
-    if (USE_REPORT_DATA) {
-      // Report-based: data comes pre-computed from CalcServer for all timeframes
-      return symbols.map((s) => {
-        const row = reportRows.get(s);
-        // Get change for currently selected timeframe
-        const tfChange = row?.changes?.[timeframe];
-        return {
-          symbol: s,
-          last: row?.last,
-          bid: row?.bid,
-          ask: row?.ask,
-          updatedAt: row?.timestamp,
-          // Pre-computed from CalcServer for the selected timeframe
-          change: tfChange?.change,
-          pctChange: tfChange?.pct,
-        };
-      });
-    } else {
-      // Tick-based: raw prices, change calculated locally
-      return symbols.map((s) => {
-        const price = prices.get(s);
-        return {
-          symbol: s,
-          last: price?.last,
-          bid: price?.bid,
-          ask: price?.ask,
-          updatedAt: price?.timestamp,
-          // Change calculated below from closePrices
-          change: undefined as number | undefined,
-          pctChange: undefined as number | undefined,
-        };
-      });
-    }
-  }, [symbols, prices, reportRows, timeframe]);
+    return symbols.map((s) => {
+      const row = reportRows.get(s);
+      // Get change for currently selected timeframe
+      const tfChange = row?.changes?.[timeframe];
+      return {
+        symbol: s,
+        last: row?.last,
+        bid: row?.bid,
+        ask: row?.ask,
+        updatedAt: row?.timestamp,
+        // Pre-computed from CalcServer for the selected timeframe
+        change: tfChange?.change,
+        pctChange: tfChange?.pct,
+      };
+    });
+  }, [symbols, reportRows, timeframe]);
 
   const stats = useMemo(() => {
     let withQuote = 0, withTrade = 0;
@@ -441,7 +392,7 @@ export default function EquityPanel({
               <Th>Symbol</Th>
               <Th center>Last</Th>
               <Th center colSpan={2}>
-                {USE_REPORT_DATA && report?.referenceDates?.[timeframe]
+                {report?.referenceDates?.[timeframe]
                   ? `Chg (${formatCloseDateShort(report.referenceDates[timeframe]!)})`
                   : currentTimeframeInfo
                     ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
@@ -469,24 +420,9 @@ export default function EquityPanel({
                 const stale = isStale(r.updatedAt, STALE_MS);
                 const isSelected = r.symbol === selectedSym;
 
-                // Use pre-computed changes from report, or calculate from closePrices
-                let pctChange: number | undefined;
-                let dollarChange: number | undefined;
-
-                if (USE_REPORT_DATA && isNum(r.pctChange)) {
-                  // Report-based: use pre-computed values
-                  pctChange = r.pctChange;
-                  dollarChange = r.change;
-                } else {
-                  // Tick-based: calculate from closePrices
-                  const closeData = closePrices.get(r.symbol);
-                  pctChange = (closeData && isNum(lastVal))
-                    ? calcPctChange(lastVal!, closeData.prevClose)
-                    : undefined;
-                  dollarChange = (closeData && isNum(lastVal))
-                    ? lastVal! - closeData.prevClose
-                    : undefined;
-                }
+                // Use pre-computed changes from CalcServer report
+                const pctChange = isNum(r.pctChange) ? r.pctChange : undefined;
+                const dollarChange = isNum(r.change) ? r.change : undefined;
                 return (
                   <tr
                     key={r.symbol}

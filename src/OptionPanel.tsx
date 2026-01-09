@@ -3,15 +3,11 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { socketHub } from "./ws/SocketHub";
 import OptionTradeTicket from "./components/OptionTradeTicket";
 import TradeButton, { tradeButtonContainerCompact } from "./components/shared/TradeButton";
-import { useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 import { useOptionsReport } from "./hooks/useOptionsReport";
 import { isNum, fmtPrice, fmtGreek } from "./utils/formatters";
-import { parseOptionSymbol, formatExpiryWithDTE } from "./utils/options";
+import { formatExpiryWithDTE } from "./utils/options";
 import Select from "./components/shared/Select";
 import { light, dark, semantic } from "./theme";
-
-// Feature flag: use pre-computed report from CalcServer instead of per-tick updates
-const USE_REPORT_DATA = true;
 
 /** ---------- Component ---------- */
 export default function OptionPanel({ ticker }: { ticker?: string }) {
@@ -38,15 +34,11 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
   const [ticketAccount] = useState("DU333427");
   const [ticketMarketData, setTicketMarketData] = useState<any>({});
 
-  // Listen to option channel updates (triggers re-render on any option price change)
-  // Throttle to 250ms (4 updates/sec) for readability
-  const optionVersion = useChannelUpdates("option", 250);
-
-  // Report-based data (when USE_REPORT_DATA is enabled)
+  // Pre-computed options data from CalcServer
   const { report: optionsReport, loaded: reportLoaded } = useOptionsReport(
     underlying,
     selectedExpiry || "",
-    USE_REPORT_DATA && !!underlying && !!selectedExpiry
+    !!underlying && !!selectedExpiry
   );
 
   // Load expiries when ticker changes
@@ -111,16 +103,14 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
     });
 
     // Request CalcServer to start OptionsReportBuilder for this chain
-    if (USE_REPORT_DATA) {
-      socketHub.send({
-        type: "control",
-        target: "calc",
-        op: "start_options_report",
-        id: `start_options_report_${Date.now()}`,
-        underlying: und,
-        expiry: expiry,
-      });
-    }
+    socketHub.send({
+      type: "control",
+      target: "calc",
+      op: "start_options_report",
+      id: `start_options_report_${Date.now()}`,
+      underlying: und,
+      expiry: expiry,
+    });
   };
 
   // Handle control messages (find_expiries, get_chain responses)
@@ -181,106 +171,32 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
     return () => socketHub.offMessage(onMsg);
   }, [ticker, limit]);
 
-  // Build rows for SELECTED expiry - from report or individual ticks
+  // Build rows from CalcServer's OptionsReport
   const rows = useMemo(() => {
-    if (!ticker || !selectedExpiry) return [];
+    if (!ticker || !selectedExpiry || !optionsReport || !reportLoaded) return [];
 
-    // Use report data if feature flag is enabled and report is loaded
-    if (USE_REPORT_DATA && optionsReport && reportLoaded) {
-      return optionsReport.rows.map((r) => ({
-        strike: r.strike,
-        cLast: r.call?.last,
-        cBid: r.call?.bid,
-        cMid: r.call?.mid,
-        cAsk: r.call?.ask,
-        cDelta: r.call?.delta,
-        cGamma: r.call?.gamma,
-        cTheta: r.call?.theta,
-        cVega: r.call?.vega,
-        cIv: r.call?.iv,
-        pLast: r.put?.last,
-        pBid: r.put?.bid,
-        pMid: r.put?.mid,
-        pAsk: r.put?.ask,
-        pDelta: r.put?.delta,
-        pGamma: r.put?.gamma,
-        pTheta: r.put?.theta,
-        pVega: r.put?.vega,
-        pIv: r.put?.iv,
-      }));
-    }
-
-    // Fallback: build from individual ticks via MarketDataBus
-    const optionPrices = getChannelPrices("option");
-
-    const strikeMap = new Map<number, { call?: PriceData; put?: PriceData }>();
-
-    for (const [symbol, price] of optionPrices) {
-      const p = parseOptionSymbol(symbol);
-      if (!p) continue;
-      if (p.underlying !== ticker.toUpperCase()) continue;
-      if (p.expiration !== selectedExpiry) continue;
-
-      const at = strikeMap.get(p.strike) || {};
-      if (p.right === "call") at.call = price;
-      else at.put = price;
-      strikeMap.set(p.strike, at);
-    }
-
-    return Array.from(strikeMap.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([strike, sideMap]) => {
-        // Calls prices
-        const cl = num(sideMap.call?.last);
-        const cb = num(sideMap.call?.bid);
-        const ca = num(sideMap.call?.ask);
-        const cm = mid(cb, ca, cl);
-
-        // Puts prices
-        const pl = num(sideMap.put?.last);
-        const pb = num(sideMap.put?.bid);
-        const pa = num(sideMap.put?.ask);
-        const pm = mid(pb, pa, pl);
-
-        // Call Greeks (from extended price data)
-        const callData = sideMap.call as any;
-        const cDelta = num(callData?.delta);
-        const cGamma = num(callData?.gamma);
-        const cTheta = num(callData?.theta);
-        const cVega = num(callData?.vega);
-        const cIv = num(callData?.iv);
-
-        // Put Greeks
-        const putData = sideMap.put as any;
-        const pDelta = num(putData?.delta);
-        const pGamma = num(putData?.gamma);
-        const pTheta = num(putData?.theta);
-        const pVega = num(putData?.vega);
-        const pIv = num(putData?.iv);
-
-        return {
-          strike,
-          cLast: cl,
-          cBid: cb,
-          cMid: cm,
-          cAsk: ca,
-          cDelta,
-          cGamma,
-          cTheta,
-          cVega,
-          cIv,
-          pLast: pl,
-          pBid: pb,
-          pMid: pm,
-          pAsk: pa,
-          pDelta,
-          pGamma,
-          pTheta,
-          pVega,
-          pIv,
-        };
-      });
-  }, [ticker, selectedExpiry, optionVersion, optionsReport, reportLoaded]);
+    return optionsReport.rows.map((r) => ({
+      strike: r.strike,
+      cLast: r.call?.last,
+      cBid: r.call?.bid,
+      cMid: r.call?.mid,
+      cAsk: r.call?.ask,
+      cDelta: r.call?.delta,
+      cGamma: r.call?.gamma,
+      cTheta: r.call?.theta,
+      cVega: r.call?.vega,
+      cIv: r.call?.iv,
+      pLast: r.put?.last,
+      pBid: r.put?.bid,
+      pMid: r.put?.mid,
+      pAsk: r.put?.ask,
+      pDelta: r.put?.delta,
+      pGamma: r.put?.gamma,
+      pTheta: r.put?.theta,
+      pVega: r.put?.vega,
+      pIv: r.put?.iv,
+    }));
+  }, [ticker, selectedExpiry, optionsReport, reportLoaded]);
 
   /** ---------- Render ---------- */
   return (
