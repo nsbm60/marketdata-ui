@@ -54,7 +54,7 @@ interface AppStateContextValue {
   reportError: (error: string) => void;
   retry: () => void;
 
-  // IB Connection actions (called by PortfolioPanel when it gets IB status)
+  // IB Connection actions (called by IBPanel when it gets IB status)
   setIbConnected: (connected: boolean) => void;
 }
 

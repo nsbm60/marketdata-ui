@@ -2,7 +2,7 @@
 import { useState } from "react";
 import EquityPanel from "./EquityPanel";
 import OptionPanel from "./OptionPanel";
-import PortfolioPanel from "./PortfolioPanel";
+import IBPanel from "./IBPanel";
 import FidelityPanel from "./FidelityPanel";
 import ChartPanel from "./ChartPanel";
 import ConnectionStatus from "./components/shared/ConnectionStatus";
@@ -110,7 +110,7 @@ export default function TwoPane() {
             display: activeTab === "portfolio" ? "block" : "none",
           } as any}
         >
-          <PortfolioPanel />
+          <IBPanel />
         </div>
 
         {/* Fidelity tab content — also kept mounted */}

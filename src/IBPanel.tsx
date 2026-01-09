@@ -1,4 +1,4 @@
-// src/PortfolioPanel.tsx
+// src/IBPanel.tsx
 import { useEffect, useState, useMemo } from "react";
 import { socketHub } from "./ws/SocketHub";
 import TradeTicket from "./components/TradeTicket";
@@ -35,7 +35,7 @@ const defaultTimeframes: TimeframeOption[] = [
   { id: "1m", date: "", label: "-1m" },
 ];
 
-export default function PortfolioPanel() {
+export default function IBPanel() {
   // Portfolio data and IB connection state
   const {
     accountState,
