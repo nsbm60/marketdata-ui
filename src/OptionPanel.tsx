@@ -320,7 +320,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
             <div style={stickyHeader as any}>
               <div style={hdrRow1 as any}>
                 <div style={{ ...thBlock, textAlign: "center" } as any}>Calls</div>
-                <div style={{ ...thBlock, textAlign: "center" } as any}>Strike</div>
+                <div style={{ ...thBlock, textAlign: "center", background: "#e8f4f8" } as any}>Strike</div>
                 <div style={{ ...thBlock, textAlign: "center" } as any}>Puts</div>
               </div>
               {/* Level 2 header */}
@@ -337,7 +337,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                   <div style={subTh as any}>IV</div>
                   <div style={subTh as any}>OI</div>
                 </div>
-                <div style={subTh as any}>{/* strike subheader empty */}</div>
+                <div style={{ ...subTh, background: "#e8f4f8" } as any}>{/* strike subheader empty */}</div>
                 <div style={subgrid10 as any}>
                   <div style={subTh as any}>OI</div>
                   <div style={subTh as any}>Last</div>
@@ -410,7 +410,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtOI(r.cOI)}</div>
 
                       {/* Strike */}
-                      <div style={{ ...baseCell, textAlign: "center", fontWeight: 700 }}>
+                      <div style={{ ...baseCell, ...strikeCell }}>
                         {fmtPrice(r.strike)}
                       </div>
 
@@ -629,6 +629,12 @@ const td = {
   border: `1px solid ${light.border.primary}`,
   borderRadius: 0,
   background: light.bg.primary,
+};
+
+const strikeCell = {
+  textAlign: "center" as const,
+  fontWeight: 700,
+  background: "#e8f4f8", // Pastel blue
 };
 
 const atmDivider = {
