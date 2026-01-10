@@ -784,7 +784,7 @@ export default function FidelityPanel() {
 /* Styles */
 const shell: React.CSSProperties = { display: "flex", flexDirection: "column", height: "100%", color: light.text.primary, background: light.bg.primary };
 const header: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${light.border.primary}`, background: light.bg.primary };
-const body: React.CSSProperties = { flex: 1, overflow: "auto", padding: "12px 14px", background: light.bg.muted };
+const body: React.CSSProperties = { flex: 1, overflow: "hidden", padding: "12px 14px", background: light.bg.muted };
 const summary: React.CSSProperties = { fontSize: 11, color: light.text.secondary, marginBottom: 10 };
 const section: React.CSSProperties = { background: light.bg.primary, border: `1px solid ${light.border.primary}`, borderRadius: 8, overflow: "hidden" };
 const tabBar: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: light.bg.tertiary, borderBottom: `1px solid ${light.border.primary}`, maxWidth: 745 };

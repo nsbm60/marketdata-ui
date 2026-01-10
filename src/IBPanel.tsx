@@ -24,8 +24,10 @@ import { buildOsiSymbol, buildTopicSymbolFromYYYYMMDD, formatExpiryYYYYMMDD } fr
 import { usePortfolioData } from "./hooks/usePortfolioData";
 import { useTradeTicket } from "./hooks/useTradeTicket";
 import { useAppState } from "./state/useAppState";
-import { usePortfolioOptionsReports, PortfolioOptionPosition } from "./hooks/usePortfolioOptionsReports";
+import { usePortfolioOptionsReports, PortfolioOptionPosition, OptionGreeks } from "./hooks/usePortfolioOptionsReports";
+import { usePositionsReport, ReportPosition } from "./hooks/usePositionsReport";
 import type { TimeframeOption } from "./services/marketState";
+import type { IbPosition } from "./types/portfolio";
 import { light, semantic, table as tableTheme } from "./theme";
 
 // Default timeframes used when marketState hasn't loaded yet
@@ -34,6 +36,52 @@ const defaultTimeframes: TimeframeOption[] = [
   { id: "1w", date: "", label: "-1w" },
   { id: "1m", date: "", label: "-1m" },
 ];
+
+/**
+ * Convert ReportPosition to IbPosition format for compatibility with existing components.
+ */
+function reportPositionToIbPosition(rp: ReportPosition): IbPosition {
+  return {
+    account: rp.accountNumber || "",
+    symbol: rp.symbol,
+    secType: rp.secType,
+    currency: "USD",
+    quantity: rp.quantity,
+    avgCost: rp.avgCost,
+    lastUpdated: "",
+    // Option fields
+    strike: rp.strike,
+    expiry: rp.expiry,
+    right: rp.right,
+  };
+}
+
+/**
+ * Build a Greeks map from ReportPosition array for OptionsAnalysisTable.
+ * Key format: "UNDERLYING:YYYYMMDD:C/P:STRIKE"
+ */
+function buildGreeksMapFromReport(positions: ReportPosition[]): Map<string, OptionGreeks> {
+  const map = new Map<string, OptionGreeks>();
+
+  for (const p of positions) {
+    if (p.secType !== "OPT" || !p.expiry || !p.right || p.strike === undefined) continue;
+
+    // Key format matches usePortfolioOptionsReports: "UNDERLYING:YYYYMMDD:C/P:STRIKE"
+    const key = `${p.symbol.toUpperCase()}:${p.expiry}:${p.right}:${p.strike}`;
+
+    map.set(key, {
+      delta: p.delta ?? null,
+      gamma: p.gamma ?? null,
+      theta: p.theta ?? null,
+      vega: p.vega ?? null,
+      iv: p.iv ?? null,
+      last: p.currentPrice ?? null,
+      theo: null, // Report doesn't include theo currently
+    });
+  }
+
+  return map;
+}
 
 export default function IBPanel() {
   // Portfolio data and IB connection state
@@ -49,6 +97,14 @@ export default function IBPanel() {
     setShowErrors,
     clearErrors,
   } = usePortfolioData();
+
+  // Server-computed positions report (IB + Fidelity combined with Greeks/P&L)
+  const {
+    ibPositions: reportIbPositions,
+    summary: reportSummary,
+    loading: reportLoading,
+    version: reportVersion,
+  } = usePositionsReport(true);
 
   // Trade ticket UI state
   const {
@@ -239,6 +295,31 @@ export default function IBPanel() {
 
   // Subscribe to OptionsReportBuilders for portfolio options to get Greeks
   const { greeksMap: portfolioGreeksMap, version: greeksVersion, subscribedContracts } = usePortfolioOptionsReports(portfolioOptionPositions);
+
+  // Convert report positions to IbPosition format for compatibility with existing components
+  const reportPositionsAsIb = useMemo((): IbPosition[] => {
+    if (!reportIbPositions || reportIbPositions.length === 0) return [];
+    return reportIbPositions.map(reportPositionToIbPosition);
+  }, [reportIbPositions]);
+
+  // Build Greeks map from report data (more reliable than streaming when available)
+  const reportGreeksMap = useMemo(() => {
+    if (!reportIbPositions || reportIbPositions.length === 0) return new Map<string, OptionGreeks>();
+    return buildGreeksMapFromReport(reportIbPositions);
+  }, [reportIbPositions]);
+
+  // Combine Greeks maps: prefer report data, fall back to streaming
+  const combinedGreeksMap = useMemo(() => {
+    const combined = new Map<string, OptionGreeks>(portfolioGreeksMap);
+    // Overlay report Greeks (they include computed values from CalcServer)
+    for (const [key, greeks] of reportGreeksMap) {
+      combined.set(key, greeks);
+    }
+    return combined;
+  }, [portfolioGreeksMap, reportGreeksMap]);
+
+  // Use report version if available, otherwise use streaming version
+  const effectiveGreeksVersion = reportVersion > 0 ? reportVersion : greeksVersion;
 
   // Helper to send option subscriptions (used on initial mount and reconnect)
   const sendOptionSubscriptions = (symbols: string[]) => {
@@ -722,9 +803,9 @@ export default function IBPanel() {
                     <OptionsAnalysisTable
                       positions={accountState.positions}
                       equityPrices={equityPrices}
-                      greeksMap={portfolioGreeksMap}
-                      greeksVersion={greeksVersion}
-                      subscribedPairs={`${subscribedContracts} contracts`}
+                      greeksMap={combinedGreeksMap}
+                      greeksVersion={effectiveGreeksVersion}
+                      subscribedPairs={`${subscribedContracts} contracts | Report: ${reportIbPositions?.length ?? 0} positions`}
                     />
                   </div>
                 )}
@@ -735,8 +816,8 @@ export default function IBPanel() {
                     <ExpiryScenarioAnalysis
                       positions={accountState.positions}
                       equityPrices={equityPrices}
-                      greeksMap={portfolioGreeksMap}
-                      greeksVersion={greeksVersion}
+                      greeksMap={combinedGreeksMap}
+                      greeksVersion={effectiveGreeksVersion}
                     />
                   </div>
                 )}

@@ -267,9 +267,10 @@ export function useChartData(
   }, [symbol, timeframe, enabled, bars.length]); // Re-subscribe when symbol, timeframe, or bars change
 
   // Stop candle report on unmount or symbol/timeframe change
+  // Only send stop request if we actually started a report (reportTopicRef is set)
   useEffect(() => {
     return () => {
-      if (symbolRef.current && timeframeRef.current) {
+      if (reportTopicRef.current && symbolRef.current && timeframeRef.current) {
         // Send stop request (fire and forget)
         socketHub.send({
           type: "control",
@@ -279,6 +280,7 @@ export function useChartData(
           symbol: symbolRef.current,
           timeframe: timeframeRef.current,
         });
+        reportTopicRef.current = undefined;
       }
     };
   }, [symbol, timeframe]);
