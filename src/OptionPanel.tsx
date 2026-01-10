@@ -24,6 +24,9 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
   // Row selection (expiration + strike)
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
+  // Open interest by strike (from get_chain response)
+  const [openInterest, setOpenInterest] = useState<Map<number, { call?: number; put?: number }>>(new Map());
+
   // Trade ticket state
   const [showTradeTicket, setShowTradeTicket] = useState(false);
   const [ticketUnderlying, setTicketUnderlying] = useState("");
@@ -158,6 +161,26 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
           if (data.strikes_below !== undefined) {
             setAtmStrikesBelow(Number(data.strikes_below) || 0);
           }
+
+          // Extract open interest from contracts
+          if (Array.isArray(data.contracts)) {
+            const oiMap = new Map<number, { call?: number; put?: number }>();
+            for (const c of data.contracts) {
+              const strike = Number(c.strike);
+              const oi = c.open_interest;
+              const type = c.type; // "call" or "put"
+              if (!oiMap.has(strike)) {
+                oiMap.set(strike, {});
+              }
+              const entry = oiMap.get(strike)!;
+              if (type === "call") {
+                entry.call = oi;
+              } else if (type === "put") {
+                entry.put = oi;
+              }
+            }
+            setOpenInterest(oiMap);
+          }
         }
       }
 
@@ -175,28 +198,33 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
   const rows = useMemo(() => {
     if (!ticker || !selectedExpiry || !optionsReport || !reportLoaded) return [];
 
-    return optionsReport.rows.map((r) => ({
-      strike: r.strike,
-      cLast: r.call?.last,
-      cBid: r.call?.bid,
-      cMid: r.call?.mid,
-      cAsk: r.call?.ask,
-      cDelta: r.call?.delta,
-      cGamma: r.call?.gamma,
-      cTheta: r.call?.theta,
-      cVega: r.call?.vega,
-      cIv: r.call?.iv,
-      pLast: r.put?.last,
-      pBid: r.put?.bid,
-      pMid: r.put?.mid,
-      pAsk: r.put?.ask,
-      pDelta: r.put?.delta,
-      pGamma: r.put?.gamma,
-      pTheta: r.put?.theta,
-      pVega: r.put?.vega,
-      pIv: r.put?.iv,
-    }));
-  }, [ticker, selectedExpiry, optionsReport, reportLoaded]);
+    return optionsReport.rows.map((r) => {
+      const oi = openInterest.get(r.strike);
+      return {
+        strike: r.strike,
+        cLast: r.call?.last,
+        cBid: r.call?.bid,
+        cMid: r.call?.mid,
+        cAsk: r.call?.ask,
+        cDelta: r.call?.delta,
+        cGamma: r.call?.gamma,
+        cTheta: r.call?.theta,
+        cVega: r.call?.vega,
+        cIv: r.call?.iv,
+        cOI: oi?.call,
+        pLast: r.put?.last,
+        pBid: r.put?.bid,
+        pMid: r.put?.mid,
+        pAsk: r.put?.ask,
+        pDelta: r.put?.delta,
+        pGamma: r.put?.gamma,
+        pTheta: r.put?.theta,
+        pVega: r.put?.vega,
+        pIv: r.put?.iv,
+        pOI: oi?.put,
+      };
+    });
+  }, [ticker, selectedExpiry, optionsReport, reportLoaded, openInterest]);
 
   /** ---------- Render ---------- */
   return (
@@ -297,7 +325,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
               </div>
               {/* Level 2 header */}
               <div style={hdrRow2 as any}>
-                <div style={subgrid9 as any}>
+                <div style={subgrid10 as any}>
                   <div style={subTh as any}>Trade</div>
                   <div style={subTh as any}>Last</div>
                   <div style={subTh as any}>Bid</div>
@@ -307,9 +335,11 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                   <div style={subTh as any}>Θ</div>
                   <div style={subTh as any}>Vega</div>
                   <div style={subTh as any}>IV</div>
+                  <div style={subTh as any}>OI</div>
                 </div>
                 <div style={subTh as any}>{/* strike subheader empty */}</div>
-                <div style={subgrid9 as any}>
+                <div style={subgrid10 as any}>
+                  <div style={subTh as any}>OI</div>
                   <div style={subTh as any}>Last</div>
                   <div style={subTh as any}>Bid</div>
                   <div style={subTh as any}>Ask</div>
@@ -339,7 +369,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                   <Fragment key={rowKey}>
                     {showDivider && <div style={atmDivider as any} />}
                     <div
-                      style={{ ...row19, cursor: "pointer" } as any}
+                      style={{ ...row21, cursor: "pointer" } as any}
                       onClick={() => setSelectedKey(rowKey)}
                     >
                       {/* Call Trade Buttons */}
@@ -368,7 +398,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                         />
                       </div>
 
-                      {/* Calls: Last | Bid | Ask | Greeks */}
+                      {/* Calls: Last | Bid | Ask | Greeks | OI */}
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cLast)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cBid)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.cAsk)}</div>
@@ -377,13 +407,15 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cTheta)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cVega)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtGreek(r.cIv)}</div>
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtOI(r.cOI)}</div>
 
                       {/* Strike */}
                       <div style={{ ...baseCell, textAlign: "center", fontWeight: 700 }}>
                         {fmtPrice(r.strike)}
                       </div>
 
-                      {/* Puts: Last | Bid | Ask | Greeks */}
+                      {/* Puts: OI | Last | Bid | Ask | Greeks */}
+                      <div style={{ ...baseCell, textAlign: "right" }}>{fmtOI(r.pOI)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pLast)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pBid)}</div>
                       <div style={{ ...baseCell, textAlign: "right" }}>{fmtPrice(r.pAsk)}</div>
@@ -465,6 +497,11 @@ function mid(b?: number, a?: number, last?: number) {
   if (isNum(last)) return last as number;
   return undefined;
 }
+function fmtOI(v?: number): string {
+  if (v === undefined || v === null) return "-";
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  return v.toString();
+}
 
 /** ---------- Styles ---------- */
 const shell = {
@@ -529,7 +566,7 @@ const stickyHeader = {
 
 const hdrRow1 = {
   display: "grid",
-  gridTemplateColumns: "468px 70px 468px",
+  gridTemplateColumns: "520px 70px 520px",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
@@ -549,16 +586,16 @@ const thBlock = {
 
 const hdrRow2 = {
   display: "grid",
-  gridTemplateColumns: "468px 70px 468px",
+  gridTemplateColumns: "520px 70px 520px",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
   borderBottom: `1px solid ${light.bg.hover}`,
 };
 
-const subgrid9 = {
+const subgrid10 = {
   display: "grid",
-  gridTemplateColumns: "repeat(9, 52px)",
+  gridTemplateColumns: "repeat(10, 52px)",
   columnGap: 0,
 };
 
@@ -574,9 +611,9 @@ const subTh = {
   textAlign: "center" as const,
 };
 
-const row19 = {
+const row21 = {
   display: "grid",
-  gridTemplateColumns: "52px repeat(8, 52px) 70px repeat(8, 52px) 52px",
+  gridTemplateColumns: "52px repeat(9, 52px) 70px repeat(9, 52px) 52px",
   columnGap: 0,
   alignItems: "stretch",
   padding: 0,
