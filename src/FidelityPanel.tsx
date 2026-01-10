@@ -12,17 +12,42 @@ import {
   clearPositions,
 } from "./utils/fidelity";
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
-import { fetchAllTimeframeClosePrices, MultiTimeframeClosePrices, calcPctChange, formatCloseDateShort } from "./services/closePrices";
+import { formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { formatExpiryShort, daysToExpiry, osiToTopicSymbol, parseOptionSymbol } from "./utils/options";
 import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalysis";
 import ExpiryScenarioAnalysis from "./components/portfolio/ExpiryScenarioAnalysis";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
-import { usePortfolioOptionsReports, PortfolioOptionPosition } from "./hooks/usePortfolioOptionsReports";
+import { usePortfolioOptionsReports, PortfolioOptionPosition, OptionGreeks } from "./hooks/usePortfolioOptionsReports";
+import { usePositionsReport, positionsReportClientId, ReportPosition } from "./hooks/usePositionsReport";
 import TabButtonGroup from "./components/shared/TabButtonGroup";
 import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
 import { useAppState } from "./state/useAppState";
 import { IbPosition } from "./types/portfolio";
+
+/**
+ * Build a Greeks map from ReportPosition array for FidelityOptionsAnalysis.
+ * Key format: OSI symbol (e.g., "NVDA260123P00140000")
+ */
+function buildGreeksMapFromReport(positions: ReportPosition[]): Map<string, OptionGreeks> {
+  const map = new Map<string, OptionGreeks>();
+
+  for (const p of positions) {
+    if (p.secType !== "OPT" || !p.osiSymbol) continue;
+
+    map.set(p.osiSymbol.toUpperCase(), {
+      delta: p.delta ?? null,
+      gamma: p.gamma ?? null,
+      theta: p.theta ?? null,
+      vega: p.vega ?? null,
+      iv: p.iv ?? null,
+      last: p.currentPrice ?? null,
+      theo: null,
+    });
+  }
+
+  return map;
+}
 
 export default function FidelityPanel() {
   const [positions, setPositions] = useState<FidelityPosition[]>([]);
@@ -57,6 +82,54 @@ export default function FidelityPanel() {
       if (storedDate) setImportDate(storedDate);
     }
   }, []);
+
+  // Upload positions to CalcServer when WebSocket connects (handles page refresh)
+  // This is defined as a ref to avoid recreating the function on each render
+  const uploadedRef = useRef(false);
+  useEffect(() => {
+    if (wsConnected && positions.length > 0 && !uploadedRef.current) {
+      // Delay to ensure positions report is started first
+      const timer = setTimeout(() => {
+        const downloadedAtStr = localStorage.getItem("fidelity.downloadedAt");
+        const downloadedAt = downloadedAtStr ? new Date(downloadedAtStr) : undefined;
+
+        // Convert FidelityPosition to the format expected by CalcServer
+        const positionsPayload = positions.map(pos => ({
+          accountNumber: pos.accountNumber,
+          accountName: pos.accountName,
+          symbol: pos.symbol,
+          description: pos.description,
+          quantity: pos.quantity,
+          lastPrice: pos.lastPrice,
+          currentValue: pos.currentValue,
+          costBasisTotal: pos.costBasisTotal,
+          avgCostBasis: pos.avgCostBasis,
+          type: pos.type,
+          osiSymbol: pos.osiSymbol,
+          optionType: pos.optionType,
+          strike: pos.strike,
+          expiry: pos.expiry,
+          underlying: pos.underlying,
+        }));
+
+        socketHub.sendControl("upload_fidelity_positions", {
+          target: "calc",
+          clientId: positionsReportClientId,
+          positions: positionsPayload,
+          downloadedAt: downloadedAt?.toISOString(),
+        }).then(response => {
+          if (response.ok) {
+            console.log(`[FidelityPanel] Uploaded ${positions.length} positions to CalcServer on connect`);
+            uploadedRef.current = true;
+          }
+        }).catch(err => {
+          console.warn("[FidelityPanel] Error uploading on connect:", err);
+        });
+      }, 500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [wsConnected, positions]);
 
   // Compute import reminder based on last import time and market state
   const importReminder = useMemo(() => {
@@ -148,77 +221,8 @@ export default function FidelityPanel() {
     return () => socketHub.offConnect(handleReconnect);
   }, [subscriptionSymbols.options.join(",")]);
 
-  // Close prices for equities - all timeframes in one response
-  const [multiClosePrices, setMultiClosePrices] = useState<MultiTimeframeClosePrices | null>(null);
-
-  // Fetch close prices for all timeframes (single fetch, local timeframe switching)
-  // Retry with backoff if we get empty data (server may not be ready)
-  useEffect(() => {
-    if (subscriptionSymbols.equities.length === 0 || !wsConnected) return;
-
-    let cancelled = false;
-    let retryTimeout: number | undefined;
-
-    const fetchWithRetry = async (attempt: number = 1) => {
-      if (cancelled) return;
-      const result = await fetchAllTimeframeClosePrices(subscriptionSymbols.equities);
-      if (cancelled) return;
-
-      if (result && result.prices.size > 0) {
-        setMultiClosePrices(result);
-      } else if (attempt < 4) {
-        // Retry with backoff: 1s, 2s, 4s
-        const delay = Math.pow(2, attempt - 1) * 1000;
-        console.log(`[FidelityPanel] Close prices empty (attempt ${attempt}), retrying in ${delay}ms...`);
-        retryTimeout = window.setTimeout(() => fetchWithRetry(attempt + 1), delay);
-      } else {
-        console.warn("[FidelityPanel] Close prices still empty after 4 attempts");
-        setMultiClosePrices(result); // Set whatever we got
-      }
-    };
-
-    fetchWithRetry();
-
-    return () => {
-      cancelled = true;
-      if (retryTimeout) clearTimeout(retryTimeout);
-    };
-  }, [subscriptionSymbols.equities.join(","), wsConnected, marketState?.lastUpdated]);
-
-  // Option close prices for % change display
-  type OptionPriceData = { prevClose: number; todayClose?: number };
-  const [optionClosePrices, setOptionClosePrices] = useState<Map<string, OptionPriceData>>(new Map());
-
-  // Fetch close prices for option positions when options, timeframe, or connection change
-  useEffect(() => {
-    if (subscriptionSymbols.options.length === 0 || !marketState?.timeframes || !wsConnected) return;
-
-    // Find the date for the selected timeframe
-    const tfInfo = marketState.timeframes.find(t => t.id === timeframe);
-    const closeDate = tfInfo?.date || marketState.prevTradingDay;
-    if (!closeDate) return;
-
-    socketHub.sendControl("option_close_prices", {
-      symbols: subscriptionSymbols.options,
-      prev_trading_day: closeDate,
-    }, { timeoutMs: 10000 }).then(ack => {
-      if (ack.ok && ack.data) {
-        const data = (ack.data as any).data || ack.data;
-        const newMap = new Map<string, OptionPriceData>();
-        Object.entries(data).forEach(([symbol, prices]: [string, any]) => {
-          if (prices && typeof prices.prevClose === "number") {
-            newMap.set(symbol.toUpperCase(), {
-              prevClose: prices.prevClose,
-              todayClose: typeof prices.todayClose === "number" ? prices.todayClose : undefined,
-            });
-          }
-        });
-        setOptionClosePrices(newMap);
-      }
-    }).catch(err => {
-      console.error("[FidelityPanel] Failed to fetch option close prices:", err);
-    });
-  }, [subscriptionSymbols.options.join(","), marketState?.timeframes, timeframe, wsConnected, marketState?.lastUpdated]);
+  // Note: Close prices are now computed server-side in the positions report.
+  // No need to fetch them client-side.
 
   // Option prices from channel
   const optionPrices = useMemo(() => {
@@ -246,6 +250,46 @@ export default function FidelityPanel() {
   // Subscribe to OptionsReportBuilders for portfolio options to get Greeks
   const { greeksMap: portfolioGreeksMap, version: greeksVersion } = usePortfolioOptionsReports(portfolioOptionPositions);
 
+  // Server-computed positions report (Fidelity positions with Greeks/P&L)
+  const {
+    fidelityPositions: reportFidelityPositions,
+    referenceDates: reportReferenceDates,
+    version: reportVersion,
+  } = usePositionsReport(true);
+
+  // Build changes lookup from report positions: symbol -> timeframe -> { change, pct }
+  const reportChangesMap = useMemo(() => {
+    const map = new Map<string, Record<string, { change: number; pct: number }>>();
+    if (!reportFidelityPositions) return map;
+
+    for (const p of reportFidelityPositions) {
+      if (p.changes && Object.keys(p.changes).length > 0) {
+        // For equities, key by symbol. For options, key by OSI symbol.
+        const key = p.secType === "OPT" && p.osiSymbol ? p.osiSymbol : p.symbol;
+        map.set(key.toUpperCase(), p.changes);
+      }
+    }
+    return map;
+  }, [reportFidelityPositions]);
+
+  // Build Greeks map from report data (more reliable when available)
+  const reportGreeksMap = useMemo(() => {
+    if (!reportFidelityPositions || reportFidelityPositions.length === 0) return new Map<string, OptionGreeks>();
+    return buildGreeksMapFromReport(reportFidelityPositions);
+  }, [reportFidelityPositions]);
+
+  // Combine Greeks maps: prefer report data, fall back to streaming
+  const combinedGreeksMap = useMemo(() => {
+    const combined = new Map<string, OptionGreeks>(portfolioGreeksMap);
+    for (const [key, greeks] of reportGreeksMap) {
+      combined.set(key, greeks);
+    }
+    return combined;
+  }, [portfolioGreeksMap, reportGreeksMap]);
+
+  // Use report version if available, otherwise use streaming version
+  const effectiveGreeksVersion = reportVersion > 0 ? reportVersion : greeksVersion;
+
   // Separate cash/pending from tradeable positions
   const { cashPositions, pendingPositions, tradeablePositions } = useMemo(() => {
     const cash: FidelityPosition[] = [];
@@ -269,6 +313,46 @@ export default function FidelityPanel() {
     return pendingPositions.reduce((sum, pos) => sum + (pos.currentValue ?? 0), 0);
   }, [pendingPositions]);
 
+  // Upload positions to CalcServer for server-side processing
+  const uploadToCalcServer = async (fidelityPositions: FidelityPosition[], downloadedAt?: Date) => {
+    try {
+      // Convert FidelityPosition to the format expected by CalcServer
+      const positionsPayload = fidelityPositions.map(pos => ({
+        accountNumber: pos.accountNumber,
+        accountName: pos.accountName,
+        symbol: pos.symbol,
+        description: pos.description,
+        quantity: pos.quantity,
+        lastPrice: pos.lastPrice,
+        currentValue: pos.currentValue,
+        costBasisTotal: pos.costBasisTotal,
+        avgCostBasis: pos.avgCostBasis,
+        type: pos.type,
+        // Option-specific fields
+        osiSymbol: pos.osiSymbol,
+        optionType: pos.optionType,
+        strike: pos.strike,
+        expiry: pos.expiry,
+        underlying: pos.underlying,
+      }));
+
+      const response = await socketHub.sendControl("upload_fidelity_positions", {
+        target: "calc",
+        clientId: positionsReportClientId,
+        positions: positionsPayload,
+        downloadedAt: downloadedAt?.toISOString(),
+      });
+
+      if (response.ok) {
+        console.log(`[FidelityPanel] Uploaded ${fidelityPositions.length} positions to CalcServer`);
+      } else {
+        console.warn("[FidelityPanel] Failed to upload positions to CalcServer:", response.error);
+      }
+    } catch (err) {
+      console.warn("[FidelityPanel] Error uploading to CalcServer:", err);
+    }
+  };
+
   // Handle file upload
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -289,6 +373,9 @@ export default function FidelityPanel() {
         localStorage.setItem("fidelity.downloadedAt", result.downloadedAt.toISOString());
       }
       console.log(`[FidelityPanel] Imported ${result.positions.length} positions, downloaded: ${dateDisplay}`);
+
+      // Upload to CalcServer for server-side processing
+      uploadToCalcServer(result.positions, result.downloadedAt || undefined);
     };
     reader.readAsText(file);
 
@@ -303,6 +390,12 @@ export default function FidelityPanel() {
       clearPositions();
       setImportDate(null);
       localStorage.removeItem("fidelity.importDate");
+
+      // Clear positions on CalcServer
+      socketHub.sendControl("clear_fidelity_positions", {
+        target: "calc",
+        clientId: positionsReportClientId,
+      }).catch(err => console.warn("[FidelityPanel] Error clearing CalcServer positions:", err));
     }
   };
 
@@ -335,11 +428,13 @@ export default function FidelityPanel() {
         costBasis += pos.costBasisTotal;
       }
 
-      if (pos.type === "equity") {
-        const prevPrice = multiClosePrices?.prices.get(pos.symbol.toUpperCase())?.closes[timeframe];
-        if (prevPrice && currentPrice !== null) {
-          dayChange += (currentPrice - prevPrice) * qty * (pos.quantity < 0 ? -1 : 1);
-        }
+      // Use server-computed change from report
+      const changeKey = pos.type === "option" && pos.osiSymbol
+        ? pos.osiSymbol.toUpperCase()
+        : pos.symbol.toUpperCase();
+      const changes = reportChangesMap.get(changeKey);
+      if (changes && changes[timeframe] && currentPrice !== null) {
+        dayChange += changes[timeframe].change * qty * multiplier * (pos.quantity < 0 ? -1 : 1);
       }
     });
 
@@ -350,7 +445,7 @@ export default function FidelityPanel() {
       dayChange,
       totalAccountValue: marketValue + totalCash + totalPending,
     };
-  }, [tradeablePositions, equityPrices, optionPrices, multiClosePrices, timeframe, totalCash, totalPending]);
+  }, [tradeablePositions, equityPrices, optionPrices, reportChangesMap, timeframe, totalCash, totalPending]);
 
   // Convert Fidelity positions to IbPosition format for ExpiryScenarioAnalysis
   const ibFormatPositions = useMemo((): IbPosition[] => {
@@ -493,8 +588,8 @@ export default function FidelityPanel() {
                     <div style={hdrCellRight}>Qty</div>
                     <div style={hdrCellRight}>Last</div>
                     <div style={{ ...hdrCellCenter, gridColumn: "span 2" }}>
-                      {multiClosePrices?.referenceDates?.[timeframe]
-                        ? `Chg (${formatCloseDateShort(multiClosePrices.referenceDates[timeframe]!)})`
+                      {reportReferenceDates[timeframe]
+                        ? `Chg (${formatCloseDateShort(reportReferenceDates[timeframe])})`
                         : currentTimeframeInfo
                           ? `Chg (${formatCloseDateShort(currentTimeframeInfo.date)})`
                           : "Change"}
@@ -533,23 +628,16 @@ export default function FidelityPanel() {
                         : mktValue - pos.costBasisTotal;
                     }
 
-                    // Change calculation (using selected timeframe for equities)
+                    // Change calculation (using server-computed values from report)
                     let pctChange: number | undefined;
                     let dollarChange: number | undefined;
-                    if (currentPrice !== null) {
-                      if (pos.type === "equity") {
-                        const prevClose = multiClosePrices?.prices.get(pos.symbol.toUpperCase())?.closes[timeframe];
-                        if (prevClose && prevClose > 0) {
-                          pctChange = calcPctChange(currentPrice, prevClose);
-                          dollarChange = currentPrice - prevClose;
-                        }
-                      } else if (pos.type === "option" && pos.osiSymbol) {
-                        const optCloseData = optionClosePrices.get(pos.osiSymbol.toUpperCase());
-                        if (optCloseData?.prevClose && optCloseData.prevClose > 0) {
-                          pctChange = calcPctChange(currentPrice, optCloseData.prevClose);
-                          dollarChange = currentPrice - optCloseData.prevClose;
-                        }
-                      }
+                    const changeKey = pos.type === "option" && pos.osiSymbol
+                      ? pos.osiSymbol.toUpperCase()
+                      : pos.symbol.toUpperCase();
+                    const changes = reportChangesMap.get(changeKey);
+                    if (changes && changes[timeframe]) {
+                      pctChange = changes[timeframe].pct;
+                      dollarChange = changes[timeframe].change;
                     }
                     // Symbol display
                     let symbolDisplay: React.ReactNode;
@@ -668,8 +756,8 @@ export default function FidelityPanel() {
                     positions={tradeablePositions}
                     equityPrices={equityPrices}
                     optionPrices={optionPrices}
-                    greeksMap={portfolioGreeksMap}
-                    greeksVersion={greeksVersion}
+                    greeksMap={combinedGreeksMap}
+                    greeksVersion={effectiveGreeksVersion}
                   />
                 </div>
               )}
@@ -680,8 +768,8 @@ export default function FidelityPanel() {
                   <ExpiryScenarioAnalysis
                     positions={ibFormatPositions}
                     equityPrices={equityPrices}
-                    greeksMap={portfolioGreeksMap}
-                    greeksVersion={greeksVersion}
+                    greeksMap={combinedGreeksMap}
+                    greeksVersion={effectiveGreeksVersion}
                   />
                 </div>
               )}
