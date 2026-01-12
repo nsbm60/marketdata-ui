@@ -92,7 +92,6 @@ export default function PnLSummary({
         const key = buildPositionKey(p.symbol, p.sec_type, p.strike, p.expiry, p.right);
         map.set(key, p);
       });
-      console.log("[PnLSummary] Snapshot keys:", Array.from(map.keys()));
     }
     return map;
   }, [snapshot]);
@@ -112,7 +111,6 @@ export default function PnLSummary({
         p.right
       );
       processedKeys.add(posKey);
-      console.log(`[PnLSummary] Current position key: ${posKey}, matched: ${snapshotMap.has(posKey)}`);
 
       // Get current price
       let currentPrice = 0;
@@ -239,7 +237,7 @@ export default function PnLSummary({
   const noSnapshotMessage = !snapshot
     ? "Could not fetch snapshot data from CalcServer. Check console for details."
     : !snapshot.positions || snapshot.positions.length === 0
-      ? `No snapshot data for ${snapshot.snapshot_date}. The position snapshot job may not have run for this date yet.`
+      ? `No snapshot data for ${snapshot.snapshot_date ?? "this timeframe"}. The position snapshot job may not have run for this date yet.`
       : null;
 
   return (

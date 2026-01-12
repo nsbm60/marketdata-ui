@@ -175,13 +175,6 @@ export default function IBPanel() {
   // Throttle to 250ms (4 updates/sec) for readability
   const equityPrices = useThrottledMarketPrices(equitySymbols, "equity", 250);
 
-  // Debug: log when equity symbols change
-  useEffect(() => {
-    if (equitySymbols.length > 0) {
-      console.log("[PortfolioPanel] Equity symbols for subscription:", equitySymbols);
-    }
-  }, [equitySymbols.join(",")]);
-
   // Listen to option channel updates (backend manages option subscriptions)
   // Throttle to 250ms for consistency
   const optionVersion = useChannelUpdates("option", 250);
@@ -324,7 +317,6 @@ export default function IBPanel() {
   // Helper to send option subscriptions (used on initial mount and reconnect)
   const sendOptionSubscriptions = (symbols: string[]) => {
     if (symbols.length === 0) return;
-    console.log("[PortfolioPanel] Subscribing to option contracts:", symbols);
     // 1. Register interest with UI bridge so it forwards option messages to this client
     socketHub.send({
       type: "subscribe",
@@ -342,13 +334,11 @@ export default function IBPanel() {
 
   // Tell backend to subscribe to portfolio option contracts AND register interest with UI bridge
   useEffect(() => {
-    console.log("[PortfolioPanel] optionOsiSymbols changed:", optionOsiSymbols.length, "symbols");
     sendOptionSubscriptions(optionOsiSymbols);
 
     // Cleanup: unsubscribe when component unmounts or symbols change
     return () => {
       if (optionOsiSymbols.length > 0) {
-        console.log("[PortfolioPanel] Cleanup: unsubscribing from option contracts:", optionOsiSymbols);
         socketHub.send({
           type: "unsubscribe",
           channels: ["md.option.quote", "md.option.trade", "md.option.greeks"],
@@ -361,7 +351,6 @@ export default function IBPanel() {
   // Re-subscribe to option contracts on WebSocket reconnect
   useEffect(() => {
     const handleReconnect = () => {
-      console.log("[PortfolioPanel] WebSocket reconnected, resubscribing to options...");
       sendOptionSubscriptions(optionOsiSymbols);
     };
     socketHub.onConnect(handleReconnect);

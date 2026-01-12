@@ -145,8 +145,6 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
       }
 
       const reportData = payload as PositionsReportData;
-      console.log(`[usePositionsReport] Received report: ${reportData.positions.length} positions, ${reportData.cash?.length || 0} cash entries`);
-
       setReport(reportData);
       setLoading(false);
       setError(null);
@@ -169,7 +167,6 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
   useEffect(() => {
     if (!enabled) return;
 
-    console.log(`[usePositionsReport] Subscribing to report.positions with clientId: ${clientId}`);
     socketHub.send({
       type: "subscribe",
       channels: ["report.positions"],
@@ -190,25 +187,22 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
     if (!enabled) {
       // Stop the report if disabled
       if (reportStartedRef.current) {
-        console.log(`[usePositionsReport] Stopping report for clientId: ${clientId}`);
         socketHub.sendControl("stop_positions_report", {
           target: "calc",
           clientId: clientId,
-        }).catch(err => console.warn("[usePositionsReport] Failed to stop report:", err));
+        }).catch(() => { /* ignore */ });
         reportStartedRef.current = false;
       }
       return;
     }
 
     // Start the report
-    console.log(`[usePositionsReport] Starting positions report for clientId: ${clientId}`);
     setLoading(true);
 
     socketHub.sendControl("start_positions_report", {
       target: "calc",
       clientId: clientId,
-    }).then(response => {
-      console.log(`[usePositionsReport] Report started:`, response);
+    }).then(() => {
       reportStartedRef.current = true;
     }).catch(err => {
       console.error("[usePositionsReport] Failed to start report:", err);
@@ -219,11 +213,10 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
     // Cleanup: stop the report when unmounting
     return () => {
       if (reportStartedRef.current) {
-        console.log(`[usePositionsReport] Cleanup: stopping report for clientId: ${clientId}`);
         socketHub.sendControl("stop_positions_report", {
           target: "calc",
           clientId: clientId,
-        }).catch(err => console.warn("[usePositionsReport] Failed to stop report on cleanup:", err));
+        }).catch(() => { /* ignore */ });
         reportStartedRef.current = false;
       }
     };
@@ -233,7 +226,6 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
   const refresh = useCallback(() => {
     if (!reportStartedRef.current) return;
 
-    console.log(`[usePositionsReport] Refreshing positions for clientId: ${clientId}`);
     socketHub.sendControl("refresh_positions", {
       target: "calc",
       clientId: clientId,

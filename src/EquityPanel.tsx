@@ -510,6 +510,9 @@ const shell = {
   borderRadius: 8,
   overflow: "hidden",
   maxWidth: "100%",
+  display: "flex",
+  flexDirection: "column" as const,
+  height: "100%",
 };
 const header = {
   padding: "8px 10px",
@@ -527,7 +530,7 @@ const inputStyle = {
   color: light.text.primary,
   background: light.bg.primary,
 };
-const tableWrap = { overflowX: "auto", maxWidth: "100%" as const };
+const tableWrap = { overflowX: "auto", overflowY: "auto", flex: 1, maxWidth: "100%" as const };
 const tableStyle = {
   width: "100%",
   borderCollapse: "separate" as const,

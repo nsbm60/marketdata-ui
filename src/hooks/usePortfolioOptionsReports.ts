@@ -100,7 +100,6 @@ export function usePortfolioOptionsReports(
       }
 
       const report = payload as PortfolioOptionsReportData;
-      console.log(`[usePortfolioOptionsReports] Received report with ${report.options.length} options`);
 
       // Update Greeks map keyed by OSI symbol
       for (const opt of report.options) {
@@ -137,7 +136,6 @@ export function usePortfolioOptionsReports(
   useEffect(() => {
     if (!enabled || contracts.length === 0) return;
 
-    console.log(`[usePortfolioOptionsReports] Subscribing to report.portfolio.options with clientId: ${clientId}`);
     socketHub.send({
       type: "subscribe",
       channels: ["report.portfolio.options"],
@@ -158,11 +156,10 @@ export function usePortfolioOptionsReports(
     if (!enabled || contracts.length === 0) {
       // Stop the report if no contracts
       if (reportStartedRef.current) {
-        console.log(`[usePortfolioOptionsReports] Stopping report for clientId: ${clientId}`);
         socketHub.sendControl("stop_portfolio_options_report", {
           target: "calc",
           clientId: clientId,
-        }).catch(err => console.warn("[usePortfolioOptionsReports] Failed to stop report:", err));
+        }).catch(() => { /* ignore */ });
         reportStartedRef.current = false;
       }
       return;
@@ -171,26 +168,16 @@ export function usePortfolioOptionsReports(
     // Validate OSI format before sending: SYMBOL + YYMMDD + C/P + 8 digits
     const osiPattern = /^[A-Z]{1,6}\d{6}[CP]\d{8}$/;
     const validContracts = contracts.filter(c => osiPattern.test(c));
-    const invalidContracts = contracts.filter(c => !osiPattern.test(c));
-
-    if (invalidContracts.length > 0) {
-      console.warn(`[usePortfolioOptionsReports] Skipping ${invalidContracts.length} invalid OSI symbols:`, invalidContracts);
-    }
 
     if (validContracts.length === 0) {
-      console.error("[usePortfolioOptionsReports] No valid OSI contracts to subscribe");
       return;
     }
-
-    console.log(`[usePortfolioOptionsReports] Starting report with ${validContracts.length} contracts for clientId: ${clientId}`);
-    console.log(`[usePortfolioOptionsReports] Contracts:`, validContracts);
 
     socketHub.sendControl("start_portfolio_options_report", {
       target: "calc",
       clientId: clientId,
       contracts: validContracts,
     }).then(ack => {
-      console.log("[usePortfolioOptionsReports] Report started:", ack);
       if (!ack.ok) {
         console.error("[usePortfolioOptionsReports] Server rejected request:", ack.error);
       }
@@ -201,11 +188,10 @@ export function usePortfolioOptionsReports(
 
     // Cleanup: stop the report when unmounting
     return () => {
-      console.log(`[usePortfolioOptionsReports] Cleanup: stopping report for clientId: ${clientId}`);
       socketHub.sendControl("stop_portfolio_options_report", {
         target: "calc",
         clientId: clientId,
-      }).catch(() => {}); // Ignore errors on cleanup
+      }).catch(() => { /* ignore */ });
       reportStartedRef.current = false;
     };
   }, [enabled, contracts.join(",")]);
@@ -228,11 +214,5 @@ export function getGreeksForPosition(
   strike: number
 ): OptionGreeks | undefined {
   const osi = buildOsiSymbol(underlying, expiry, right, strike);
-  const result = greeksMap.get(osi);
-  if (!result && greeksMap.size > 0) {
-    // Log first lookup miss for debugging
-    const firstKey = greeksMap.keys().next().value;
-    console.log(`[getGreeksForPosition] Miss: ${osi} | Sample stored: ${firstKey} | Map size: ${greeksMap.size}`);
-  }
-  return result;
+  return greeksMap.get(osi);
 }

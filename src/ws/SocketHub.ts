@@ -138,11 +138,6 @@ class SocketHub {
 
   /** Fire-and-forget send of a JSON-able object. */
   public send(obj: Record<string, unknown>): void {
-    // Log subscribe/unsubscribe for debugging
-    if (obj.type === "subscribe" || obj.type === "unsubscribe") {
-      console.log(`[SocketHub] ${obj.type}:`, obj.channels, obj.symbols);
-    }
-
     const s = JSON.stringify(obj);
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(s);
@@ -233,11 +228,6 @@ class SocketHub {
     if ((msg as any).topic && (msg as any).data) {
       const tick = msg as TickEnvelope;
 
-      // *** DEBUG: log IB topics so we can see if they reach the browser ***
-      if (tick.topic.startsWith("ib.")) {
-        // This is safe to leave in while we debug; remove or comment later if noisy.
-        console.log("[SocketHub] IB tick:", tick.topic, tick.data);
-      }
 
       this.tickHandlers.forEach((fn) => {
         try {

@@ -192,6 +192,9 @@ const marketWrap = {
 const leftPane = {
   minWidth: 680,
   maxWidth: 680,
+  height: "100%",
+  minHeight: 0,
+  overflow: "hidden",
 };
 
 const rightPane = {

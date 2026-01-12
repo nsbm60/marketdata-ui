@@ -419,7 +419,7 @@ class MarketDataBus {
     const channels =
       channel === "equity"
         ? ["md.equity.quote", "md.equity.trade"]
-        : ["md.option.quote", "md.option.trade"];
+        : ["md.option.quote", "md.option.trade", "md.option.greeks"];
 
     socketHub.send({ type: "subscribe", channels, symbols: [symbol] });
 

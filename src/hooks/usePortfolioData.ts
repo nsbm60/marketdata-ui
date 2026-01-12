@@ -127,11 +127,6 @@ export function usePortfolioData(): UsePortfolioDataResult {
         snapshot = m;
       }
 
-      // Log all ib.* messages to trace what's arriving
-      if (snapshot?.topic?.startsWith("ib.")) {
-        console.log("[usePortfolioData] IB message received:", snapshot.topic);
-      }
-
       // Initial snapshot
       if (snapshot.type === "control.ack" && snapshot.op === "account_state") {
         handleAccountState(snapshot);
@@ -321,7 +316,6 @@ export function usePortfolioData(): UsePortfolioDataResult {
     }
 
     function handleOpenOrder(snapshot: any) {
-      console.log("[usePortfolioData] Received ib.openOrder:", snapshot.data);
       const d = snapshot.data;
       if (!d || d.kind !== "open_order") return;
 
@@ -350,7 +344,6 @@ export function usePortfolioData(): UsePortfolioDataResult {
           const orderToMove = prev.openOrders.find(o => o.orderId === order.orderId);
 
           if (orderToMove && (order.status === "Filled" || order.status === "Cancelled" || order.status === "Inactive")) {
-            console.log("[usePortfolioData] openOrder terminal status, adding to history:", order.status, order.orderId);
             const historyEntry: IbOrderHistory = {
               orderId: orderToMove.orderId,
               symbol: orderToMove.symbol,
@@ -390,7 +383,6 @@ export function usePortfolioData(): UsePortfolioDataResult {
       });
 
       if (order.status === "Filled") {
-        console.log("[usePortfolioData] openOrder Filled, triggering account state refresh...");
         setTimeout(() => {
           socketHub.send({ type: "control", target: "ibAccount", op: "account_state" });
         }, 500);
@@ -398,7 +390,6 @@ export function usePortfolioData(): UsePortfolioDataResult {
     }
 
     function handleOrderStatus(snapshot: any) {
-      console.log("[usePortfolioData] Received ib.order:", snapshot.data);
       const d = snapshot.data;
       if (!d || d.kind !== "order_status") return;
 
@@ -481,7 +472,6 @@ export function usePortfolioData(): UsePortfolioDataResult {
     }
 
     function handleIbError(snapshot: any) {
-      console.log("[usePortfolioData] Received ib.error:", snapshot.data);
       const d = snapshot.data;
       if (!d || d.kind !== "error") return;
 
@@ -501,7 +491,6 @@ export function usePortfolioData(): UsePortfolioDataResult {
     }
 
     function handleIbStatus(snapshot: any) {
-      console.log("[usePortfolioData] Received ib.status:", snapshot.data);
       const d = snapshot.data;
       if (!d || d.kind !== "status") return;
 
@@ -510,28 +499,14 @@ export function usePortfolioData(): UsePortfolioDataResult {
 
       // If we just reconnected, refresh account state
       if (connected) {
-        console.log("[usePortfolioData] IB Gateway reconnected, refreshing account state...");
         refresh();
       }
     }
 
     function handleExecution(snapshot: any) {
-      console.log("[usePortfolioData] Received ib.executions:", snapshot.data);
       const d = snapshot.data;
       if (!d) return;
       const exec = d.execution || d;
-
-      if (exec.secType === "OPT") {
-        console.log("[usePortfolioData] Option execution received:", {
-          symbol: exec.symbol,
-          secType: exec.secType,
-          side: exec.side,
-          shares: exec.shares ?? exec.quantity,
-          strike: exec.strike,
-          expiry: exec.expiry,
-          right: exec.right,
-        });
-      }
 
       const sideRaw = String(exec.side ?? "").toUpperCase();
       const isBuy = sideRaw === "BOT" || sideRaw === "BUY";
@@ -587,13 +562,6 @@ export function usePortfolioData(): UsePortfolioDataResult {
               normalizeRight(p.right) === execRight
             ))
         );
-
-        if (newExec.secType === "OPT") {
-          console.log("[usePortfolioData] Option position match:", {
-            found: idx >= 0,
-            execFields: { strike: newExec.strike, expiry: newExec.expiry, right: newExec.right, execExpiry, execRight },
-          });
-        }
 
         const qtyDelta = isBuy ? newExec.quantity : -newExec.quantity;
 
