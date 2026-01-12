@@ -32,6 +32,7 @@ import {
   TimeValue,
 } from "../../utils/chartMetrics";
 import { dark, semantic } from "../../theme";
+import type { AtrDataPoint } from "../../hooks/useChartData";
 
 interface ChartCanvasProps {
   bars: Bar[];
@@ -49,6 +50,8 @@ interface ChartCanvasProps {
   loadingMore?: boolean;
   /** Number of warmup bars needed for indicators (triggers earlier loading) */
   warmupBars?: number;
+  /** ATR data from server (server-computed) */
+  atrData?: AtrDataPoint[];
 }
 
 // Dark theme colors (from centralized theme)
@@ -64,6 +67,7 @@ const LINE_COLORS = {
   sma: semantic.info.alt,
   ema: semantic.warning.alt,
   rsi: semantic.purple,
+  atr: "#ff7043", // Deep orange - distinct from EMA's warning.alt
   macdLine: semantic.info.alt,
   macdSignal: semantic.warning.alt,
   macdHistUp: semantic.teal,
@@ -189,6 +193,7 @@ export default function ChartCanvas({
   hasMore = false,
   loadingMore = false,
   warmupBars = 0,
+  atrData = [],
 }: ChartCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -202,6 +207,7 @@ export default function ChartCanvas({
   // Refs for indicator sub-charts (for time scale sync)
   const rsiChartRef = useRef<IChartApi | null>(null);
   const macdChartRef = useRef<IChartApi | null>(null);
+  const atrChartRef = useRef<IChartApi | null>(null);
 
   // Track day boundaries and trading hours for labels
   const dayBoundariesRef = useRef<Map<number, string>>(new Map());
@@ -281,13 +287,14 @@ export default function ChartCanvas({
   }, [bars, settings.macd.enabled, settings.macd.fast, settings.macd.slow, settings.macd.signal]);
 
   // Calculate chart heights based on enabled indicators
-  const { mainHeight, rsiHeight, macdHeight } = useMemo(() => {
+  const { mainHeight, rsiHeight, macdHeight, atrHeight } = useMemo(() => {
     const hasRsi = settings.rsi.enabled;
     const hasMacd = settings.macd.enabled;
-    const indicatorCount = (hasRsi ? 1 : 0) + (hasMacd ? 1 : 0);
+    const hasAtr = settings.atr.enabled;
+    const indicatorCount = (hasRsi ? 1 : 0) + (hasMacd ? 1 : 0) + (hasAtr ? 1 : 0);
 
     if (indicatorCount === 0) {
-      return { mainHeight: height, rsiHeight: 0, macdHeight: 0 };
+      return { mainHeight: height, rsiHeight: 0, macdHeight: 0, atrHeight: 0 };
     }
 
     const indicatorHeight = 120;
@@ -297,8 +304,9 @@ export default function ChartCanvas({
       mainHeight: mainH,
       rsiHeight: hasRsi ? indicatorHeight : 0,
       macdHeight: hasMacd ? indicatorHeight : 0,
+      atrHeight: hasAtr ? indicatorHeight : 0,
     };
-  }, [height, settings.rsi.enabled, settings.macd.enabled]);
+  }, [height, settings.rsi.enabled, settings.macd.enabled, settings.atr.enabled]);
 
   // Initialize chart (only on mount or width change)
   useEffect(() => {
@@ -542,8 +550,18 @@ export default function ChartCanvas({
   }, [onLoadMore, hasMore, loadingMore, warmupBars]);
 
   // Sync indicator charts' time scales with main chart
+  // We need to offset the logical range because indicators have fewer data points
+  // (they start later due to warmup periods)
   useEffect(() => {
     if (!chartRef.current) return;
+
+    // Calculate the offset for each indicator based on warmup periods
+    // RSI needs period+1 bars, so first RSI is at candle index = period
+    const rsiOffset = settings.rsi.enabled ? settings.rsi.period : 0;
+    // MACD needs slow period bars before MACD line starts, then signal period more for signal
+    const macdOffset = settings.macd.enabled ? settings.macd.slow - 1 : 0;
+    // ATR needs period bars
+    const atrOffset = settings.atr.enabled ? settings.atr.period : 0;
 
     const syncTimeScales = () => {
       const mainChart = chartRef.current;
@@ -552,14 +570,25 @@ export default function ChartCanvas({
       const logicalRange = mainChart.timeScale().getVisibleLogicalRange();
       if (!logicalRange) return;
 
-      // Sync RSI chart
-      if (rsiChartRef.current) {
-        rsiChartRef.current.timeScale().setVisibleLogicalRange(logicalRange);
+      // Sync RSI chart - offset by RSI warmup period
+      if (rsiChartRef.current && settings.rsi.enabled) {
+        const rsiFrom = Math.max(0, logicalRange.from - rsiOffset);
+        const rsiTo = Math.max(0, logicalRange.to - rsiOffset);
+        rsiChartRef.current.timeScale().setVisibleLogicalRange({ from: rsiFrom, to: rsiTo });
       }
 
-      // Sync MACD chart
-      if (macdChartRef.current) {
-        macdChartRef.current.timeScale().setVisibleLogicalRange(logicalRange);
+      // Sync MACD chart - offset by MACD warmup period
+      if (macdChartRef.current && settings.macd.enabled) {
+        const macdFrom = Math.max(0, logicalRange.from - macdOffset);
+        const macdTo = Math.max(0, logicalRange.to - macdOffset);
+        macdChartRef.current.timeScale().setVisibleLogicalRange({ from: macdFrom, to: macdTo });
+      }
+
+      // Sync ATR chart - offset by ATR warmup period
+      if (atrChartRef.current && settings.atr.enabled) {
+        const atrFrom = Math.max(0, logicalRange.from - atrOffset);
+        const atrTo = Math.max(0, logicalRange.to - atrOffset);
+        atrChartRef.current.timeScale().setVisibleLogicalRange({ from: atrFrom, to: atrTo });
       }
     };
 
@@ -568,7 +597,7 @@ export default function ChartCanvas({
     return () => {
       chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(syncTimeScales);
     };
-  }, [settings.rsi.enabled, settings.macd.enabled]);
+  }, [settings.rsi.enabled, settings.rsi.period, settings.macd.enabled, settings.macd.slow, settings.atr.enabled, settings.atr.period]);
 
 
   // Update overlay series (MAs, Ribbon)
@@ -702,6 +731,17 @@ export default function ChartCanvas({
           slow={settings.macd.slow}
           signal={settings.macd.signal}
           chartRefOut={macdChartRef}
+        />
+      )}
+
+      {/* ATR pane (server-computed) */}
+      {settings.atr.enabled && (
+        <AtrPane
+          data={atrData}
+          height={atrHeight}
+          width={width}
+          period={settings.atr.period}
+          chartRefOut={atrChartRef}
         />
       )}
     </div>
@@ -898,6 +938,90 @@ function MacdPane({
       chart.remove();
     };
   }, [height, width, fast, slow, signal, macdLine, signalLine, histogram, chartRefOut]);
+
+  return <div ref={containerRef} style={{ width: "100%", borderTop: `1px solid ${CHART_GRID}` }} />;
+}
+
+// ATR Pane component (server-computed data)
+function AtrPane({
+  data,
+  height,
+  width,
+  period,
+  chartRefOut,
+}: {
+  data: AtrDataPoint[];
+  height: number;
+  width?: number;
+  period: number;
+  chartRefOut?: React.MutableRefObject<IChartApi | null>;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || height === 0) return;
+
+    const chart = createChart(containerRef.current, {
+      width: width || containerRef.current.clientWidth,
+      height,
+      layout: {
+        background: { type: ColorType.Solid, color: CHART_BG },
+        textColor: CHART_TEXT,
+      },
+      grid: {
+        vertLines: { color: CHART_GRID },
+        horzLines: { color: CHART_GRID },
+      },
+      rightPriceScale: {
+        borderColor: CHART_GRID,
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+      },
+      timeScale: {
+        visible: false,
+      },
+    });
+
+    chartRef.current = chart;
+    if (chartRefOut) chartRefOut.current = chart;
+
+    // Add ATR line (v5 API)
+    const series = chart.addSeries(LineSeries, {
+      color: LINE_COLORS.atr,
+      lineWidth: 2,
+      title: `ATR(${period})`,
+      priceScaleId: "right",
+    });
+    seriesRef.current = series;
+
+    const handleResize = () => {
+      if (containerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({
+          width: width || containerRef.current.clientWidth,
+        });
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      if (chartRefOut) chartRefOut.current = null;
+      chart.remove();
+    };
+  }, [height, width, period, chartRefOut]);
+
+  useEffect(() => {
+    if (seriesRef.current && data.length > 0) {
+      // Convert server AtrDataPoint[] to LineData[]
+      const lineData: LineData[] = data.map((d) => ({
+        time: Math.floor(d.timestamp / 1000) as any, // Convert ms to seconds
+        value: d.atr,
+      }));
+      seriesRef.current.setData(lineData);
+    }
+  }, [data]);
 
   return <div ref={containerRef} style={{ width: "100%", borderTop: `1px solid ${CHART_GRID}` }} />;
 }

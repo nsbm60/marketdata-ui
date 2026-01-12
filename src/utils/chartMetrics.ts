@@ -257,6 +257,7 @@ export interface ChartMetricSettings {
   ribbon: { enabled: boolean; count: number; base: number; step: number };
   rsi: { enabled: boolean; period: number };
   macd: { enabled: boolean; fast: number; slow: number; signal: number };
+  atr: { enabled: boolean; period: number };  // ATR (Average True Range) - server-side calculation
 }
 
 // Color palette for moving averages (cycles through)
@@ -276,6 +277,7 @@ export const DEFAULT_METRIC_SETTINGS: ChartMetricSettings = {
   ribbon: { enabled: false, count: 3, base: 9, step: 3 },
   rsi: { enabled: false, period: 14 },
   macd: { enabled: false, fast: 12, slow: 26, signal: 9 },
+  atr: { enabled: false, period: 14 },  // ATR computed server-side
 };
 
 // Helper to generate unique ID

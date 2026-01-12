@@ -192,7 +192,7 @@ function RibbonPopoverContent({
   updateSetting,
 }: {
   settings: ChartMetricSettings;
-  updateSetting: <K extends "ribbon" | "rsi" | "macd">(key: K, updates: Partial<ChartMetricSettings[K]>) => void;
+  updateSetting: <K extends "ribbon" | "rsi" | "macd" | "atr">(key: K, updates: Partial<ChartMetricSettings[K]>) => void;
 }) {
   const [countStr, setCountStr] = useState(settings.ribbon.count.toString());
   const [baseStr, setBaseStr] = useState(settings.ribbon.base.toString());
@@ -395,11 +395,13 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
   const [showRibbon, setShowRibbon] = useState(false);
   const [showRSI, setShowRSI] = useState(false);
   const [showMACD, setShowMACD] = useState(false);
+  const [showATR, setShowATR] = useState(false);
 
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const ribbonRef = useRef<HTMLButtonElement>(null);
   const rsiRef = useRef<HTMLButtonElement>(null);
   const macdRef = useRef<HTMLButtonElement>(null);
+  const atrRef = useRef<HTMLButtonElement>(null);
 
   // Get next color for new MA
   const nextColor = MA_COLORS[settings.movingAverages.length % MA_COLORS.length];
@@ -437,7 +439,7 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
   };
 
   // Update other settings
-  const updateSetting = <K extends "ribbon" | "rsi" | "macd">(
+  const updateSetting = <K extends "ribbon" | "rsi" | "macd" | "atr">(
     key: K,
     updates: Partial<ChartMetricSettings[K]>
   ) => {
@@ -662,6 +664,56 @@ export default function MetricToolbar({ settings, onSettingsChange }: MetricTool
               max={100}
               style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
             />
+          </div>
+        </Popover>
+      </div>
+
+      {/* ATR (Average True Range) - computed server-side */}
+      <div style={{ position: "relative", display: "inline-flex" }}>
+        <button
+          ref={atrRef}
+          onClick={() => updateSetting("atr", { enabled: !settings.atr.enabled })}
+          style={{
+            padding: "4px 8px",
+            borderRadius: "4px 0 0 4px",
+            border: `1px solid ${settings.atr.enabled ? semantic.warning : dark.border.primary}`,
+            backgroundColor: settings.atr.enabled ? "#3d2f1f" : dark.bg.secondary,
+            color: settings.atr.enabled ? semantic.warning : dark.text.secondary,
+            cursor: "pointer",
+            fontSize: 11,
+          }}
+        >
+          ATR({settings.atr.period})
+        </button>
+        <button
+          onClick={() => setShowATR(!showATR)}
+          style={{
+            padding: "4px 6px",
+            borderRadius: "0 4px 4px 0",
+            border: `1px solid ${settings.atr.enabled ? semantic.warning : dark.border.primary}`,
+            borderLeft: "none",
+            backgroundColor: settings.atr.enabled ? "#3d2f1f" : dark.bg.secondary,
+            color: settings.atr.enabled ? semantic.warning : dark.text.secondary,
+            cursor: "pointer",
+            fontSize: 9,
+          }}
+        >
+          ▼
+        </button>
+        <Popover isOpen={showATR} onClose={() => setShowATR(false)} anchorRef={atrRef}>
+          <div>
+            <label style={{ display: "block", fontSize: 11, color: dark.text.secondary, marginBottom: 4 }}>Period</label>
+            <input
+              type="number"
+              value={settings.atr.period}
+              onChange={(e) => updateSetting("atr", { period: parseInt(e.target.value) || 14 })}
+              min={1}
+              max={100}
+              style={{ width: "100%", padding: "4px 8px", backgroundColor: dark.bg.secondary, border: `1px solid ${dark.border.primary}`, borderRadius: 4, color: dark.text.primary, fontSize: 13 }}
+            />
+            <div style={{ fontSize: 10, color: dark.text.muted, marginTop: 6 }}>
+              Volatility indicator (server-computed)
+            </div>
           </div>
         </Popover>
       </div>

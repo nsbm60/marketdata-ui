@@ -87,15 +87,19 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
   // Number of visible bars to display
   const visibleBars = 200;
 
+  // Determine ATR period if ATR is enabled
+  const atrPeriod = settings.atr.enabled ? settings.atr.period : undefined;
+
   // Chart data (session filtering happens server-side)
   // Load extra bars for indicator warm-up so indicators have valid values from first visible bar
-  const { bars, liveCandle, loading, loadingMore, error, hasMore, refresh, loadMore } = useChartData(
+  const { bars, liveCandle, loading, loadingMore, error, hasMore, atrData, liveAtr, refresh, loadMore } = useChartData(
     activeSymbol,
     timeframe,
     visibleBars,
     !!activeSymbol,
     session,
-    warmupBars
+    warmupBars,
+    atrPeriod
   );
 
   // Update symbol input when selected prop changes, but don't auto-load
@@ -341,6 +345,7 @@ export default function ChartPanel({ selected }: ChartPanelProps) {
             hasMore={hasMore}
             loadingMore={loadingMore}
             warmupBars={warmupBars}
+            atrData={atrData}
           />
         )}
       </div>

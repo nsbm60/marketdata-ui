@@ -13,6 +13,12 @@ import { socketHub } from "../ws/SocketHub";
 import type { TickEnvelope } from "../ws/ws-types";
 import { aggregateBars, Bar } from "../utils/barAggregation";
 
+// ATR data point
+export interface AtrDataPoint {
+  timestamp: number;
+  atr: number;
+}
+
 // Response shape from CalcServer's get_chart_data
 export interface ChartDataResponse {
   symbol: string;
@@ -21,6 +27,9 @@ export interface ChartDataResponse {
   aggregateMultiple: number;
   hasMore?: boolean;  // For pagination - true if more historical data is available
   bars: Bar[];
+  atr?: AtrDataPoint[];  // ATR values if atrPeriod was requested
+  atrPeriod?: number;
+  atrReportTopic?: string;
 }
 
 // Live candle update shape from CandleReportBuilder
@@ -53,6 +62,10 @@ export interface UseChartDataResult {
   aggregateMultiple: number;
   /** Whether more historical data is available */
   hasMore: boolean;
+  /** ATR (Average True Range) data points */
+  atrData: AtrDataPoint[];
+  /** Current live ATR value */
+  liveAtr: number | undefined;
   /** Refresh data (re-fetch historical) */
   refresh: () => void;
   /** Load more historical data (prepend older bars) */
@@ -68,6 +81,7 @@ export interface UseChartDataResult {
  * @param enabled - Whether to fetch and subscribe (false = disabled)
  * @param session - Market session: "extended" (default) or "regular"
  * @param warmupBars - Extra bars to load for indicator warm-up (default: 0)
+ * @param atrPeriod - ATR period to calculate (undefined = no ATR)
  */
 export function useChartData(
   symbol: string | undefined,
@@ -75,7 +89,8 @@ export function useChartData(
   barCount: number = 200,
   enabled: boolean = true,
   session: "extended" | "regular" = "extended",
-  warmupBars: number = 0
+  warmupBars: number = 0,
+  atrPeriod?: number
 ): UseChartDataResult {
   const [bars, setBars] = useState<Bar[]>([]);
   const [liveCandle, setLiveCandle] = useState<Bar | undefined>(undefined);
@@ -84,21 +99,28 @@ export function useChartData(
   const [error, setError] = useState<string | undefined>(undefined);
   const [aggregateMultiple, setAggregateMultiple] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [atrData, setAtrData] = useState<AtrDataPoint[]>([]);
+  const [liveAtr, setLiveAtr] = useState<number | undefined>(undefined);
 
   // Track current report topic for cleanup
   const reportTopicRef = useRef<string | undefined>(undefined);
+  const atrReportTopicRef = useRef<string | undefined>(undefined);
   const symbolRef = useRef<string | undefined>(undefined);
   const timeframeRef = useRef<string>(timeframe);
+  const atrPeriodRef = useRef<number | undefined>(atrPeriod);
 
   // Update refs
   symbolRef.current = symbol;
   timeframeRef.current = timeframe;
+  atrPeriodRef.current = atrPeriod;
 
   // Fetch data function
   const fetchData = useCallback(async () => {
     if (!symbol || !enabled) {
       setBars([]);
       setLiveCandle(undefined);
+      setAtrData([]);
+      setLiveAtr(undefined);
       setError(undefined);
       return;
     }
@@ -109,17 +131,22 @@ export function useChartData(
     try {
       // Request extra bars for indicator warm-up
       const totalBars = barCount + warmupBars;
-      console.log(`[useChartData] Fetching chart data for ${symbol} @ ${timeframe} (${barCount} visible + ${warmupBars} warmup = ${totalBars} total)`);
+      console.log(`[useChartData] Fetching chart data for ${symbol} @ ${timeframe} (${barCount} visible + ${warmupBars} warmup = ${totalBars} total)${atrPeriod ? ` with ATR(${atrPeriod})` : ''}`);
+
+      const requestPayload: Record<string, unknown> = {
+        target: "calc",
+        symbol: symbol.toUpperCase(),
+        timeframe,
+        barCount: totalBars,
+        session,
+      };
+      if (atrPeriod !== undefined && atrPeriod > 0) {
+        requestPayload.atrPeriod = atrPeriod;
+      }
 
       const ack = await socketHub.sendControl(
         "get_chart_data",
-        {
-          target: "calc",
-          symbol: symbol.toUpperCase(),
-          timeframe,
-          barCount: totalBars,
-          session,
-        },
+        requestPayload,
         { timeoutMs: 15000 }
       );
 
@@ -149,13 +176,24 @@ export function useChartData(
       setLiveCandle(undefined); // Reset live candle
       reportTopicRef.current = responseData.reportTopic;
 
+      // Handle ATR data if present
+      if (responseData.atr && responseData.atr.length > 0) {
+        console.log(`[useChartData] Received ${responseData.atr.length} ATR data points`);
+        setAtrData(responseData.atr);
+        atrReportTopicRef.current = responseData.atrReportTopic;
+      } else {
+        setAtrData([]);
+        atrReportTopicRef.current = undefined;
+      }
+      setLiveAtr(undefined);
+
       setLoading(false);
     } catch (err) {
       console.error("[useChartData] Fetch error:", err);
       setError(err instanceof Error ? err.message : "Unknown error");
       setLoading(false);
     }
-  }, [symbol, timeframe, barCount, enabled, session, warmupBars]);
+  }, [symbol, timeframe, barCount, enabled, session, warmupBars, atrPeriod]);
 
   // Fetch on mount and when dependencies change
   useEffect(() => {
@@ -285,6 +323,95 @@ export function useChartData(
     };
   }, [symbol, timeframe]);
 
+  // Subscribe to live ATR updates
+  useEffect(() => {
+    if (!symbol || !enabled || !atrReportTopicRef.current || !atrPeriod) {
+      return;
+    }
+
+    const topic = atrReportTopicRef.current;
+    const channel = "report.atr";
+    const prefix = "report.atr.";
+    const subscriptionKey = topic.startsWith(prefix)
+      ? topic.substring(prefix.length)
+      : `${symbol.toLowerCase()}.${timeframeRef.current}`;
+
+    socketHub.send({
+      type: "subscribe",
+      channels: [channel],
+      symbols: [subscriptionKey],
+    });
+
+    const handleAtrTick = (tick: TickEnvelope) => {
+      if (!tick.topic.startsWith("report.atr.")) return;
+
+      const tickParts = tick.topic.split(".");
+      if (tickParts.length < 4) return;
+
+      const tickSymbol = tickParts[2];
+      const tickTimeframe = tickParts[3];
+
+      if (
+        tickSymbol.toUpperCase() !== symbolRef.current?.toUpperCase() ||
+        tickTimeframe.toLowerCase() !== timeframeRef.current.toLowerCase()
+      ) {
+        return;
+      }
+
+      try {
+        const payload = (tick.data as any)?.data ?? tick.data;
+        const atrValue = payload.atr as number;
+        const timestamp = payload.timestamp as number;
+
+        if (atrValue !== undefined) {
+          setLiveAtr(atrValue);
+
+          // Also update atrData with the new point
+          setAtrData((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.timestamp === timestamp) {
+              // Update existing point
+              return [...prev.slice(0, -1), { timestamp, atr: atrValue }];
+            }
+            // Append new point
+            return [...prev, { timestamp, atr: atrValue }];
+          });
+        }
+      } catch (e) {
+        console.warn("[useChartData] Failed to parse ATR update:", e);
+      }
+    };
+
+    socketHub.onTick(handleAtrTick);
+
+    return () => {
+      socketHub.offTick(handleAtrTick);
+      socketHub.send({
+        type: "unsubscribe",
+        channels: [channel],
+        symbols: [subscriptionKey],
+      });
+    };
+  }, [symbol, timeframe, enabled, atrPeriod, atrData.length]);
+
+  // Stop ATR report on unmount or when ATR is disabled
+  useEffect(() => {
+    return () => {
+      if (atrReportTopicRef.current && symbolRef.current && timeframeRef.current && atrPeriodRef.current) {
+        socketHub.send({
+          type: "control",
+          target: "calc",
+          op: "stop_atr",
+          id: `stop_atr_${Date.now()}`,
+          symbol: symbolRef.current,
+          timeframe: timeframeRef.current,
+          period: atrPeriodRef.current,
+        });
+        atrReportTopicRef.current = undefined;
+      }
+    };
+  }, [symbol, timeframe, atrPeriod]);
+
   // Load more historical data (older bars)
   const loadMore = useCallback(async () => {
     if (!symbol || !enabled || bars.length === 0 || loadingMore || !hasMore) {
@@ -357,6 +484,8 @@ export function useChartData(
     error,
     aggregateMultiple,
     hasMore,
+    atrData,
+    liveAtr,
     refresh: fetchData,
     loadMore,
   };
