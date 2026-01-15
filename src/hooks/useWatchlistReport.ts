@@ -77,6 +77,8 @@ export function useWatchlistReport(
   const [report, setReport] = useState<WatchlistReport | undefined>(undefined);
   const [lastUpdated, setLastUpdated] = useState<number | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
+  // Version counter to force re-renders even if report structure is similar
+  const [, setVersion] = useState(0);
 
   // Stable reference for name
   const nameRef = useRef(watchlistName);
@@ -132,6 +134,7 @@ export function useWatchlistReport(
           setReport(reportData);
           setLastUpdated(reportData.asOf);
           setLoaded(true);
+          setVersion(v => v + 1); // Force re-render even if report structure looks similar
         }
       } catch (e) {
         console.warn("[useWatchlistReport] Failed to parse report:", e);

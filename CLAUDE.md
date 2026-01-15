@@ -99,3 +99,18 @@ The rest is auto-discovered:
 - [ ] Channel constant in TopicBuilder.UiChannel
 - [ ] Channel added to TopicBuilder.UiChannel.AllReports
 - [ ] Frontend hook subscribes with lowercase symbol (all report channels use lowercase)
+
+### Debugging and Data Assumptions
+
+**Rule**: Assume external data sources (Alpaca, IB) provide all required data. If data is missing, fail hard.
+
+When debugging data issues:
+- **Trust the source** - Alpaca and IB are production services; assume they deliver what we request
+- **Look inward first** - The bug is more likely in how we request, parse, or cache data than in the external source
+- **Fail hard on missing data** - Throw exceptions, don't silently continue with partial state
+- **No partial initialization** - Objects must be fully initialized at construction time; don't create objects that will be "fixed up" later
+
+**Rationale**:
+- Silent failures mask bugs and make diagnosis difficult
+- Failing early surfaces problems at the point of origin
+- Partial state leads to mysterious symptoms far from the root cause
