@@ -114,3 +114,16 @@ When debugging data issues:
 - Silent failures mask bugs and make diagnosis difficult
 - Failing early surfaces problems at the point of origin
 - Partial state leads to mysterious symptoms far from the root cause
+
+### Shared UI Components
+
+**Rule**: Before creating new UI elements, check `src/components/shared/` for existing components.
+
+Available shared components:
+- **Select** - Styled dropdown with consistent theming and cross-browser fixes (use instead of raw `<select>`)
+- **Button** - Styled button with variants (primary, secondary, danger, success) and sizes (sm, md, form); includes `colorScheme: "light"` to prevent macOS dark mode text visibility issues
+
+When creating new UI:
+1. Check `src/components/shared/` for existing components
+2. Use shared components to maintain visual consistency
+3. If a pattern is used in 2+ places, consider extracting to a shared component

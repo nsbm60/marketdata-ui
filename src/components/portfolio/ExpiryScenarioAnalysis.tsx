@@ -12,6 +12,7 @@ type Props = {
   equityPrices: Map<string, PriceData>;
   greeksMap?: Map<string, OptionGreeks>;
   greeksVersion?: number;
+  onSelectUnderlying?: (underlying: string) => void;
 };
 
 interface PositionScenarioValue {
@@ -56,7 +57,7 @@ interface AnalysisResult {
 
 const DEFAULT_SCENARIOS = [-0.06, -0.04, -0.02, 0, 0.02, 0.04, 0.06];
 
-export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeksMap, greeksVersion }: Props) {
+export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeksMap, greeksVersion, onSelectUnderlying }: Props) {
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -227,11 +228,23 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
 
       {results.map(result => (
         <div key={result.underlying} style={resultContainer}>
-          <div style={resultHeader}>
+          <div
+            style={{
+              ...resultHeader,
+              cursor: onSelectUnderlying ? "pointer" : undefined,
+            }}
+            onClick={() => onSelectUnderlying?.(result.underlying)}
+            title={onSelectUnderlying ? "Click to open simulator" : undefined}
+          >
             <span style={{ fontWeight: 700 }}>{result.underlying}</span>
             <span style={{ marginLeft: 12, color: light.text.muted, fontSize: fonts.ui.body }}>
               Current: ${fmtPrice(result.currentPrice)}
             </span>
+            {onSelectUnderlying && (
+              <span style={{ marginLeft: "auto", color: semantic.info.text, fontSize: fonts.ui.caption }}>
+                Simulate →
+              </span>
+            )}
           </div>
 
           {/* Scenario header row */}
@@ -350,13 +363,15 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                           </div>
                         );
                       } else {
-                        // For options: show value and per-contract price
+                        // For options: show P&L (change from current) and per-contract terminal price
                         const optionPrice = pos.quantity !== 0
                           ? Math.abs(sv.value) / (Math.abs(pos.quantity) * 100)
                           : 0;
                         return (
                           <div key={i} style={{ ...valueCell, borderLeft: scenarioBorder(i) }}>
-                            <div>${fmt(sv.value)}</div>
+                            <div style={{ color: valueColor(sv.pnl) }}>
+                              {sv.pnl >= 0 ? "+" : ""}{fmt(sv.pnl)}
+                            </div>
                             <div style={{ color: light.text.light, fontSize: fonts.table.small }}>
                               @${optionPrice.toFixed(2)}
                             </div>

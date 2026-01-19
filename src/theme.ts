@@ -169,6 +169,7 @@ export const rowHighlight = {
   expiringBorder: semantic.warning.accent,
   selected: semantic.highlight.blue,
   selectedBorder: semantic.highlight.blueBorder,
+  hypothetical: "#f0f4ff", // Light blue for hypothetical positions
 };
 
 // ─────────────────────────────────────────────────────────────

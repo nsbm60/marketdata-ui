@@ -12,6 +12,7 @@ import {
   OptionsAnalysisTable,
   ExpiryScenarioAnalysis,
   PnLSummary,
+  SimulatorPanel,
 } from "./components/portfolio";
 import ConnectionStatus from "./components/shared/ConnectionStatus";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
@@ -129,6 +130,9 @@ export default function IBPanel() {
 
   // Tab for positions view: "positions", "analysis", or "pnl"
   const [positionsTab, setPositionsTab] = useState<"positions" | "analysis" | "scenarios" | "pnl">("positions");
+
+  // Simulator drill-down state
+  const [simulatorUnderlying, setSimulatorUnderlying] = useState<string | null>(null);
 
   // Market state for prevTradingDay and timeframes
   const marketState = useMarketState();
@@ -743,12 +747,31 @@ export default function IBPanel() {
                                 ? getChannelPrices("option").get(buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike))
                                 : equityPrices.get(p.symbol.toUpperCase());
                               // Calculate mid if we have bid and ask
-                              const marketData = freshPriceData ? {
+                              let marketData = freshPriceData ? {
                                 ...freshPriceData,
                                 mid: (freshPriceData.bid !== undefined && freshPriceData.ask !== undefined)
                                   ? (freshPriceData.bid + freshPriceData.ask) / 2
                                   : undefined
                               } : undefined;
+                              // Merge Greeks from CalcServer report for options
+                              if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+                                const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
+                                // Try colon-separated key (reportGreeksMap) and OSI key (portfolioGreeksMap)
+                                const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
+                                const osiKey = buildOsiSymbol(p.symbol, p.expiry, right, p.strike);
+                                const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(osiKey);
+                                if (greeks) {
+                                  marketData = {
+                                    ...marketData,
+                                    delta: greeks.delta ?? marketData?.delta,
+                                    gamma: greeks.gamma ?? marketData?.gamma,
+                                    theta: greeks.theta ?? marketData?.theta,
+                                    vega: greeks.vega ?? marketData?.vega,
+                                    iv: greeks.iv ?? marketData?.iv,
+                                    last: greeks.last ?? marketData?.last,
+                                  };
+                                }
+                              }
                               openTradeTicket(p.symbol, p.account, "BUY", p.secType, optionDetails, marketData);
                             }}
                             style={{ ...iconBtn, background: semantic.success.bgMuted, color: semantic.success.textDark }}
@@ -766,12 +789,32 @@ export default function IBPanel() {
                                 ? getChannelPrices("option").get(buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike))
                                 : equityPrices.get(p.symbol.toUpperCase());
                               // Calculate mid if we have bid and ask
-                              const marketData = freshPriceData ? {
+                              let marketData = freshPriceData ? {
                                 ...freshPriceData,
                                 mid: (freshPriceData.bid !== undefined && freshPriceData.ask !== undefined)
                                   ? (freshPriceData.bid + freshPriceData.ask) / 2
                                   : undefined
                               } : undefined;
+                              // Merge Greeks from CalcServer report for options
+                              if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+                                const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
+                                // Try colon-separated key (reportGreeksMap format)
+                                const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
+                                // Try OSI key (portfolioGreeksMap format)
+                                const osiKey = buildOsiSymbol(p.symbol, p.expiry, right, p.strike);
+                                const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(osiKey);
+                                if (greeks) {
+                                  marketData = {
+                                    ...marketData,
+                                    delta: greeks.delta ?? marketData?.delta,
+                                    gamma: greeks.gamma ?? marketData?.gamma,
+                                    theta: greeks.theta ?? marketData?.theta,
+                                    vega: greeks.vega ?? marketData?.vega,
+                                    iv: greeks.iv ?? marketData?.iv,
+                                    last: greeks.last ?? marketData?.last,
+                                  };
+                                }
+                              }
                               openTradeTicket(p.symbol, p.account, "SELL", p.secType, optionDetails, marketData);
                             }}
                             style={{ ...iconBtn, background: semantic.highlight.pink, color: semantic.error.textDark }}
@@ -799,15 +842,26 @@ export default function IBPanel() {
                   </div>
                 )}
 
-                {/* Expiry Scenario Analysis */}
+                {/* Expiry Scenario Analysis / Simulator */}
                 {positionsTab === "scenarios" && (
                   <div style={{ maxHeight: 750, overflow: "auto" }}>
-                    <ExpiryScenarioAnalysis
-                      positions={accountState.positions}
-                      equityPrices={equityPrices}
-                      greeksMap={combinedGreeksMap}
-                      greeksVersion={effectiveGreeksVersion}
-                    />
+                    {simulatorUnderlying ? (
+                      <SimulatorPanel
+                        underlying={simulatorUnderlying}
+                        positions={accountState.positions}
+                        equityPrices={equityPrices}
+                        greeksMap={combinedGreeksMap}
+                        onClose={() => setSimulatorUnderlying(null)}
+                      />
+                    ) : (
+                      <ExpiryScenarioAnalysis
+                        positions={accountState.positions}
+                        equityPrices={equityPrices}
+                        greeksMap={combinedGreeksMap}
+                        greeksVersion={effectiveGreeksVersion}
+                        onSelectUnderlying={setSimulatorUnderlying}
+                      />
+                    )}
                   </div>
                 )}
 

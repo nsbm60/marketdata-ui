@@ -1,8 +1,9 @@
 // src/components/TradeTicket.tsx
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { socketHub } from "../ws/SocketHub";
 import { useMarketPrice } from "../hooks/useMarketData";
 import Select from "./shared/Select";
+import Button from "./shared/Button";
 import { light, semantic, pnl } from "../theme";
 
 type Props = {
@@ -209,12 +210,22 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
         )}
 
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-          <button onClick={sendOrder} style={{ flex: 1, padding: 12, background: side === "BUY" ? pnl.positive : pnl.negative, color: light.bg.primary, border: "none", borderRadius: 8, fontWeight: 600 }}>
+          <Button
+            onClick={sendOrder}
+            size="form"
+            style={{
+              flex: 1,
+              background: side === "BUY" ? pnl.positive : pnl.negative,
+              color: light.bg.primary,
+              border: "none",
+              fontWeight: 600,
+            }}
+          >
             Submit {side}
-          </button>
-          <button onClick={onClose} style={{ padding: 12, border: `1px solid ${light.border.lighter}`, background: light.bg.primary, borderRadius: 8, color: light.text.primary }}>
+          </Button>
+          <Button onClick={onClose} variant="secondary" size="form">
             Cancel
-          </button>
+          </Button>
         </div>
       </div>
     </div>

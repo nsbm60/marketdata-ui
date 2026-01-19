@@ -5,6 +5,7 @@ import { socketHub } from "../../ws/SocketHub";
 import { modalOverlay, modalContent } from "./styles";
 import { buildTopicSymbol } from "../../utils/options";
 import Select from "../shared/Select";
+import Button from "../shared/Button";
 import { light, semantic } from "../../theme";
 
 const THROTTLE_MS = 200;
@@ -378,36 +379,17 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
         )}
 
         <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-          <button
-            onClick={onClose}
-            style={{
-              flex: 1,
-              padding: "8px 12px",
-              border: `1px solid ${light.border.secondary}`,
-              borderRadius: 6,
-              background: light.bg.primary,
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
+          <Button onClick={onClose} variant="secondary" size="md" style={{ flex: 1 }}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={handleModify}
-            style={{
-              flex: 1,
-              padding: "8px 12px",
-              border: "none",
-              borderRadius: 6,
-              background: semantic.info.text,
-              color: light.bg.primary,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
+            variant="primary"
+            size="md"
+            style={{ flex: 1, background: semantic.info.text, color: light.bg.primary, fontWeight: 600 }}
           >
             Modify Order
-          </button>
+          </Button>
         </div>
       </div>
     </div>

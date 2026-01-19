@@ -3,6 +3,7 @@ import { IbOpenOrder } from "../../types/portfolio";
 import { socketHub } from "../../ws/SocketHub";
 import { modalOverlay, modalContent } from "./styles";
 import { light, semantic, pnl } from "../../theme";
+import Button from "../shared/Button";
 
 type Props = {
   order: IbOpenOrder;
@@ -66,36 +67,22 @@ export default function CancelOrderModal({ order, onClose }: Props) {
         </div>
 
         <div style={{ display: "flex", gap: 12 }}>
-          <button
+          <Button
             onClick={onClose}
-            style={{
-              flex: 1,
-              padding: "10px 16px",
-              border: `1px solid ${light.border.secondary}`,
-              borderRadius: 6,
-              background: light.bg.primary,
-              fontSize: 14,
-              cursor: "pointer",
-            }}
+            variant="secondary"
+            size="form"
+            style={{ flex: 1 }}
           >
             Keep Order
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={handleCancel}
-            style={{
-              flex: 1,
-              padding: "10px 16px",
-              border: "none",
-              borderRadius: 6,
-              background: semantic.error.text,
-              color: light.bg.primary,
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
+            variant="danger"
+            size="form"
+            style={{ flex: 1, fontWeight: 600 }}
           >
             Cancel Order
-          </button>
+          </Button>
         </div>
       </div>
     </div>

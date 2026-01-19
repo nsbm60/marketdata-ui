@@ -16,7 +16,7 @@ import { formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { formatExpiryShort, daysToExpiry, osiToTopicSymbol, parseOptionSymbol } from "./utils/options";
 import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalysis";
-import ExpiryScenarioAnalysis from "./components/portfolio/ExpiryScenarioAnalysis";
+import { ExpiryScenarioAnalysis, SimulatorPanel } from "./components/portfolio";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
 import { usePortfolioOptionsReports, PortfolioOptionPosition, OptionGreeks } from "./hooks/usePortfolioOptionsReports";
 import { usePositionsReport, positionsReportClientId, ReportPosition } from "./hooks/usePositionsReport";
@@ -60,6 +60,9 @@ export default function FidelityPanel() {
 
   // Tab state: "positions", "analysis", or "scenarios"
   const [activeTab, setActiveTab] = useState<"positions" | "analysis" | "scenarios">("positions");
+
+  // Simulator drill-down state
+  const [simulatorUnderlying, setSimulatorUnderlying] = useState<string | null>(null);
 
   // Market state for timeframe options
   const marketState = useMarketState();
@@ -762,15 +765,26 @@ export default function FidelityPanel() {
                 </div>
               )}
 
-              {/* Expiry Scenarios Tab */}
+              {/* Expiry Scenarios Tab / Simulator */}
               {activeTab === "scenarios" && (
                 <div style={{ maxHeight: 750, overflow: "auto" }}>
-                  <ExpiryScenarioAnalysis
-                    positions={ibFormatPositions}
-                    equityPrices={equityPrices}
-                    greeksMap={combinedGreeksMap}
-                    greeksVersion={effectiveGreeksVersion}
-                  />
+                  {simulatorUnderlying ? (
+                    <SimulatorPanel
+                      underlying={simulatorUnderlying}
+                      positions={ibFormatPositions}
+                      equityPrices={equityPrices}
+                      greeksMap={combinedGreeksMap}
+                      onClose={() => setSimulatorUnderlying(null)}
+                    />
+                  ) : (
+                    <ExpiryScenarioAnalysis
+                      positions={ibFormatPositions}
+                      equityPrices={equityPrices}
+                      greeksMap={combinedGreeksMap}
+                      greeksVersion={effectiveGreeksVersion}
+                      onSelectUnderlying={setSimulatorUnderlying}
+                    />
+                  )}
                 </div>
               )}
             </div>

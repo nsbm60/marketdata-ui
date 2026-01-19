@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { socketHub } from "../ws/SocketHub";
 import { formatExpiryWithWeekday } from "../utils/options";
 import Select from "./shared/Select";
+import Button from "./shared/Button";
 import { light, semantic, pnl } from "../theme";
 
 const THROTTLE_MS = 200; // 5 updates/sec for trade tickets
@@ -401,32 +402,22 @@ export default function OptionTradeTicket({
         )}
 
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-          <button
+          <Button
             onClick={sendOrder}
+            size="form"
             style={{
               flex: 1,
-              padding: 12,
               background: side === "BUY" ? pnl.positive : pnl.negative,
               color: light.bg.primary,
               border: "none",
-              borderRadius: 8,
-              fontWeight: 600
+              fontWeight: 600,
             }}
           >
             Submit {side}
-          </button>
-          <button
-            onClick={onClose}
-            style={{
-              padding: 12,
-              border: `1px solid ${light.border.lighter}`,
-              background: light.bg.primary,
-              borderRadius: 8,
-              color: light.text.primary
-            }}
-          >
+          </Button>
+          <Button onClick={onClose} variant="secondary" size="form">
             Cancel
-          </button>
+          </Button>
         </div>
       </div>
     </div>
