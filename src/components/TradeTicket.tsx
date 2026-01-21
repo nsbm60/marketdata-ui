@@ -22,7 +22,7 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
   const [orderType, setOrderType] = useState<"MKT" | "LMT" | "STP" | "STPLMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
-  const [session, setSession] = useState<"REGULAR" | "PREMARKET" | "AFTERHOURS">("REGULAR");
+  const [session, setSession] = useState<"REGULAR" | "PREMARKET" | "AFTERHOURS" | "OVERNIGHT">("REGULAR");
   const [useAdaptive, setUseAdaptive] = useState(true);
   const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">("Normal");
 
@@ -166,6 +166,7 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
           <option value="REGULAR">Regular Hours (9:30 AM - 4:00 PM ET)</option>
           <option value="PREMARKET">Pre-Market (4:00 AM - 9:30 AM ET)</option>
           <option value="AFTERHOURS">After-Hours (4:00 PM - 8:00 PM ET)</option>
+          <option value="OVERNIGHT">Overnight (8:00 PM - 4:00 AM ET)</option>
         </Select>
 
         {/* Adaptive Algo - only show for non-market orders */}

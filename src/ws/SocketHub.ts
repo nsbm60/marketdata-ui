@@ -30,6 +30,10 @@ class SocketHub {
     { resolve: (ack: ControlAck) => void; reject: (err: Error) => void; timeout: number }
   >();
 
+  // Track active subscriptions for auto-replay on reconnect
+  // Key format: "channel:symbol" (e.g., "report.candle:nvda.5m" or "md.equity.quote:AAPL")
+  private activeSubscriptions = new Map<string, { channels: string[]; symbols: string[] }>();
+
   // ---- Public API ---------------------------------------------------------
 
   /** Ensure there is a connected socket (idempotent). */
@@ -64,6 +68,11 @@ class SocketHub {
       // flush queue
       while (this.sendQueue.length && ws.readyState === WebSocket.OPEN) {
         ws.send(this.sendQueue.shift()!);
+      }
+
+      // Auto-replay all tracked subscriptions on reconnect
+      if (isReconnect) {
+        this.resubscribeAll();
       }
 
       // Notify connect handlers (they can use this to refresh data)
@@ -138,12 +147,68 @@ class SocketHub {
 
   /** Fire-and-forget send of a JSON-able object. */
   public send(obj: Record<string, unknown>): void {
+    // Track subscriptions for auto-replay on reconnect
+    if (obj.type === "subscribe" && Array.isArray(obj.channels) && Array.isArray(obj.symbols)) {
+      this.trackSubscription(obj.channels as string[], obj.symbols as string[]);
+    } else if (obj.type === "unsubscribe" && Array.isArray(obj.channels) && Array.isArray(obj.symbols)) {
+      this.untrackSubscription(obj.channels as string[], obj.symbols as string[]);
+    }
+
     const s = JSON.stringify(obj);
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(s);
     } else {
       this.sendQueue.push(s);
       this.connect(); // ensure a connection attempt exists
+    }
+  }
+
+  /** Track a subscription for replay on reconnect. */
+  private trackSubscription(channels: string[], symbols: string[]): void {
+    for (const channel of channels) {
+      for (const symbol of symbols) {
+        const key = `${channel}:${symbol}`.toLowerCase();
+        this.activeSubscriptions.set(key, { channels: [channel], symbols: [symbol] });
+      }
+    }
+  }
+
+  /** Remove a subscription from tracking. */
+  private untrackSubscription(channels: string[], symbols: string[]): void {
+    for (const channel of channels) {
+      for (const symbol of symbols) {
+        const key = `${channel}:${symbol}`.toLowerCase();
+        this.activeSubscriptions.delete(key);
+      }
+    }
+  }
+
+  /** Replay all tracked subscriptions (called on reconnect). */
+  private resubscribeAll(): void {
+    if (this.activeSubscriptions.size === 0) return;
+
+    console.log(`[SocketHub] Replaying ${this.activeSubscriptions.size} subscriptions after reconnect`);
+
+    // Group by channel for efficiency
+    const byChannel = new Map<string, Set<string>>();
+    for (const { channels, symbols } of this.activeSubscriptions.values()) {
+      for (const channel of channels) {
+        if (!byChannel.has(channel)) {
+          byChannel.set(channel, new Set());
+        }
+        for (const symbol of symbols) {
+          byChannel.get(channel)!.add(symbol);
+        }
+      }
+    }
+
+    // Send grouped subscriptions
+    for (const [channel, symbolSet] of byChannel) {
+      const symbols = Array.from(symbolSet);
+      const msg = JSON.stringify({ type: "subscribe", channels: [channel], symbols });
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        this.socket.send(msg);
+      }
     }
   }
 

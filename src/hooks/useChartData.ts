@@ -10,13 +10,25 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { socketHub } from "../ws/SocketHub";
-import type { TickEnvelope } from "../ws/ws-types";
 import { aggregateBars, Bar } from "../utils/barAggregation";
+import { useSubscription } from "./useSubscription";
 
-// ATR data point
+// Indicator data point types
 export interface AtrDataPoint {
   timestamp: number;
   atr: number;
+}
+
+export interface RsiDataPoint {
+  timestamp: number;
+  rsi: number;
+}
+
+export interface MacdDataPoint {
+  timestamp: number;
+  macd: number;
+  signal: number;
+  histogram: number;
 }
 
 // Response shape from CalcServer's get_chart_data
@@ -27,9 +39,20 @@ export interface ChartDataResponse {
   aggregateMultiple: number;
   hasMore?: boolean;  // For pagination - true if more historical data is available
   bars: Bar[];
-  atr?: AtrDataPoint[];  // ATR values if atrPeriod was requested
+  // ATR
+  atr?: AtrDataPoint[];
   atrPeriod?: number;
   atrReportTopic?: string;
+  // RSI
+  rsi?: RsiDataPoint[];
+  rsiPeriod?: number;
+  rsiReportTopic?: string;
+  // MACD
+  macd?: MacdDataPoint[];
+  macdFast?: number;
+  macdSlow?: number;
+  macdSignal?: number;
+  macdReportTopic?: string;
 }
 
 // Live candle update shape from CandleReportBuilder
@@ -66,10 +89,27 @@ export interface UseChartDataResult {
   atrData: AtrDataPoint[];
   /** Current live ATR value */
   liveAtr: number | undefined;
+  /** RSI (Relative Strength Index) data points */
+  rsiData: RsiDataPoint[];
+  /** Current live RSI value */
+  liveRsi: number | undefined;
+  /** MACD data points */
+  macdData: MacdDataPoint[];
+  /** Current live MACD values */
+  liveMacd: MacdDataPoint | undefined;
   /** Refresh data (re-fetch historical) */
   refresh: () => void;
   /** Load more historical data (prepend older bars) */
   loadMore: () => void;
+}
+
+/** Indicator settings for useChartData */
+export interface ChartIndicatorSettings {
+  atrPeriod?: number;
+  rsiPeriod?: number;
+  macdFast?: number;
+  macdSlow?: number;
+  macdSignal?: number;
 }
 
 /**
@@ -81,7 +121,7 @@ export interface UseChartDataResult {
  * @param enabled - Whether to fetch and subscribe (false = disabled)
  * @param session - Market session: "extended" (default) or "regular"
  * @param warmupBars - Extra bars to load for indicator warm-up (default: 0)
- * @param atrPeriod - ATR period to calculate (undefined = no ATR)
+ * @param indicators - Optional indicator settings (ATR, RSI, MACD)
  */
 export function useChartData(
   symbol: string | undefined,
@@ -90,8 +130,9 @@ export function useChartData(
   enabled: boolean = true,
   session: "extended" | "regular" = "extended",
   warmupBars: number = 0,
-  atrPeriod?: number
+  indicators?: ChartIndicatorSettings
 ): UseChartDataResult {
+  const { atrPeriod, rsiPeriod, macdFast, macdSlow, macdSignal } = indicators || {};
   const [bars, setBars] = useState<Bar[]>([]);
   const [liveCandle, setLiveCandle] = useState<Bar | undefined>(undefined);
   const [loading, setLoading] = useState(false);
@@ -101,18 +142,35 @@ export function useChartData(
   const [hasMore, setHasMore] = useState(true);
   const [atrData, setAtrData] = useState<AtrDataPoint[]>([]);
   const [liveAtr, setLiveAtr] = useState<number | undefined>(undefined);
+  const [rsiData, setRsiData] = useState<RsiDataPoint[]>([]);
+  const [liveRsi, setLiveRsi] = useState<number | undefined>(undefined);
+  const [macdData, setMacdData] = useState<MacdDataPoint[]>([]);
+  const [liveMacd, setLiveMacd] = useState<MacdDataPoint | undefined>(undefined);
 
-  // Track current report topic for cleanup
+  // Subscription keys (set when reports start, cleared on symbol/timeframe change)
+  // Format: "{symbol}.{timeframe}" for candles, or specific topic suffix for indicators
+  const [candleSubKey, setCandleSubKey] = useState<string>("");
+  const [atrSubKey, setAtrSubKey] = useState<string>("");
+  const [rsiSubKey, setRsiSubKey] = useState<string>("");
+  const [macdSubKey, setMacdSubKey] = useState<string>("");
+
+  // Track current report topic for cleanup (still need ref for stop requests)
   const reportTopicRef = useRef<string | undefined>(undefined);
   const atrReportTopicRef = useRef<string | undefined>(undefined);
+  const rsiReportTopicRef = useRef<string | undefined>(undefined);
+  const macdReportTopicRef = useRef<string | undefined>(undefined);
   const symbolRef = useRef<string | undefined>(undefined);
   const timeframeRef = useRef<string>(timeframe);
   const atrPeriodRef = useRef<number | undefined>(atrPeriod);
+  const rsiPeriodRef = useRef<number | undefined>(rsiPeriod);
+  const macdSettingsRef = useRef<{ fast?: number; slow?: number; signal?: number }>({});
 
   // Update refs
   symbolRef.current = symbol;
   timeframeRef.current = timeframe;
   atrPeriodRef.current = atrPeriod;
+  rsiPeriodRef.current = rsiPeriod;
+  macdSettingsRef.current = { fast: macdFast, slow: macdSlow, signal: macdSignal };
 
   // Fetch data function
   const fetchData = useCallback(async () => {
@@ -121,6 +179,10 @@ export function useChartData(
       setLiveCandle(undefined);
       setAtrData([]);
       setLiveAtr(undefined);
+      setRsiData([]);
+      setLiveRsi(undefined);
+      setMacdData([]);
+      setLiveMacd(undefined);
       setError(undefined);
       return;
     }
@@ -131,7 +193,12 @@ export function useChartData(
     try {
       // Request extra bars for indicator warm-up
       const totalBars = barCount + warmupBars;
-      console.log(`[useChartData] Fetching chart data for ${symbol} @ ${timeframe} (${barCount} visible + ${warmupBars} warmup = ${totalBars} total)${atrPeriod ? ` with ATR(${atrPeriod})` : ''}`);
+      const indicatorDesc = [
+        atrPeriod ? `ATR(${atrPeriod})` : null,
+        rsiPeriod ? `RSI(${rsiPeriod})` : null,
+        macdFast && macdSlow && macdSignal ? `MACD(${macdFast},${macdSlow},${macdSignal})` : null,
+      ].filter(Boolean).join(', ');
+      console.log(`[useChartData] Fetching chart data for ${symbol} @ ${timeframe} (${barCount} visible + ${warmupBars} warmup = ${totalBars} total)${indicatorDesc ? ` with ${indicatorDesc}` : ''}`);
 
       const requestPayload: Record<string, unknown> = {
         target: "calc",
@@ -142,6 +209,14 @@ export function useChartData(
       };
       if (atrPeriod !== undefined && atrPeriod > 0) {
         requestPayload.atrPeriod = atrPeriod;
+      }
+      if (rsiPeriod !== undefined && rsiPeriod > 0) {
+        requestPayload.rsiPeriod = rsiPeriod;
+      }
+      if (macdFast !== undefined && macdSlow !== undefined && macdSignal !== undefined) {
+        requestPayload.macdFast = macdFast;
+        requestPayload.macdSlow = macdSlow;
+        requestPayload.macdSignal = macdSignal;
       }
 
       const ack = await socketHub.sendControl(
@@ -176,16 +251,57 @@ export function useChartData(
       setLiveCandle(undefined); // Reset live candle
       reportTopicRef.current = responseData.reportTopic;
 
+      // Set candle subscription key (extract from topic: "report.candle.nvda.5m" -> "nvda.5m")
+      const candlePrefix = "report.candle.";
+      const candleKey = responseData.reportTopic?.startsWith(candlePrefix)
+        ? responseData.reportTopic.substring(candlePrefix.length)
+        : "";
+      setCandleSubKey(candleKey);
+
       // Handle ATR data if present
       if (responseData.atr && responseData.atr.length > 0) {
         console.log(`[useChartData] Received ${responseData.atr.length} ATR data points`);
         setAtrData(responseData.atr);
         atrReportTopicRef.current = responseData.atrReportTopic;
+        const atrPrefix = "report.atr.";
+        setAtrSubKey(responseData.atrReportTopic?.startsWith(atrPrefix)
+          ? responseData.atrReportTopic.substring(atrPrefix.length) : "");
       } else {
         setAtrData([]);
         atrReportTopicRef.current = undefined;
+        setAtrSubKey("");
       }
       setLiveAtr(undefined);
+
+      // Handle RSI data if present
+      if (responseData.rsi && responseData.rsi.length > 0) {
+        console.log(`[useChartData] Received ${responseData.rsi.length} RSI data points`);
+        setRsiData(responseData.rsi);
+        rsiReportTopicRef.current = responseData.rsiReportTopic;
+        const rsiPrefix = "report.rsi.";
+        setRsiSubKey(responseData.rsiReportTopic?.startsWith(rsiPrefix)
+          ? responseData.rsiReportTopic.substring(rsiPrefix.length) : "");
+      } else {
+        setRsiData([]);
+        rsiReportTopicRef.current = undefined;
+        setRsiSubKey("");
+      }
+      setLiveRsi(undefined);
+
+      // Handle MACD data if present
+      if (responseData.macd && responseData.macd.length > 0) {
+        console.log(`[useChartData] Received ${responseData.macd.length} MACD data points`);
+        setMacdData(responseData.macd);
+        macdReportTopicRef.current = responseData.macdReportTopic;
+        const macdPrefix = "report.macd.";
+        setMacdSubKey(responseData.macdReportTopic?.startsWith(macdPrefix)
+          ? responseData.macdReportTopic.substring(macdPrefix.length) : "");
+      } else {
+        setMacdData([]);
+        macdReportTopicRef.current = undefined;
+        setMacdSubKey("");
+      }
+      setLiveMacd(undefined);
 
       setLoading(false);
     } catch (err) {
@@ -193,69 +309,28 @@ export function useChartData(
       setError(err instanceof Error ? err.message : "Unknown error");
       setLoading(false);
     }
-  }, [symbol, timeframe, barCount, enabled, session, warmupBars, atrPeriod]);
+  }, [symbol, timeframe, barCount, enabled, session, warmupBars, atrPeriod, rsiPeriod, macdFast, macdSlow, macdSignal]);
 
   // Fetch on mount and when dependencies change
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Subscribe to live candle updates
-  useEffect(() => {
-    if (!symbol || !enabled || !reportTopicRef.current) {
-      return;
-    }
-
-    const topic = reportTopicRef.current;
-
-    // Subscribe to report.candle channel
-    // Topic format: report.candle.{symbol}.{timeframe}
-    // Subscription key is "{symbol}.{timeframe}" (everything after "report.candle.")
-    const channel = "report.candle";
-    const prefix = "report.candle.";
-    const subscriptionKey = topic.startsWith(prefix)
-      ? topic.substring(prefix.length)
-      : `${symbol.toLowerCase()}.${timeframeRef.current}`;
-
-    socketHub.send({
-      type: "subscribe",
-      channels: [channel],
-      symbols: [subscriptionKey],
-    });
-
-    const handleTick = (tick: TickEnvelope) => {
-      // Check if this is our candle report
-      if (!tick.topic.startsWith("report.candle.")) return;
-
-      // Extract symbol from topic: report.candle.NVDA.5m
-      const tickParts = tick.topic.split(".");
-      if (tickParts.length < 4) return;
-
-      const tickSymbol = tickParts[2];
-      const tickTimeframe = tickParts[3];
-
-      // Match current symbol and timeframe
-      if (
-        tickSymbol.toUpperCase() !== symbolRef.current?.toUpperCase() ||
-        tickTimeframe.toLowerCase() !== timeframeRef.current.toLowerCase()
-      ) {
-        return;
-      }
-
+  // Subscribe to live candle updates using centralized subscription hook
+  useSubscription({
+    channel: "report.candle",
+    symbol: candleSubKey,
+    enabled: enabled && !!candleSubKey,
+    onMessage: (tick) => {
       try {
-        // Parse candle update
         const payload = (tick.data as any)?.data ?? tick.data;
         const update = payload as LiveCandleUpdate;
 
         console.log(`[useChartData] Candle update: ${update.barType}, ts=${update.timestamp}, close=${update.close}`);
 
-        if (update.barType === "empty") {
-          // No data yet
-          return;
-        }
+        if (update.barType === "empty") return;
 
         if (update.barType === "completed" && update.timestamp !== undefined) {
-          // A bar just completed - add it to bars and clear live candle
           const completedBar: Bar = {
             t: new Date(update.timestamp).toISOString(),
             o: update.open || 0,
@@ -266,18 +341,14 @@ export function useChartData(
           };
 
           setBars((prev) => {
-            // Avoid duplicates - check if last bar has same timestamp
             const last = prev[prev.length - 1];
             if (last && new Date(last.t).getTime() === update.timestamp) {
-              // Update last bar
               return [...prev.slice(0, -1), completedBar];
             }
-            // Append new bar
             return [...prev, completedBar];
           });
           setLiveCandle(undefined);
         } else if (update.barType === "live" && update.timestamp !== undefined) {
-          // Update live candle
           setLiveCandle({
             t: new Date(update.timestamp).toISOString(),
             o: update.open || 0,
@@ -290,19 +361,8 @@ export function useChartData(
       } catch (e) {
         console.warn("[useChartData] Failed to parse candle update:", e);
       }
-    };
-
-    socketHub.onTick(handleTick);
-
-    return () => {
-      socketHub.offTick(handleTick);
-      socketHub.send({
-        type: "unsubscribe",
-        channels: [channel],
-        symbols: [subscriptionKey],
-      });
-    };
-  }, [symbol, timeframe, enabled, bars.length]); // Re-subscribe when symbol, timeframe, or bars change
+    },
+  });
 
   // Stop candle report on unmount or symbol/timeframe change
   // Only send stop request if we actually started a report (reportTopicRef is set)
@@ -323,41 +383,12 @@ export function useChartData(
     };
   }, [symbol, timeframe]);
 
-  // Subscribe to live ATR updates
-  useEffect(() => {
-    if (!symbol || !enabled || !atrReportTopicRef.current || !atrPeriod) {
-      return;
-    }
-
-    const topic = atrReportTopicRef.current;
-    const channel = "report.atr";
-    const prefix = "report.atr.";
-    const subscriptionKey = topic.startsWith(prefix)
-      ? topic.substring(prefix.length)
-      : `${symbol.toLowerCase()}.${timeframeRef.current}`;
-
-    socketHub.send({
-      type: "subscribe",
-      channels: [channel],
-      symbols: [subscriptionKey],
-    });
-
-    const handleAtrTick = (tick: TickEnvelope) => {
-      if (!tick.topic.startsWith("report.atr.")) return;
-
-      const tickParts = tick.topic.split(".");
-      if (tickParts.length < 4) return;
-
-      const tickSymbol = tickParts[2];
-      const tickTimeframe = tickParts[3];
-
-      if (
-        tickSymbol.toUpperCase() !== symbolRef.current?.toUpperCase() ||
-        tickTimeframe.toLowerCase() !== timeframeRef.current.toLowerCase()
-      ) {
-        return;
-      }
-
+  // Subscribe to live ATR updates using centralized subscription hook
+  useSubscription({
+    channel: "report.atr",
+    symbol: atrSubKey,
+    enabled: enabled && !!atrSubKey && !!atrPeriod,
+    onMessage: (tick) => {
       try {
         const payload = (tick.data as any)?.data ?? tick.data;
         const atrValue = payload.atr as number;
@@ -370,29 +401,16 @@ export function useChartData(
           setAtrData((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.timestamp === timestamp) {
-              // Update existing point
               return [...prev.slice(0, -1), { timestamp, atr: atrValue }];
             }
-            // Append new point
             return [...prev, { timestamp, atr: atrValue }];
           });
         }
       } catch (e) {
         console.warn("[useChartData] Failed to parse ATR update:", e);
       }
-    };
-
-    socketHub.onTick(handleAtrTick);
-
-    return () => {
-      socketHub.offTick(handleAtrTick);
-      socketHub.send({
-        type: "unsubscribe",
-        channels: [channel],
-        symbols: [subscriptionKey],
-      });
-    };
-  }, [symbol, timeframe, enabled, atrPeriod, atrData.length]);
+    },
+  });
 
   // Stop ATR report on unmount or when ATR is disabled
   useEffect(() => {
@@ -411,6 +429,110 @@ export function useChartData(
       }
     };
   }, [symbol, timeframe, atrPeriod]);
+
+  // Subscribe to live RSI updates using centralized subscription hook
+  useSubscription({
+    channel: "report.rsi",
+    symbol: rsiSubKey,
+    enabled: enabled && !!rsiSubKey && !!rsiPeriod,
+    onMessage: (tick) => {
+      try {
+        const payload = (tick.data as any)?.data ?? tick.data;
+        const rsiValue = payload.rsi as number;
+        const timestamp = payload.timestamp as number;
+
+        if (rsiValue !== undefined) {
+          setLiveRsi(rsiValue);
+
+          // Also update rsiData with the new point
+          setRsiData((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.timestamp === timestamp) {
+              return [...prev.slice(0, -1), { timestamp, rsi: rsiValue }];
+            }
+            return [...prev, { timestamp, rsi: rsiValue }];
+          });
+        }
+      } catch (e) {
+        console.warn("[useChartData] Failed to parse RSI update:", e);
+      }
+    },
+  });
+
+  // Stop RSI report on unmount or when RSI is disabled
+  useEffect(() => {
+    return () => {
+      if (rsiReportTopicRef.current && symbolRef.current && timeframeRef.current && rsiPeriodRef.current) {
+        socketHub.send({
+          type: "control",
+          target: "calc",
+          op: "stop_rsi",
+          id: `stop_rsi_${Date.now()}`,
+          symbol: symbolRef.current,
+          timeframe: timeframeRef.current,
+          period: rsiPeriodRef.current,
+        });
+        rsiReportTopicRef.current = undefined;
+      }
+    };
+  }, [symbol, timeframe, rsiPeriod]);
+
+  // Subscribe to live MACD updates using centralized subscription hook
+  useSubscription({
+    channel: "report.macd",
+    symbol: macdSubKey,
+    enabled: enabled && !!macdSubKey && !!macdFast && !!macdSlow && !!macdSignal,
+    onMessage: (tick) => {
+      try {
+        const payload = (tick.data as any)?.data ?? tick.data;
+        const macdValue = payload.macd as number;
+        const signalValue = payload.signalLine as number;
+        const histogramValue = payload.histogram as number;
+        const timestamp = payload.timestamp as number;
+
+        if (macdValue !== undefined && signalValue !== undefined && histogramValue !== undefined) {
+          const newPoint: MacdDataPoint = {
+            timestamp,
+            macd: macdValue,
+            signal: signalValue,
+            histogram: histogramValue,
+          };
+          setLiveMacd(newPoint);
+
+          // Also update macdData with the new point
+          setMacdData((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.timestamp === timestamp) {
+              return [...prev.slice(0, -1), newPoint];
+            }
+            return [...prev, newPoint];
+          });
+        }
+      } catch (e) {
+        console.warn("[useChartData] Failed to parse MACD update:", e);
+      }
+    },
+  });
+
+  // Stop MACD report on unmount or when MACD is disabled
+  useEffect(() => {
+    return () => {
+      if (macdReportTopicRef.current && symbolRef.current && timeframeRef.current && macdSettingsRef.current.fast) {
+        socketHub.send({
+          type: "control",
+          target: "calc",
+          op: "stop_macd",
+          id: `stop_macd_${Date.now()}`,
+          symbol: symbolRef.current,
+          timeframe: timeframeRef.current,
+          fast: macdSettingsRef.current.fast,
+          slow: macdSettingsRef.current.slow,
+          signal: macdSettingsRef.current.signal,
+        });
+        macdReportTopicRef.current = undefined;
+      }
+    };
+  }, [symbol, timeframe, macdFast, macdSlow, macdSignal]);
 
   // Load more historical data (older bars)
   const loadMore = useCallback(async () => {
@@ -486,6 +608,10 @@ export function useChartData(
     hasMore,
     atrData,
     liveAtr,
+    rsiData,
+    liveRsi,
+    macdData,
+    liveMacd,
     refresh: fetchData,
     loadMore,
   };

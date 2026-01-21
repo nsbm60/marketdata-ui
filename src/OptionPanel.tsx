@@ -19,8 +19,6 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
   const [wsOpen, setWsOpen] = useState<boolean>(false);
   const [loadingExpiries, setLoadingExpiries] = useState<boolean>(false);
   const [loadingChain, setLoadingChain] = useState<boolean>(false);
-  const [atmStrikesBelow, setAtmStrikesBelow] = useState<number>(0);
-
   // Row selection (expiration + strike)
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
@@ -50,7 +48,6 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
       setUnderlying("");
       setExpiries([]);
       setSelectedExpiry(null);
-      setAtmStrikesBelow(0);
       setSelectedKey(null);
     } else {
       setUnderlying(ticker.toUpperCase());
@@ -158,9 +155,6 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
 
           if (data.underlying) setUnderlying(String(data.underlying));
           if (data.expiry) setSelectedExpiry(String(data.expiry));
-          if (data.strikes_below !== undefined) {
-            setAtmStrikesBelow(Number(data.strikes_below) || 0);
-          }
 
           // Extract open interest from contracts
           if (Array.isArray(data.contracts)) {
@@ -225,6 +219,9 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
       };
     });
   }, [ticker, selectedExpiry, optionsReport, reportLoaded, openInterest]);
+
+  // ATM divider index comes from CalcServer (not calculated in UI)
+  const atmDividerIndex = optionsReport?.atmIndex ?? -1;
 
   /** ---------- Render ---------- */
   return (
@@ -358,7 +355,7 @@ export default function OptionPanel({ ticker }: { ticker?: string }) {
               {rows.map((r, idx) => {
                 const rowKey = `${selectedExpiry}:${r.strike}`;
                 const isSelected = selectedKey === rowKey;
-                const showDivider = atmStrikesBelow > 0 && idx === atmStrikesBelow;
+                const showDivider = atmDividerIndex > 0 && idx === atmDividerIndex;
 
                 const baseCell = {
                   ...td,

@@ -135,12 +135,36 @@ const TRADING_HOURS_REGULAR = [
   { hour: 16, minute: 0, label: "4p" },   // Market close
 ];
 
+// Hourly markers for short timeframes (1m, 5m)
+const HOURLY_MARKERS_EXTENDED = Array.from({ length: 17 }, (_, i) => {
+  const hour = 4 + i; // 4am to 8pm
+  const label = hour < 12 ? `${hour}a` : hour === 12 ? "12p" : `${hour - 12}p`;
+  return { hour, minute: 0, label };
+});
+
+const HOURLY_MARKERS_REGULAR = Array.from({ length: 8 }, (_, i) => {
+  const hour = 9 + i; // 9am to 4pm
+  const label = hour < 12 ? `${hour}a` : hour === 12 ? "12p" : `${hour - 12}p`;
+  return { hour, minute: hour === 9 ? 30 : 0, label: hour === 9 ? "9:30" : label };
+});
+
+// Determine if timeframe needs hourly labels
+const needsHourlyLabels = (tf: string) => ["1m", "5m"].includes(tf);
+
 // Find timestamps for key trading hours in the data
-function findTradingHourTimestamps(bars: Bar[], session: "extended" | "regular" = "extended"): Map<number, string> {
+function findTradingHourTimestamps(
+  bars: Bar[],
+  session: "extended" | "regular" = "extended",
+  timeframe: string = "1h"
+): Map<number, string> {
   const timestamps = new Map<number, string>();
   if (bars.length === 0) return timestamps;
 
-  const tradingHours = session === "regular" ? TRADING_HOURS_REGULAR : TRADING_HOURS_EXTENDED;
+  // Use hourly markers for short timeframes, key hours for longer ones
+  const useHourly = needsHourlyLabels(timeframe);
+  const markers = useHourly
+    ? (session === "regular" ? HOURLY_MARKERS_REGULAR : HOURLY_MARKERS_EXTENDED)
+    : (session === "regular" ? TRADING_HOURS_REGULAR : TRADING_HOURS_EXTENDED);
 
   // Get all unique dates in data
   const dates = new Set<string>();
@@ -149,22 +173,25 @@ function findTradingHourTimestamps(bars: Bar[], session: "extended" | "regular" 
     dates.add(`${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`);
   }
 
-  // For each date, find the closest bar to each trading hour
+  // Tolerance for finding closest bar (30 min for key hours, 5 min for hourly)
+  const tolerance = useHourly ? 300 : 1800;
+
+  // For each date, find the closest bar to each marker
   for (const dateStr of dates) {
     const [year, month, day] = dateStr.split("-").map(Number);
 
-    for (const th of tradingHours) {
+    for (const th of markers) {
       const targetTime = new Date(year, month - 1, day, th.hour, th.minute, 0);
       const targetTs = Math.floor(targetTime.getTime() / 1000);
 
-      // Find the bar closest to this time (within 30 minutes)
+      // Find the bar closest to this time
       let closestBar: Bar | null = null;
       let closestDiff = Infinity;
 
       for (const bar of bars) {
         const barTs = Math.floor(new Date(bar.t).getTime() / 1000);
         const diff = Math.abs(barTs - targetTs);
-        if (diff < closestDiff && diff < 1800) { // Within 30 min
+        if (diff < closestDiff && diff < tolerance) {
           closestDiff = diff;
           closestBar = bar;
         }
@@ -198,6 +225,7 @@ export default function ChartCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const overlaySeriesRef = useRef<ISeriesApi<"Line">[]>([]);
 
   // Track if initial data has been loaded (to avoid fitContent on every update)
@@ -228,7 +256,7 @@ export default function ChartCanvas({
     } else {
       // Intraday: use day boundaries and trading hours
       dayBoundariesRef.current = findDayBoundaryTimestamps(bars);
-      tradingHoursRef.current = findTradingHourTimestamps(bars, session);
+      tradingHoursRef.current = findTradingHourTimestamps(bars, session, timeframe);
     }
   }, [bars, timeframe, session]);
 
@@ -242,6 +270,34 @@ export default function ChartCanvas({
         data[data.length - 1] = liveData;
       } else if (liveData.time > (data[data.length - 1]?.time || 0)) {
         data.push(liveData);
+      }
+    }
+    return data;
+  }, [bars, liveCandle]);
+
+  // Convert bars to volume histogram data (colored by up/down)
+  const volumeData = useMemo(() => {
+    const data = bars.map((bar) => ({
+      time: Math.floor(new Date(bar.t).getTime() / 1000) as any,
+      value: bar.v,
+      color: bar.c >= bar.o
+        ? `${UP_COLOR}80`  // Up candle - green with transparency
+        : `${DOWN_COLOR}80`, // Down candle - red with transparency
+    }));
+
+    // Handle live candle (same logic as candleData)
+    if (liveCandle) {
+      const liveTime = Math.floor(new Date(liveCandle.t).getTime() / 1000);
+      const liveVol = {
+        time: liveTime as any,
+        value: liveCandle.v,
+        color: liveCandle.c >= liveCandle.o ? `${UP_COLOR}80` : `${DOWN_COLOR}80`,
+      };
+      // Replace or append
+      if (data.length > 0 && data[data.length - 1].time === liveTime) {
+        data[data.length - 1] = liveVol;
+      } else if (liveTime > (data[data.length - 1]?.time || 0)) {
+        data.push(liveVol);
       }
     }
     return data;
@@ -383,6 +439,21 @@ export default function ChartCanvas({
     });
     candleSeriesRef.current = candleSeries;
 
+    // Add volume histogram series (on separate scale at bottom)
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: {
+        type: "volume",
+      },
+      priceScaleId: "volume",
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.85, // Volume takes bottom 15% of chart
+        bottom: 0,
+      },
+    });
+    volumeSeriesRef.current = volumeSeries;
+
     // Handle resize
     const handleResize = () => {
       if (containerRef.current && chartRef.current) {
@@ -399,6 +470,7 @@ export default function ChartCanvas({
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
       overlaySeriesRef.current = [];
     };
   }, [width, timeframe]);
@@ -431,6 +503,11 @@ export default function ChartCanvas({
 
       // Update data
       candleSeriesRef.current.setData(candleData as CandlestickData[]);
+
+      // Update volume data
+      if (volumeSeriesRef.current && volumeData.length > 0) {
+        volumeSeriesRef.current.setData(volumeData as HistogramData[]);
+      }
 
       if (!initialLoadDoneRef.current) {
         // First load: check if we have enough bars for indicators
@@ -469,7 +546,7 @@ export default function ChartCanvas({
 
       prevBarCountRef.current = newCount;
     }
-  }, [candleData]);
+  }, [candleData, volumeData]);
 
   // Update day/month markers and time markers when visible range changes
   useEffect(() => {
@@ -621,6 +698,8 @@ export default function ChartCanvas({
           color: color,
           lineWidth: 2,
           title: `${type.toUpperCase()}(${period})`,
+          priceLineVisible: false,    // Hide horizontal price line
+          lastValueVisible: false,    // Hide label on price axis
         });
         maSeries.setData(data as LineData[]);
         overlaySeriesRef.current.push(maSeries);
@@ -636,6 +715,8 @@ export default function ChartCanvas({
             color: RIBBON_COLORS[idx % RIBBON_COLORS.length],
             lineWidth: 1,
             title: `R${period}`,
+            priceLineVisible: false,    // Hide horizontal price line
+            lastValueVisible: false,    // Hide label on price axis
           });
           ribbonSeries.setData(lineData as LineData[]);
           overlaySeriesRef.current.push(ribbonSeries);
@@ -652,6 +733,17 @@ export default function ChartCanvas({
         <div ref={containerRef} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
         {/* Overlay layer for vertical lines and date labels */}
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none", zIndex: 10 }}>
+          {/* Bottom axis line */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: 22,
+              left: 0,
+              right: 50,
+              height: 1,
+              backgroundColor: dark.text.muted,
+            }}
+          />
           {/* Vertical lines and date labels at day boundaries */}
           {/* Day boundary markers */}
           {dayMarkers.map(({ x, label }, i) => (

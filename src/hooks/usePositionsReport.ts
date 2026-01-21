@@ -167,13 +167,22 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
   useEffect(() => {
     if (!enabled) return;
 
-    socketHub.send({
-      type: "subscribe",
-      channels: ["report.positions"],
-      symbols: [clientId],
-    });
+    const subscribe = () => {
+      socketHub.send({
+        type: "subscribe",
+        channels: ["report.positions"],
+        symbols: [clientId],
+      });
+    };
+
+    // Subscribe now
+    subscribe();
+
+    // Resubscribe on WebSocket reconnect
+    socketHub.onConnect(subscribe);
 
     return () => {
+      socketHub.offConnect(subscribe);
       socketHub.send({
         type: "unsubscribe",
         channels: ["report.positions"],

@@ -108,43 +108,49 @@ export function calculateRibbon(
  * Calculate Relative Strength Index (RSI).
  *
  * @param bars - Price bars sorted by time ascending
- * @param period - RSI period (default: 14)
- * @returns Array of { time, value } where value is between 0 and 100
+ * @param period - Number of periods (default: 14)
+ * @returns Array of { time, value } where value is RSI (0-100)
  */
 export function calculateRSI(bars: Bar[], period: number = 14): TimeValue[] {
   if (bars.length < period + 1) return [];
 
   const result: TimeValue[] = [];
-  const gains: number[] = [];
-  const losses: number[] = [];
 
   // Calculate price changes
+  const changes: number[] = [];
   for (let i = 1; i < bars.length; i++) {
-    const change = bars[i].c - bars[i - 1].c;
-    gains.push(change > 0 ? change : 0);
-    losses.push(change < 0 ? -change : 0);
+    changes.push(bars[i].c - bars[i - 1].c);
   }
 
-  // First average (SMA)
-  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  // Initialize average gain/loss with SMA
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 0; i < period; i++) {
+    if (changes[i] > 0) avgGain += changes[i];
+    else avgLoss -= changes[i];
+  }
+  avgGain /= period;
+  avgLoss /= period;
 
-  let rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-  let rsi = 100 - 100 / (1 + rs);
-
+  // First RSI value
+  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  const rsi = 100 - 100 / (1 + rs);
   result.push({
     time: Math.floor(new Date(bars[period].t).getTime() / 1000),
     value: rsi,
   });
 
-  // Subsequent values use smoothed averages (Wilder's method)
-  for (let i = period; i < gains.length; i++) {
-    avgGain = (avgGain * (period - 1) + gains[i]) / period;
-    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+  // Calculate remaining RSI values using smoothed averages
+  for (let i = period; i < changes.length; i++) {
+    const change = changes[i];
+    const gain = change > 0 ? change : 0;
+    const loss = change < 0 ? -change : 0;
 
-    rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    rsi = 100 - 100 / (1 + rs);
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
 
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    const rsi = 100 - 100 / (1 + rs);
     result.push({
       time: Math.floor(new Date(bars[i + 1].t).getTime() / 1000),
       value: rsi,
@@ -154,19 +160,13 @@ export function calculateRSI(bars: Bar[], period: number = 14): TimeValue[] {
   return result;
 }
 
-export interface MACDResult {
-  macdLine: TimeValue[];
-  signalLine: TimeValue[];
-  histogram: TimeValue[];
-}
-
 /**
  * Calculate MACD (Moving Average Convergence Divergence).
  *
  * @param bars - Price bars sorted by time ascending
  * @param fastPeriod - Fast EMA period (default: 12)
  * @param slowPeriod - Slow EMA period (default: 26)
- * @param signalPeriod - Signal line period (default: 9)
+ * @param signalPeriod - Signal line EMA period (default: 9)
  * @returns Object with macdLine, signalLine, and histogram arrays
  */
 export function calculateMACD(
@@ -174,8 +174,8 @@ export function calculateMACD(
   fastPeriod: number = 12,
   slowPeriod: number = 26,
   signalPeriod: number = 9
-): MACDResult {
-  if (bars.length < slowPeriod + signalPeriod - 1) {
+): { macdLine: TimeValue[]; signalLine: TimeValue[]; histogram: TimeValue[] } {
+  if (bars.length < slowPeriod) {
     return { macdLine: [], signalLine: [], histogram: [] };
   }
 
@@ -183,17 +183,14 @@ export function calculateMACD(
   const slowEMA = calculateEMA(bars, slowPeriod);
 
   // MACD line = Fast EMA - Slow EMA
-  // Align by timestamp
+  // Align by timestamp since EMAs start at different points
   const macdLine: TimeValue[] = [];
-  const slowTimeMap = new Map(slowEMA.map((e) => [e.time, e.value]));
+  const slowEMAMap = new Map(slowEMA.map((d) => [d.time, d.value]));
 
   for (const fast of fastEMA) {
-    const slowVal = slowTimeMap.get(fast.time);
-    if (slowVal !== undefined) {
-      macdLine.push({
-        time: fast.time,
-        value: fast.value - slowVal,
-      });
+    const slow = slowEMAMap.get(fast.time);
+    if (slow !== undefined) {
+      macdLine.push({ time: fast.time, value: fast.value - slow });
     }
   }
 
@@ -211,32 +208,21 @@ export function calculateMACD(
     sum += macdLine[i].value;
   }
   let signal = sum / signalPeriod;
+  signalLine.push({ time: macdLine[signalPeriod - 1].time, value: signal });
 
-  signalLine.push({
-    time: macdLine[signalPeriod - 1].time,
-    value: signal,
-  });
-
-  // Calculate EMA for remaining values
   for (let i = signalPeriod; i < macdLine.length; i++) {
     signal = (macdLine[i].value - signal) * multiplier + signal;
-    signalLine.push({
-      time: macdLine[i].time,
-      value: signal,
-    });
+    signalLine.push({ time: macdLine[i].time, value: signal });
   }
 
-  // Histogram = MACD - Signal
+  // Histogram = MACD line - Signal line
   const histogram: TimeValue[] = [];
-  const signalTimeMap = new Map(signalLine.map((s) => [s.time, s.value]));
+  const signalMap = new Map(signalLine.map((d) => [d.time, d.value]));
 
   for (const macd of macdLine) {
-    const sigVal = signalTimeMap.get(macd.time);
-    if (sigVal !== undefined) {
-      histogram.push({
-        time: macd.time,
-        value: macd.value - sigVal,
-      });
+    const sig = signalMap.get(macd.time);
+    if (sig !== undefined) {
+      histogram.push({ time: macd.time, value: macd.value - sig });
     }
   }
 

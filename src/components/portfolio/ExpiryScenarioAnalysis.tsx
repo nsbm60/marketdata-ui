@@ -55,13 +55,34 @@ interface AnalysisResult {
   expiryRows: ExpiryRow[];
 }
 
-const DEFAULT_SCENARIOS = [-0.06, -0.04, -0.02, 0, 0.02, 0.04, 0.06];
+const SCENARIO_STEPS = [0.01, 0.02, 0.03, 0.04];
+const DEFAULT_STEP = 0.02;
+const DEFAULT_RANGE = 0.06;
+
+// Generate scenarios from step and range (mirrors backend buildScenarios)
+function buildScenarios(step: number, range: number): number[] {
+  const numSteps = Math.round(range / step);
+  const scenarios: number[] = [];
+  for (let i = -numSteps; i <= numSteps; i++) {
+    scenarios.push(Math.round(i * step * 1000) / 1000); // Avoid floating point issues
+  }
+  return scenarios;
+}
 
 export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeksMap, greeksVersion, onSelectUnderlying }: Props) {
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<number>(0);
+  const [scenarioStep, setScenarioStep] = useState<number>(DEFAULT_STEP);
+
+  // Generate scenarios based on current step
+  const scenarios = useMemo(() => buildScenarios(scenarioStep, DEFAULT_RANGE), [scenarioStep]);
+
+  // Clear results when scenarios change to avoid header/content mismatch
+  useEffect(() => {
+    setResults([]);
+  }, [scenarios]);
 
   // Build the analysis input from positions and greeks
   const analysisInput = useMemo(() => {
@@ -144,7 +165,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
         positions: analysisInput.positions,
         equityPositions: analysisInput.equityPositions,
         underlyingPrices: analysisInput.underlyingPrices,
-        scenarios: DEFAULT_SCENARIOS
+        scenarios
       });
 
       // Handle double-nested data: response.data.data.results (UiSocket wraps the response)
@@ -164,7 +185,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
     } finally {
       setLoading(false);
     }
-  }, [analysisInput]);
+  }, [analysisInput, scenarios]);
 
   // Auto-refresh when inputs change (debounced)
   useEffect(() => {
@@ -196,13 +217,16 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
     return undefined;
   };
 
-  // Border style for scenario columns - bold borders around 0% column (index 3)
+  // Border style for scenario columns - bold borders around 0% column
   const scenarioBorder = (idx: number) => {
-    const zeroIdx = DEFAULT_SCENARIOS.indexOf(0);
+    const zeroIdx = scenarios.indexOf(0);
     if (idx === zeroIdx) return `2px solid ${light.border.secondary}`;  // Left border of 0%
     if (idx === zeroIdx + 1) return `2px solid ${light.border.secondary}`;  // Left border of column after 0%
     return `1px solid ${light.border.primary}`;
   };
+
+  // Dynamic grid columns based on scenarios
+  const gridCols = `110px 62px repeat(${scenarios.length}, 68px)`;
 
   if (analysisInput.positions.length === 0 && analysisInput.equityPositions.length === 0) {
     return <div style={emptyStyle}>No positions to analyze</div>;
@@ -211,7 +235,23 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
   return (
     <div style={container}>
       <div style={headerSection}>
-        <h3 style={{ margin: 0, fontSize: fonts.ui.heading, fontWeight: 600 }}>Expiry Scenario Analysis</h3>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <h3 style={{ margin: 0, fontSize: fonts.ui.heading, fontWeight: 600 }}>Expiry Scenario Analysis</h3>
+          <div style={stepSelector}>
+            <span style={{ fontSize: fonts.ui.caption, color: light.text.muted, marginRight: 8 }}>Step:</span>
+            {SCENARIO_STEPS.map(step => (
+              <label key={step} style={stepLabel}>
+                <input
+                  type="radio"
+                  checked={scenarioStep === step}
+                  onChange={() => setScenarioStep(step)}
+                  style={{ marginRight: 2 }}
+                />
+                {step * 100}%
+              </label>
+            ))}
+          </div>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {loading && <span style={{ fontSize: fonts.table.cell, color: light.text.muted }}>Loading...</span>}
           {error && <span style={{ fontSize: fonts.table.cell, color: semantic.error.text }}>{error}</span>}
@@ -248,12 +288,12 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
           </div>
 
           {/* Scenario header row */}
-          <div style={scenarioHeaderRow}>
+          <div style={{ ...scenarioHeaderRow, gridTemplateColumns: gridCols }}>
             <div style={positionLabelCell}>Position</div>
             <div style={{ ...scenarioHeaderCell, borderLeft: `1px solid ${light.border.primary}` }}>
               <div style={{ fontWeight: 600, color: semantic.info.text }}>Current</div>
             </div>
-            {DEFAULT_SCENARIOS.map((pct, i) => {
+            {scenarios.map((pct, i) => {
               const price = result.currentPrice * (1 + pct);
               return (
                 <div key={pct} style={{ ...scenarioHeaderCell, borderLeft: scenarioBorder(i) }}>
@@ -289,6 +329,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                     key={pos.osiSymbol}
                     style={{
                       ...positionRow,
+                      gridTemplateColumns: gridCols,
                       background: pos.isExpiring ? rowHighlight.expiring : posIdx % 2 === 0 ? light.bg.muted : light.bg.primary
                     }}
                   >
@@ -384,7 +425,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
               })}
 
               {/* Subtotal row for this expiry */}
-              <div style={subtotalRow}>
+              <div style={{ ...subtotalRow, gridTemplateColumns: gridCols }}>
                 <div style={positionLabelCell}>
                   <span style={{ fontWeight: 700 }}>Subtotal</span>
                 </div>
@@ -408,7 +449,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
 
           {/* Grand total (final expiry subtotal) */}
           {result.expiryRows.length > 0 && (
-            <div style={grandTotalRow}>
+            <div style={{ ...grandTotalRow, gridTemplateColumns: gridCols }}>
               <div style={positionLabelCell}>
                 <span style={{ fontWeight: 700 }}>Final</span>
               </div>
@@ -416,7 +457,7 @@ export default function ExpiryScenarioAnalysis({ positions, equityPrices, greeks
                 ${fmt(result.expiryRows[result.expiryRows.length - 1].subtotals[0]?.currentValue ?? 0)}
               </div>
               {result.expiryRows[result.expiryRows.length - 1].subtotals.map((sv, i) => {
-                const zeroIdx = DEFAULT_SCENARIOS.indexOf(0);
+                const zeroIdx = scenarios.indexOf(0);
                 const isZeroBorder = i === zeroIdx || i === zeroIdx + 1;
                 return (
                   <div key={i} style={{ ...grandTotalCell, borderLeft: isZeroBorder ? `2px solid ${semantic.info.text}` : `1px solid ${semantic.highlight.blueBorder}` }}>
@@ -481,11 +522,21 @@ const resultHeader: React.CSSProperties = {
   fontSize: fonts.table.header,
 };
 
-const gridCols = "110px 62px repeat(7, 68px)";
+const stepSelector: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+};
+
+const stepLabel: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  marginRight: 8,
+  fontSize: fonts.ui.caption,
+  cursor: "pointer",
+};
 
 const scenarioHeaderRow: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: gridCols,
   background: light.bg.tertiary,
   borderBottom: `1px solid ${light.border.primary}`,
   padding: "2px 0",
@@ -513,7 +564,6 @@ const expiryLabelRow: React.CSSProperties = {
 
 const positionRow: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: gridCols,
   padding: "1px 0",
   borderBottom: `1px solid ${light.bg.hover}`,
 };
@@ -526,7 +576,6 @@ const valueCell: React.CSSProperties = {
 
 const subtotalRow: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: gridCols,
   padding: "2px 0",
   background: semantic.warning.bgMuted,
   borderBottom: `1px solid ${semantic.highlight.yellowBorder}`,
@@ -540,7 +589,6 @@ const subtotalCell: React.CSSProperties = {
 
 const grandTotalRow: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: gridCols,
   padding: "2px 0",
   background: semantic.highlight.blue,
   borderTop: `1px solid ${semantic.highlight.blueBorder}`,

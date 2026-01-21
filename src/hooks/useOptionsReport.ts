@@ -41,6 +41,7 @@ export interface OptionsReport {
   asOf: number;           // Timestamp
   rowCount: number;
   atmStrike?: number;     // Closest strike to spot
+  atmIndex: number;       // Row index where ITM/OTM divider goes (count of strikes below spot)
   rows: OptionsReportRow[];
 }
 
@@ -126,6 +127,7 @@ export function useOptionsReport(
             asOf: payload.asOf || Date.now(),
             rowCount: payload.rowCount || 0,
             atmStrike: payload.atmStrike,
+            atmIndex: payload.atmIndex ?? 0,
             rows: Array.isArray(payload.rows)
               ? payload.rows.map((r: any) => ({
                   strike: r.strike ?? 0,
