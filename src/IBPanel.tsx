@@ -268,27 +268,58 @@ export default function IBPanel() {
     });
   }, [accountState?.positions, marketState?.timeframes, timeframe, wsConnected, marketState?.lastUpdated]);
 
-  // Build OSI symbols for option positions (for backend subscription)
+  // Build OSI symbols for option positions AND open orders (for backend subscription)
   const optionOsiSymbols = useMemo(() => {
-    if (!accountState?.positions) return [];
-    return accountState.positions
-      .filter(p => p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined)
-      .map(p => buildOsiSymbol(p.symbol, p.expiry!, p.right!, p.strike!));
-  }, [accountState?.positions]);
+    const symbols = new Set<string>();
+
+    // Add option positions
+    accountState?.positions?.forEach(p => {
+      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+        symbols.add(buildOsiSymbol(p.symbol, p.expiry!, p.right!, p.strike!));
+      }
+    });
+
+    // Add option open orders (so ModifyOrderModal can get prices/Greeks)
+    accountState?.openOrders?.forEach(o => {
+      if (o.secType === "OPT" && o.strike !== undefined && o.expiry !== undefined && o.right !== undefined) {
+        symbols.add(buildOsiSymbol(o.symbol, o.expiry!, o.right!, o.strike!));
+      }
+    });
+
+    return Array.from(symbols);
+  }, [accountState?.positions, accountState?.openOrders]);
 
   // Build option positions for Greeks lookup via OptionsReportBuilder
+  // Includes both positions AND open orders so ModifyOrderModal can show Greeks
   const portfolioOptionPositions = useMemo((): PortfolioOptionPosition[] => {
-    if (!accountState?.positions) return [];
-    return accountState.positions
-      .filter(p => p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined)
-      .map(p => ({
-        underlying: p.symbol,
-        expiry: p.expiry!,
-        strike: p.strike!,
-        // Normalize right to "C" or "P"
-        right: (p.right === "C" || p.right === "Call") ? "C" : "P",
-      }));
-  }, [accountState?.positions]);
+    const seen = new Set<string>();
+    const result: PortfolioOptionPosition[] = [];
+
+    const addOption = (symbol: string, expiry: string, strike: number, right: string) => {
+      const normalizedRight = (right === "C" || right === "Call") ? "C" : "P";
+      const key = `${symbol}:${expiry}:${normalizedRight}:${strike}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push({ underlying: symbol, expiry, strike, right: normalizedRight });
+      }
+    };
+
+    // Add option positions
+    accountState?.positions?.forEach(p => {
+      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+        addOption(p.symbol, p.expiry!, p.strike!, p.right!);
+      }
+    });
+
+    // Add option open orders
+    accountState?.openOrders?.forEach(o => {
+      if (o.secType === "OPT" && o.strike !== undefined && o.expiry !== undefined && o.right !== undefined) {
+        addOption(o.symbol, o.expiry!, o.strike!, o.right!);
+      }
+    });
+
+    return result;
+  }, [accountState?.positions, accountState?.openOrders]);
 
   // Subscribe to OptionsReportBuilders for portfolio options to get Greeks
   const { greeksMap: portfolioGreeksMap, version: greeksVersion, subscribedContracts } = usePortfolioOptionsReports(portfolioOptionPositions);
@@ -956,6 +987,30 @@ export default function IBPanel() {
           <ModifyOrderModal
             order={modifyingOrder}
             onClose={() => setModifyingOrder(null)}
+            initialMarketData={(() => {
+              // Look up Greeks for option orders
+              if (modifyingOrder.secType === "OPT" && modifyingOrder.strike && modifyingOrder.expiry && modifyingOrder.right) {
+                const right = (modifyingOrder.right === "C" || modifyingOrder.right === "Call") ? "C" : "P";
+                const colonKey = `${modifyingOrder.symbol.toUpperCase()}:${modifyingOrder.expiry}:${right}:${modifyingOrder.strike}`;
+                const osiKey = buildOsiSymbol(modifyingOrder.symbol, modifyingOrder.expiry, right, modifyingOrder.strike);
+                const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(osiKey);
+                // Also get prices from option channel
+                const priceKey = buildTopicSymbolFromYYYYMMDD(modifyingOrder.symbol, modifyingOrder.expiry, modifyingOrder.right, modifyingOrder.strike);
+                const prices = getChannelPrices("option").get(priceKey);
+                return {
+                  last: prices?.last ?? greeks?.last ?? undefined,
+                  bid: prices?.bid ?? greeks?.bid ?? undefined,
+                  ask: prices?.ask ?? greeks?.ask ?? undefined,
+                  mid: prices?.mid ?? greeks?.mid ?? undefined,
+                  delta: greeks?.delta ?? undefined,
+                  gamma: greeks?.gamma ?? undefined,
+                  theta: greeks?.theta ?? undefined,
+                  vega: greeks?.vega ?? undefined,
+                  iv: greeks?.iv ?? undefined,
+                };
+              }
+              return undefined;
+            })()}
           />
         )}
       </div>
