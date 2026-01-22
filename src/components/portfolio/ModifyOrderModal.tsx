@@ -3,34 +3,48 @@ import { useState, useEffect, useRef } from "react";
 import { IbOpenOrder } from "../../types/portfolio";
 import { socketHub } from "../../ws/SocketHub";
 import { modalOverlay, modalContent } from "./styles";
-import { buildTopicSymbol } from "../../utils/options";
+import { buildTopicSymbol, buildOsiSymbol } from "../../utils/options";
 import Select from "../shared/Select";
 import Button from "../shared/Button";
 import { light, semantic } from "../../theme";
 
 const THROTTLE_MS = 200;
 
+// Initial market data that can be passed in
+interface MarketData {
+  last?: number;
+  bid?: number;
+  ask?: number;
+  mid?: number;
+  delta?: number;
+  gamma?: number;
+  theta?: number;
+  vega?: number;
+  iv?: number;
+}
+
 type Props = {
   order: IbOpenOrder;
   onClose: () => void;
+  initialMarketData?: MarketData;
 };
 
-export default function ModifyOrderModal({ order, onClose }: Props) {
+export default function ModifyOrderModal({ order, onClose, initialMarketData }: Props) {
   const [quantity, setQuantity] = useState(order.quantity);
   const [price, setPrice] = useState(order.lmtPrice?.toString() ?? "");
 
-  // Live market data
-  const [last, setLast] = useState("—");
-  const [bid, setBid] = useState("—");
-  const [ask, setAsk] = useState("—");
-  const [mid, setMid] = useState("—");
+  // Live market data - initialize from props if available
+  const [last, setLast] = useState(initialMarketData?.last?.toFixed(4) ?? "—");
+  const [bid, setBid] = useState(initialMarketData?.bid?.toFixed(4) ?? "—");
+  const [ask, setAsk] = useState(initialMarketData?.ask?.toFixed(4) ?? "—");
+  const [mid, setMid] = useState(initialMarketData?.mid?.toFixed(4) ?? "—");
 
-  // Greeks for options
-  const [delta, setDelta] = useState("—");
-  const [gamma, setGamma] = useState("—");
-  const [theta, setTheta] = useState("—");
-  const [vega, setVega] = useState("—");
-  const [iv, setIv] = useState("—");
+  // Greeks for options - initialize from props if available
+  const [delta, setDelta] = useState(initialMarketData?.delta?.toFixed(4) ?? "—");
+  const [gamma, setGamma] = useState(initialMarketData?.gamma?.toFixed(4) ?? "—");
+  const [theta, setTheta] = useState(initialMarketData?.theta?.toFixed(4) ?? "—");
+  const [vega, setVega] = useState(initialMarketData?.vega?.toFixed(4) ?? "—");
+  const [iv, setIv] = useState(initialMarketData?.iv?.toFixed(4) ?? "—");
 
   // Adaptive algo - initialize from order's current settings
   // Note: IB returns "none" for algoStrategy even for Adaptive orders, so this may not be reliable
@@ -63,14 +77,33 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
     return order.symbol.toUpperCase();
   })();
 
+  // Build OSI symbol for backend subscription (options only)
+  const osiSymbol = (() => {
+    if (isOption && order.strike && order.expiry && order.right) {
+      const rightChar = (order.right === "Call" || order.right === "C") ? "C" : "P";
+      return buildOsiSymbol(order.symbol, order.expiry, rightChar, order.strike);
+    }
+    return null;
+  })();
+
   useEffect(() => {
     // Subscribe to market data
     if (isOption) {
+      // 1. Register interest with UI bridge
       socketHub.send({
         type: "subscribe",
         channels: ["md.option.quote", "md.option.trade", "md.option.greeks"],
         symbols: [marketSymbol],
       });
+      // 2. Tell backend to subscribe to Alpaca streaming for this contract
+      if (osiSymbol) {
+        socketHub.send({
+          type: "control",
+          target: "marketData",
+          op: "subscribe_portfolio_contracts",
+          contracts: [osiSymbol],
+        });
+      }
     } else {
       socketHub.send({
         type: "subscribe",
@@ -180,7 +213,7 @@ export default function ModifyOrderModal({ order, onClose }: Props) {
         });
       }
     };
-  }, [marketSymbol, isOption]);
+  }, [marketSymbol, isOption, osiSymbol]);
 
   const handleModify = () => {
     const qty = parseInt(quantity, 10);
