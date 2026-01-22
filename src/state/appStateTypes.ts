@@ -50,7 +50,7 @@ export interface ConnectionState {
 
 export interface MarketContext {
   tradingDay: string;          // YYYY-MM-DD format
-  session: SessionState;       // Pre/Regular/After/Closed
+  session: SessionState;       // Pre/Regular/After/Overnight/Closed
   prevTradingDay: string;      // Previous trading day for close prices
   lastSessionChange: number;   // Timestamp of last session change
 }

@@ -13,7 +13,7 @@ import { checkAndClearCacheOnDateChange, clearCache as clearClosePricesCache } f
 
 // ---- Types ----
 
-export type SessionState = "PreMarket" | "RegularHours" | "AfterHours" | "Closed";
+export type SessionState = "PreMarket" | "RegularHours" | "AfterHours" | "Overnight" | "Closed";
 
 export interface MarketSession {
   name: string;   // "pre-market", "regular", "after-hours"
@@ -215,10 +215,10 @@ export function isRegularHours(): boolean {
   return currentState?.state === "RegularHours";
 }
 
-/** Check if currently in extended hours (pre-market or after-hours). */
+/** Check if currently in extended hours (pre-market, after-hours, or overnight). */
 export function isExtendedHours(): boolean {
   const s = currentState?.state;
-  return s === "PreMarket" || s === "AfterHours";
+  return s === "PreMarket" || s === "AfterHours" || s === "Overnight";
 }
 
 /** Get the previous trading day (for close price lookups). */

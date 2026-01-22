@@ -83,6 +83,7 @@ export function useNotifications(): NotificationsResult {
       const sessionLabels: Record<string, string> = {
         PreMarket: "Pre-Market",
         AfterHours: "After Hours",
+        Overnight: "Overnight",
         Closed: "Market Closed",
       };
       result.push({
