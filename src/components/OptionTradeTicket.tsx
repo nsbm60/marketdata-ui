@@ -58,6 +58,11 @@ export default function OptionTradeTicket({
   const [useAdaptive, setUseAdaptive] = useState(true);
   const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">("Normal");
 
+  // Conditional order state
+  const [useCondition, setUseCondition] = useState(false);
+  const [conditionPrice, setConditionPrice] = useState("");
+  const [underlyingLast, setUnderlyingLast] = useState<number | null>(null);
+
   // Live market data updates (prices)
   const [liveLast, setLiveLast] = useState(last?.toFixed(4) || "—");
   const [liveBid, setLiveBid] = useState(bid?.toFixed(4) || "—");
@@ -176,6 +181,49 @@ export default function OptionTradeTicket({
     };
   }, [underlying, strike, expiry, right]);
 
+  // Subscribe to underlying equity price (for conditional order direction inference)
+  useEffect(() => {
+    const symbol = underlying.toUpperCase();
+
+    // Subscribe to equity market data
+    socketHub.send({
+      type: "subscribe",
+      channels: ["md.equity.quote", "md.equity.trade"],
+      symbols: [symbol],
+    });
+
+    const handler = (m: any) => {
+      const topic = m?.topic;
+      if (!topic || typeof topic !== "string") return;
+
+      // Check for equity trades or quotes for the underlying
+      if (!topic.startsWith("md.equity.")) return;
+      const parts = topic.split(".");
+      if (parts.length < 4) return;
+      const topicSymbol = parts[3]?.toUpperCase();
+      if (topicSymbol !== symbol) return;
+
+      const d = m.data?.data || m.data || {};
+      const lastPrice = d.lastPrice ?? d.last ?? d.price ?? d.lp;
+      if (lastPrice !== undefined && lastPrice !== null && lastPrice > 0) {
+        setUnderlyingLast(Number(lastPrice));
+      }
+    };
+
+    socketHub.onMessage(handler);
+    socketHub.onTick(handler);
+
+    return () => {
+      socketHub.offMessage(handler);
+      socketHub.offTick(handler);
+      socketHub.send({
+        type: "unsubscribe",
+        channels: ["md.equity.quote", "md.equity.trade"],
+        symbols: [symbol],
+      });
+    };
+  }, [underlying]);
+
   const sendOrder = () => {
     if (!quantity || Number(quantity) <= 0) return;
 
@@ -213,6 +261,23 @@ export default function OptionTradeTicket({
     if (useAdaptive && orderType !== "MKT") {
       data.algoStrategy = "Adaptive";
       data.algoPriority = algoPriority;
+    }
+
+    // Add price condition if enabled
+    if (useCondition && conditionPrice) {
+      const threshold = parseFloat(conditionPrice);
+      if (!isNaN(threshold) && threshold > 0) {
+        data.conditionPrice = threshold;
+        // Determine direction: if threshold > current price, trigger on rally (above)
+        // If threshold < current price, trigger on decline (below)
+        if (underlyingLast !== null && underlyingLast > 0) {
+          data.conditionAbove = threshold > underlyingLast;
+        } else {
+          // Default to above if we don't have current price
+          data.conditionAbove = true;
+        }
+        data.conditionUnderlying = underlying;
+      }
     }
 
     socketHub.send({
@@ -343,8 +408,10 @@ export default function OptionTradeTicket({
           onChange={e => setOrderType(e.target.value as any)}
           size="form"
           style={{ marginBottom: 10 }}
+          disabled={useCondition}
+          title={useCondition ? "Conditional orders use Market order type" : undefined}
         >
-          <option value="MKT">Market</option>
+          <option value="MKT">Market{useCondition ? " (conditional)" : ""}</option>
           <option value="LMT">Limit</option>
           <option value="STP">Stop</option>
           <option value="STPLMT">Stop Limit</option>
@@ -382,6 +449,62 @@ export default function OptionTradeTicket({
             )}
           </div>
         )}
+
+        {/* Conditional Order - trigger when underlying reaches price */}
+        <div style={{
+          marginBottom: 10,
+          padding: "8px 10px",
+          background: useCondition ? semantic.info.bg : light.bg.secondary,
+          borderRadius: 8,
+          border: `1px solid ${useCondition ? semantic.info.text : light.border.secondary}`
+        }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={useCondition}
+              onChange={e => {
+                setUseCondition(e.target.checked);
+                if (e.target.checked) {
+                  // Force market order when condition is enabled
+                  setOrderType("MKT");
+                }
+              }}
+              style={{ width: 16, height: 16 }}
+            />
+            <span style={{ fontSize: 13, fontWeight: 500 }}>Trigger when {underlying} reaches price</span>
+          </label>
+          {useCondition && (
+            <div style={{ marginTop: 8 }}>
+              <input
+                type="number"
+                step="0.01"
+                placeholder="Trigger price"
+                value={conditionPrice}
+                onChange={e => setConditionPrice(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: `1px solid ${light.border.lighter}`,
+                  fontSize: 13,
+                }}
+              />
+              {conditionPrice && underlyingLast !== null && (
+                <div style={{ fontSize: 11, color: semantic.info.text, marginTop: 6 }}>
+                  Market order activates when {underlying} {parseFloat(conditionPrice) > underlyingLast ? "≥" : "≤"} ${conditionPrice}
+                  <span style={{ color: light.text.muted, marginLeft: 8 }}>
+                    (currently ${underlyingLast.toFixed(2)})
+                  </span>
+                </div>
+              )}
+              {conditionPrice && underlyingLast === null && (
+                <div style={{ fontSize: 11, color: light.text.muted, marginTop: 6 }}>
+                  Waiting for {underlying} price...
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {(orderType === "LMT" || orderType === "STPLMT") && (
           <input
