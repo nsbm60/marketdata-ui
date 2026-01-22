@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Related Projects
+
+- **Scala Backend**: `/Users/nsm/Projects/Scala/MarketData` - The Scala 3 backend that provides market data, CalcServer, and IB integration via WebSocket/ZMQ
+- **Python Tools**: `/Users/nsm/Projects/Python/marketdata-python` - ZMQ utilities, tick injection/replay for testing, and monitoring scripts
+
 ## Build and Development Commands
 
 ```bash
