@@ -14,7 +14,7 @@ import {
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 import { formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
-import { formatExpiryShort, daysToExpiry, osiToTopicSymbol, parseOptionSymbol } from "./utils/options";
+import { formatExpiryShort, daysToExpiry, parseOptionSymbol } from "./utils/options";
 import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalysis";
 import { ExpiryScenarioAnalysis, SimulatorPanel } from "./components/portfolio";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
@@ -408,24 +408,29 @@ export default function FidelityPanel() {
     let costBasis = 0;
     let dayChange = 0;
 
+    let missingPriceCount = 0;
     tradeablePositions.forEach((pos) => {
       const qty = Math.abs(pos.quantity);
       const multiplier = pos.type === "option" ? 100 : 1;
 
-      let currentPrice = pos.lastPrice;
-      if (pos.type === "equity" && equityPrices.has(pos.symbol)) {
-        currentPrice = equityPrices.get(pos.symbol)?.last ?? currentPrice;
+      // Get price: prefer live, fall back to position's lastPrice
+      let currentPrice: number | null = null;
+      if (pos.type === "equity") {
+        currentPrice = equityPrices.get(pos.symbol)?.last ?? pos.lastPrice;
       } else if (pos.type === "option" && pos.osiSymbol) {
-        const topicKey = osiToTopicSymbol(pos.osiSymbol);
-        if (topicKey && optionPrices.has(topicKey)) {
-          currentPrice = optionPrices.get(topicKey)?.last ?? currentPrice;
-        }
+        const priceKey = pos.osiSymbol.toUpperCase();
+        currentPrice = optionPrices.get(priceKey)?.last ?? pos.lastPrice;
       }
 
-      if (currentPrice !== null) {
-        const value = qty * currentPrice * multiplier * (pos.quantity < 0 ? -1 : 1);
-        marketValue += value;
+      if (currentPrice === null || currentPrice === 0) {
+        missingPriceCount++;
+        const key = pos.type === "option" ? pos.osiSymbol : pos.symbol;
+        console.warn(`[FidelityPanel] Missing price for position: ${key} (${pos.type})`);
+        return; // Skip this position in totals
       }
+
+      const value = qty * currentPrice * multiplier * (pos.quantity < 0 ? -1 : 1);
+      marketValue += value;
 
       if (pos.costBasisTotal !== null) {
         costBasis += pos.costBasisTotal;
@@ -436,10 +441,14 @@ export default function FidelityPanel() {
         ? pos.osiSymbol.toUpperCase()
         : pos.symbol.toUpperCase();
       const changes = reportChangesMap.get(changeKey);
-      if (changes && changes[timeframe] && currentPrice !== null) {
+      if (changes && changes[timeframe]) {
         dayChange += changes[timeframe].change * qty * multiplier * (pos.quantity < 0 ? -1 : 1);
       }
     });
+
+    if (missingPriceCount > 0) {
+      console.warn(`[FidelityPanel] ${missingPriceCount} position(s) excluded from total due to missing prices`);
+    }
 
     return {
       marketValue,
@@ -604,20 +613,18 @@ export default function FidelityPanel() {
 
                   {/* Position rows */}
                   {sortedPositions.map((pos, i) => {
-                    // Get current price
-                    let currentPrice = pos.lastPrice;
-                    if (pos.type === "equity" && equityPrices.has(pos.symbol)) {
-                      currentPrice = equityPrices.get(pos.symbol)?.last ?? currentPrice;
+                    // Get current price: prefer live, fall back to position's lastPrice
+                    let currentPrice: number | null = null;
+                    if (pos.type === "equity") {
+                      currentPrice = equityPrices.get(pos.symbol)?.last ?? pos.lastPrice;
                     } else if (pos.type === "option" && pos.osiSymbol) {
-                      const topicKey = osiToTopicSymbol(pos.osiSymbol);
-                      if (topicKey) {
-                        currentPrice = optionPrices.get(topicKey)?.last ?? currentPrice;
-                      }
+                      currentPrice = optionPrices.get(pos.osiSymbol.toUpperCase())?.last ?? pos.lastPrice;
                     }
 
+                    const hasMissingPrice = currentPrice === null || currentPrice === 0;
                     const multiplier = pos.type === "option" ? 100 : 1;
                     const qty = pos.quantity;
-                    const mktValue = currentPrice !== null ? qty * currentPrice * multiplier : null;
+                    const mktValue = hasMissingPrice ? null : qty * currentPrice! * multiplier;
 
                     // P&L calculation
                     // For long positions: P&L = market value - cost paid

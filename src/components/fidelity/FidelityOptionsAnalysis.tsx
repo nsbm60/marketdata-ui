@@ -2,7 +2,7 @@
 import { useMemo } from "react";
 import { FidelityPosition } from "../../utils/fidelity";
 import { PriceData } from "../../hooks/useMarketData";
-import { formatExpiryShort, daysToExpiry, compareOptions, osiToTopicSymbol, parseOptionSymbol } from "../../utils/options";
+import { formatExpiryShort, daysToExpiry, compareOptions, parseOptionSymbol } from "../../utils/options";
 import { OptionGreeks, getGreeksForPosition } from "../../hooks/usePortfolioOptionsReports";
 import { light, semantic, pnl } from "../../theme";
 
@@ -78,8 +78,7 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
         if (opt.strike === undefined || opt.expiry === undefined || opt.optionType === undefined) return;
 
         const osiSymbol = opt.osiSymbol;
-        const topicSymbol = osiSymbol ? osiToTopicSymbol(osiSymbol) : null;
-        const priceData = topicSymbol ? optionPrices.get(topicSymbol) : null;
+        const priceData = osiSymbol ? optionPrices.get(osiSymbol.toUpperCase()) : null;
 
         // Try to get Greeks from the report-based greeksMap first (more reliable)
         // Fall back to raw market data if greeksMap not available
@@ -101,6 +100,11 @@ export default function FidelityOptionsAnalysis({ positions, equityPrices, optio
         const theoPrice = greeksData?.theo ?? (priceData as any)?.theo ?? null;
         const delta = greeksData?.delta ?? (priceData as any)?.delta ?? null;
         const theta = greeksData?.theta ?? (priceData as any)?.theta ?? null;
+
+        // Log missing price data (critical for analysis)
+        if (optionPrice === null || optionPrice === 0) {
+          console.warn(`[FidelityOptionsAnalysis] Missing price for option: ${osiSymbol}`);
+        }
 
         const effectiveEquiv = delta !== null ? opt.quantity * 100 * delta : null;
         const thetaDollar = theta !== null ? theta * opt.quantity * 100 : null;

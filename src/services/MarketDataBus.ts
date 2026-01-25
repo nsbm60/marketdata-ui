@@ -266,10 +266,22 @@ class MarketDataBus {
     if (!msg?.topic || typeof msg.topic !== "string") return;
 
     const parsed = this.parseTopic(msg.topic);
-    if (!parsed.channel || !parsed.symbol) return;
+    if (!parsed.channel) return;
 
-    const key = this.makeKey(parsed.symbol, parsed.channel);
     const data = msg.data?.data || msg.data || {};
+
+    // For options, use OSI symbol from payload (canonical identifier)
+    // For equities, use symbol from topic (simple ticker)
+    let symbol = parsed.symbol;
+    if (parsed.channel === "option") {
+      const payloadSymbol = data.symbol || msg.data?.symbol;
+      if (payloadSymbol && typeof payloadSymbol === "string") {
+        symbol = payloadSymbol.toUpperCase().trim();
+      }
+    }
+    if (!symbol) return;
+
+    const key = this.makeKey(symbol, parsed.channel);
 
     // Normalize and merge with existing data
     const price = this.normalizePrice(parsed.symbol, parsed.channel, data);
@@ -306,9 +318,9 @@ class MarketDataBus {
   }
 
   private parseTopic(topic: string): { channel?: Channel; symbol?: string } {
-    // md.equity.quote.NVDA -> { channel: "equity", symbol: "NVDA" }
-    // md.equity.trade.NVDA -> { channel: "equity", symbol: "NVDA" }
-    // md.option.quote.NVDA251219C00140000 -> { channel: "option", symbol: "NVDA251219C00140000" }
+    // Determines channel and extracts symbol from topic.
+    // For equities: symbol comes from topic (e.g., md.equity.quote.NVDA -> NVDA)
+    // For options: only channel is determined here; symbol (OSI) comes from payload
 
     if (topic.startsWith("md.equity.")) {
       const parts = topic.split(".");
@@ -319,11 +331,8 @@ class MarketDataBus {
     }
 
     if (topic.startsWith("md.option.")) {
-      const parts = topic.split(".");
-      if (parts.length >= 4) {
-        const symbol = parts.slice(3).join(".").toUpperCase();
-        return { channel: "option", symbol };
-      }
+      // Channel only - OSI symbol extracted from payload in handleMessage
+      return { channel: "option" };
     }
 
     return {};

@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { socketHub } from "./ws/SocketHub";
 import { getMarketState } from "./services/marketState";
 import { AppStateProvider } from "./state/AppStateContext";
-import TwoPane from "./TwoPane";
+import MainLayout from "./MainLayout";
 import { light } from "./theme";
 
 export default function App() {
@@ -18,7 +18,7 @@ export default function App() {
   return (
     <AppStateProvider>
       <div style={root as any}>
-        <TwoPane />
+        <MainLayout />
       </div>
     </AppStateProvider>
   );

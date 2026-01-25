@@ -21,7 +21,7 @@ import { PriceChangePercent, PriceChangeDollar } from "./components/shared/Price
 import { fetchAllTimeframeClosePrices, MultiTimeframeClosePrices, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
-import { buildOsiSymbol, buildTopicSymbolFromYYYYMMDD, formatExpiryYYYYMMDD } from "./utils/options";
+import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
 import { usePortfolioData } from "./hooks/usePortfolioData";
 import { useTradeTicket } from "./hooks/useTradeTicket";
 import { useAppState } from "./state/useAppState";
@@ -437,30 +437,43 @@ export default function IBPanel() {
     }
 
     let mktValue = 0;
+    let missingPriceCount = 0;
     accountState.positions.forEach((p) => {
       let priceKey = p.symbol.toUpperCase();
       let priceData;
       if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        priceKey = buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike);
+        priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
         priceData = getChannelPrices("option").get(priceKey);
       } else {
         priceData = equityPrices.get(priceKey);
       }
-      const lastPrice = priceData?.last || 0;
-      let displayPrice = lastPrice;
-      if (lastPrice === 0) {
+
+      // Get price: prefer live, fall back to close
+      let price: number | null = priceData?.last ?? null;
+      if (price === null || price === 0) {
         if (p.secType === "OPT") {
           const optPriceData = optionClosePrices.get(priceKey);
-          if (optPriceData?.todayClose) displayPrice = optPriceData.todayClose;
+          price = optPriceData?.todayClose ?? null;
         } else if (p.secType === "STK") {
-          // Use "0d" (today's close) as fallback when no live price
           const todayClose = multiClosePrices?.prices.get(p.symbol.toUpperCase())?.closes["0d"];
-          if (todayClose) displayPrice = todayClose;
+          price = todayClose ?? null;
         }
       }
+
+      if (price === null || price === 0) {
+        // Position with no price data - exclude from total and log
+        missingPriceCount++;
+        console.warn(`[IBPanel] Missing price for position: ${priceKey} (${p.secType})`);
+        return;
+      }
+
       const contractMultiplier = p.secType === "OPT" ? 100 : 1;
-      mktValue += p.quantity * displayPrice * contractMultiplier;
+      mktValue += p.quantity * price * contractMultiplier;
     });
+
+    if (missingPriceCount > 0) {
+      console.warn(`[IBPanel] ${missingPriceCount} position(s) excluded from total due to missing prices`);
+    }
 
     const cash = accountState.cash.reduce((sum, c) => sum + c.amount, 0);
 
@@ -494,11 +507,10 @@ export default function IBPanel() {
                 gap: 4,
                 padding: "2px 8px",
                 fontSize: 11,
-                border: "1px solid",
+                border: `1px solid ${ibErrors.some(e => e.severity === "error") ? semantic.error.light : semantic.warning.accent}`,
                 borderRadius: 4,
                 cursor: "pointer",
                 background: ibErrors.some(e => e.severity === "error") ? semantic.error.bgMuted : semantic.warning.bg,
-                borderColor: ibErrors.some(e => e.severity === "error") ? semantic.error.light : semantic.warning.accent,
                 color: ibErrors.some(e => e.severity === "error") ? semantic.error.textDark : semantic.warning.text,
               }}
               title={showErrors ? "Hide IB errors" : "Show IB errors"}
@@ -552,8 +564,7 @@ export default function IBPanel() {
                   fontSize: 11,
                   padding: "4px 6px",
                   background: err.severity === "error" ? semantic.error.bgMuted : light.bg.primary,
-                  border: "1px solid",
-                  borderColor: err.severity === "error" ? semantic.error.light : light.border.primary,
+                  border: `1px solid ${err.severity === "error" ? semantic.error.light : light.border.primary}`,
                   borderRadius: 3,
                 }}
               >
@@ -663,37 +674,37 @@ export default function IBPanel() {
                       return 0;
                     })
                     .map((p, i) => {
-                    // Build the proper symbol for price lookup
+                    // Build the proper symbol for price lookup (OSI for options, ticker for equities)
                     let priceKey = p.symbol.toUpperCase();
                     let priceData;
-                    let osiKey = priceKey; // OSI key for option close price lookup
                     if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-                      priceKey = buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike);
-                      osiKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
+                      priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
                       priceData = getChannelPrices("option").get(priceKey);
                     } else {
                       priceData = equityPrices.get(priceKey);
                     }
 
-                    const lastPrice = priceData?.last || 0;
-
-                    // Use todayClose as fallback when no live price (after market close / no post-market trades)
-                    const optPriceData = p.secType === "OPT" ? optionClosePrices.get(osiKey) : undefined;
+                    // Get price: prefer live, fall back to close
+                    const optPriceData = p.secType === "OPT" ? optionClosePrices.get(priceKey) : undefined;
                     const equityCloses = p.secType === "STK" ? multiClosePrices?.prices.get(p.symbol.toUpperCase())?.closes : undefined;
-                    let displayPrice = lastPrice;
-                    if (lastPrice === 0) {
-                      if (p.secType === "OPT" && optPriceData?.todayClose) {
-                        displayPrice = optPriceData.todayClose;
-                      } else if (p.secType === "STK" && equityCloses?.["0d"]) {
-                        displayPrice = equityCloses["0d"];
+
+                    let displayPrice: number | null = priceData?.last ?? null;
+                    if (displayPrice === null || displayPrice === 0) {
+                      if (p.secType === "OPT") {
+                        displayPrice = optPriceData?.todayClose ?? null;
+                      } else if (p.secType === "STK") {
+                        displayPrice = equityCloses?.["0d"] ?? null;
                       }
                     }
 
+                    // Log missing prices (but only once per render cycle via ref would be better - for now just log)
+                    const hasMissingPrice = displayPrice === null || displayPrice === 0;
+
                     // For options, multiply by contract size (100)
                     const contractMultiplier = p.secType === "OPT" ? 100 : 1;
-                    const mktValue = p.quantity * displayPrice * contractMultiplier;
+                    const mktValue = hasMissingPrice ? null : p.quantity * displayPrice! * contractMultiplier;
 
-                    const mktValueDisplay = displayPrice > 0
+                    const mktValueDisplay = mktValue !== null
                       ? (mktValue < 0
                           ? `(${Math.abs(mktValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
                           : mktValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
@@ -705,16 +716,18 @@ export default function IBPanel() {
                     // Calculate % and $ change for equities (using selected timeframe) and options
                     let pctChange: number | undefined;
                     let dollarChange: number | undefined;
-                    if (p.secType === "STK") {
-                      const prevClose = equityCloses?.[timeframe];
-                      if (displayPrice > 0 && prevClose && prevClose > 0) {
-                        pctChange = calcPctChange(displayPrice, prevClose);
-                        dollarChange = displayPrice - prevClose;
-                      }
-                    } else if (p.secType === "OPT") {
-                      if (displayPrice > 0 && optPriceData?.prevClose && optPriceData.prevClose > 0) {
-                        pctChange = calcPctChange(displayPrice, optPriceData.prevClose);
-                        dollarChange = displayPrice - optPriceData.prevClose;
+                    if (!hasMissingPrice && displayPrice !== null) {
+                      if (p.secType === "STK") {
+                        const prevClose = equityCloses?.[timeframe];
+                        if (prevClose && prevClose > 0) {
+                          pctChange = calcPctChange(displayPrice, prevClose);
+                          dollarChange = displayPrice - prevClose;
+                        }
+                      } else if (p.secType === "OPT") {
+                        if (optPriceData?.prevClose && optPriceData.prevClose > 0) {
+                          pctChange = calcPctChange(displayPrice, optPriceData.prevClose);
+                          dollarChange = displayPrice - optPriceData.prevClose;
+                        }
                       }
                     }
                     // Format symbol display based on secType
@@ -775,7 +788,7 @@ export default function IBPanel() {
                                 : undefined;
                               // Get fresh price data at click time (not closure-captured render-time value)
                               const freshPriceData = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
-                                ? getChannelPrices("option").get(buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike))
+                                ? getChannelPrices("option").get(buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike))
                                 : equityPrices.get(p.symbol.toUpperCase());
                               // Calculate mid if we have bid and ask
                               let marketData = freshPriceData ? {
@@ -817,7 +830,7 @@ export default function IBPanel() {
                                 : undefined;
                               // Get fresh price data at click time (not closure-captured render-time value)
                               const freshPriceData = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
-                                ? getChannelPrices("option").get(buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike))
+                                ? getChannelPrices("option").get(buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike))
                                 : equityPrices.get(p.symbol.toUpperCase());
                               // Calculate mid if we have bid and ask
                               let marketData = freshPriceData ? {
@@ -995,8 +1008,7 @@ export default function IBPanel() {
                 const osiKey = buildOsiSymbol(modifyingOrder.symbol, modifyingOrder.expiry, right, modifyingOrder.strike);
                 const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(osiKey);
                 // Also get prices from option channel
-                const priceKey = buildTopicSymbolFromYYYYMMDD(modifyingOrder.symbol, modifyingOrder.expiry, modifyingOrder.right, modifyingOrder.strike);
-                const prices = getChannelPrices("option").get(priceKey);
+                const prices = getChannelPrices("option").get(osiKey);
                 return {
                   last: prices?.last ?? greeks?.last ?? undefined,
                   bid: prices?.bid ?? greeks?.bid ?? undefined,

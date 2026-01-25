@@ -1,7 +1,7 @@
 // src/components/portfolio/PnLSummary.tsx
 import { useMemo, useEffect, useState } from "react";
 import { IbPosition } from "../../types/portfolio";
-import { buildTopicSymbolFromYYYYMMDD, formatExpiryYYYYMMDD, compareOptions } from "../../utils/options";
+import { buildOsiSymbol, formatExpiryYYYYMMDD, compareOptions } from "../../utils/options";
 import { getChannelPrices } from "../../hooks/useMarketData";
 import { formatCloseDateShort } from "../../services/closePrices";
 import { TimeframeInfo } from "../../services/marketState";
@@ -113,14 +113,22 @@ export default function PnLSummary({
       processedKeys.add(posKey);
 
       // Get current price
-      let currentPrice = 0;
+      let currentPrice: number | null = null;
+      let priceKey: string;
       if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        const topicSymbol = buildTopicSymbolFromYYYYMMDD(p.symbol, p.expiry, p.right, p.strike);
-        const priceData = getChannelPrices("option").get(topicSymbol);
-        currentPrice = priceData?.last || 0;
+        priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
+        const priceData = getChannelPrices("option").get(priceKey);
+        currentPrice = priceData?.last ?? null;
       } else {
-        const priceData = equityPrices.get(p.symbol.toUpperCase());
-        currentPrice = priceData?.last || 0;
+        priceKey = p.symbol.toUpperCase();
+        const priceData = equityPrices.get(priceKey);
+        currentPrice = priceData?.last ?? null;
+      }
+
+      // Skip positions with missing prices
+      if (currentPrice === null || currentPrice === 0) {
+        console.warn(`[PnLSummary] Missing price for position: ${priceKey} (${p.secType})`);
+        return;
       }
 
       const contractMultiplier = p.secType === "OPT" ? 100 : 1;

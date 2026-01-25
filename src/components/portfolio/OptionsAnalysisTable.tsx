@@ -2,7 +2,7 @@
 import { useMemo } from "react";
 import { IbPosition } from "../../types/portfolio";
 import { PriceData, getChannelPrices } from "../../hooks/useMarketData";
-import { buildOsiSymbol, buildTopicSymbolFromYYYYMMDD, formatExpiryShort, compareOptions } from "../../utils/options";
+import { buildOsiSymbol, formatExpiryShort, compareOptions } from "../../utils/options";
 import { OptionGreeks, getGreeksForPosition } from "../../hooks/usePortfolioOptionsReports";
 import { light, semantic, pnl, rowHighlight } from "../../theme";
 
@@ -103,8 +103,7 @@ export default function OptionsAnalysisTable({ positions, equityPrices, greeksMa
         if (opt.strike === undefined || opt.expiry === undefined || opt.right === undefined) return;
 
         const osiSymbol = buildOsiSymbol(opt.symbol, opt.expiry, opt.right, opt.strike);
-        const topicSymbol = buildTopicSymbolFromYYYYMMDD(opt.symbol, opt.expiry, opt.right, opt.strike);
-        const priceData = optionPrices.get(topicSymbol);
+        const priceData = optionPrices.get(osiSymbol);
 
         // Try to get Greeks from the report-based greeksMap first (more reliable)
         // Fall back to raw market data if greeksMap not available
@@ -116,6 +115,11 @@ export default function OptionsAnalysisTable({ positions, equityPrices, greeksMa
         const theoPrice = greeksData?.theo ?? (priceData as any)?.theo ?? null;
         const delta = greeksData?.delta ?? (priceData as any)?.delta ?? null;
         const theta = greeksData?.theta ?? (priceData as any)?.theta ?? null;
+
+        // Log missing price data (critical for analysis)
+        if (optionPrice === null) {
+          console.warn(`[OptionsAnalysisTable] Missing price for option: ${osiSymbol}`);
+        }
 
         // Calculate effective equivalent position
         const effectiveEquiv = delta !== null ? opt.quantity * 100 * delta : null;

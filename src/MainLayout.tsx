@@ -1,10 +1,11 @@
-// src/TwoPane.tsx
+// src/MainLayout.tsx
 import { useState } from "react";
 import EquityPanel from "./EquityPanel";
 import OptionPanel from "./OptionPanel";
 import IBPanel from "./IBPanel";
 import FidelityPanel from "./FidelityPanel";
 import ChartPanel from "./ChartPanel";
+import { OptionCalculator } from "./components/tools";
 import ConnectionStatus from "./components/shared/ConnectionStatus";
 import NotificationBanner from "./components/shared/NotificationBanner";
 import VixTicker from "./components/shared/VixTicker";
@@ -12,9 +13,9 @@ import { socketHub } from "./ws/SocketHub";
 import { useAppState } from "./state/useAppState";
 import { light } from "./theme";
 
-type TabId = "market" | "portfolio" | "fidelity" | "chart";
+type TabId = "market" | "portfolio" | "fidelity" | "chart" | "calculator";
 
-export default function TwoPane() {
+export default function MainLayout() {
   const [selected, setSelected] = useState<string>("");
   const [activeTab, setActiveTab] = useState<TabId>("market");
 
@@ -78,6 +79,13 @@ export default function TwoPane() {
           >
             Chart
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("calculator")}
+            style={tabButton(activeTab === "calculator") as any}
+          >
+            Calculator
+          </button>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <VixTicker />
@@ -133,6 +141,17 @@ export default function TwoPane() {
           } as any}
         >
           <ChartPanel selected={selected} />
+        </div>
+
+        {/* Calculator tab content — also kept mounted */}
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: activeTab === "calculator" ? "block" : "none",
+          } as any}
+        >
+          <OptionCalculator />
         </div>
       </div>
     </div>

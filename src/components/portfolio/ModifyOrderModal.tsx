@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { IbOpenOrder } from "../../types/portfolio";
 import { socketHub } from "../../ws/SocketHub";
 import { modalOverlay, modalContent } from "./styles";
-import { buildTopicSymbol, buildOsiSymbol } from "../../utils/options";
+import { buildOsiSymbol } from "../../utils/options";
 import Select from "../shared/Select";
 import Button from "../shared/Button";
 import { light, semantic } from "../../theme";
@@ -64,20 +64,7 @@ export default function ModifyOrderModal({ order, onClose, initialMarketData }: 
 
   const isOption = order.secType === "OPT";
 
-  // Build the symbol for market data lookup (hierarchical format for topic matching)
-  const marketSymbol = (() => {
-    if (isOption && order.strike && order.expiry && order.right) {
-      // Convert YYYYMMDD to YYYY-MM-DD for buildTopicSymbol
-      const expiry = order.expiry;
-      const expiryIso = expiry.length === 8
-        ? `${expiry.substring(0, 4)}-${expiry.substring(4, 6)}-${expiry.substring(6, 8)}`
-        : expiry;
-      return buildTopicSymbol(order.symbol, expiryIso, order.right, order.strike);
-    }
-    return order.symbol.toUpperCase();
-  })();
-
-  // Build OSI symbol for backend subscription (options only)
+  // Build OSI symbol for price lookup and subscription (options only)
   const osiSymbol = (() => {
     if (isOption && order.strike && order.expiry && order.right) {
       const rightChar = (order.right === "Call" || order.right === "C") ? "C" : "P";
@@ -85,6 +72,9 @@ export default function ModifyOrderModal({ order, onClose, initialMarketData }: 
     }
     return null;
   })();
+
+  // Symbol for market data lookup (OSI for options, ticker for equities)
+  const marketSymbol = isOption && osiSymbol ? osiSymbol : order.symbol.toUpperCase();
 
   useEffect(() => {
     // Subscribe to market data
@@ -132,15 +122,24 @@ export default function ModifyOrderModal({ order, onClose, initialMarketData }: 
       const topic = m?.topic;
       if (!topic || typeof topic !== "string") return;
 
-      // Check if this message is for our symbol
+      // Check if this message is for our channel
       const expectedPrefix = isOption ? "md.option." : "md.equity.";
       if (!topic.startsWith(expectedPrefix)) return;
 
-      const parts = topic.split(".");
-      const topicSymbol = parts.length >= 4 ? parts.slice(3).join(".").toUpperCase() : "";
-      if (topicSymbol !== marketSymbol) return;
-
       const d = m.data?.data || m.data || {};
+
+      // For options, symbol comes from payload (OSI format)
+      // For equities, extract from topic
+      let msgSymbol: string;
+      if (isOption) {
+        const payloadSymbol = d.symbol || m.data?.symbol;
+        if (!payloadSymbol || typeof payloadSymbol !== "string") return;
+        msgSymbol = payloadSymbol.toUpperCase().trim();
+      } else {
+        const parts = topic.split(".");
+        msgSymbol = parts.length >= 4 ? parts.slice(3).join(".").toUpperCase() : "";
+      }
+      if (msgSymbol !== marketSymbol) return;
 
       // Price updates
       const lastPrice = d.lastPrice ?? d.last ?? d.price ?? d.p ?? d.lp;
