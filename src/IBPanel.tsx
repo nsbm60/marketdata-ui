@@ -25,8 +25,7 @@ import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
 import { usePortfolioData } from "./hooks/usePortfolioData";
 import { useTradeTicket } from "./hooks/useTradeTicket";
 import { useAppState } from "./state/useAppState";
-import { usePortfolioOptionsReports, PortfolioOptionPosition, OptionGreeks } from "./hooks/usePortfolioOptionsReports";
-import { usePositionsReport, ReportPosition } from "./hooks/usePositionsReport";
+import { usePositionsReport, ReportPosition, OptionGreeks, buildGreeksMap } from "./hooks/usePositionsReport";
 import type { TimeframeOption } from "./services/marketState";
 import type { IbPosition } from "./types/portfolio";
 import { light, semantic, table as tableTheme } from "./theme";
@@ -57,33 +56,6 @@ function reportPositionToIbPosition(rp: ReportPosition): IbPosition {
   };
 }
 
-/**
- * Build a Greeks map from ReportPosition array for OptionsAnalysisTable.
- * Key format: "UNDERLYING:YYYYMMDD:C/P:STRIKE"
- */
-function buildGreeksMapFromReport(positions: ReportPosition[]): Map<string, OptionGreeks> {
-  const map = new Map<string, OptionGreeks>();
-
-  for (const p of positions) {
-    if (p.secType !== "OPT" || !p.expiry || !p.right || p.strike === undefined) continue;
-
-    // Key format matches usePortfolioOptionsReports: "UNDERLYING:YYYYMMDD:C/P:STRIKE"
-    const key = `${p.symbol.toUpperCase()}:${p.expiry}:${p.right}:${p.strike}`;
-
-    map.set(key, {
-      delta: p.delta ?? null,
-      gamma: p.gamma ?? null,
-      theta: p.theta ?? null,
-      vega: p.vega ?? null,
-      iv: p.iv ?? null,
-      last: p.currentPrice ?? null,
-      theo: null, // Report doesn't include theo currently
-    });
-  }
-
-  return map;
-}
-
 export default function IBPanel() {
   // Portfolio data and IB connection state
   const {
@@ -99,14 +71,14 @@ export default function IBPanel() {
     clearErrors,
   } = usePortfolioData();
 
-  // Server-computed positions report (IB + Fidelity combined with Greeks/P&L)
+  // Server-computed IB positions report (P&L, Greeks, per-expiry subtotals)
   const {
-    ibPositions: reportIbPositions,
+    positions: reportIbPositions,
     summary: reportSummary,
     underlyingGroups,
     loading: reportLoading,
     version: reportVersion,
-  } = usePositionsReport(true);
+  } = usePositionsReport("ib");
 
   // Trade ticket UI state
   const {
@@ -243,66 +215,17 @@ export default function IBPanel() {
     return Array.from(symbols);
   }, [accountState?.positions, accountState?.openOrders]);
 
-  // Build option positions for Greeks lookup via OptionsReportBuilder
-  // Includes both positions AND open orders so ModifyOrderModal can show Greeks
-  const portfolioOptionPositions = useMemo((): PortfolioOptionPosition[] => {
-    const seen = new Set<string>();
-    const result: PortfolioOptionPosition[] = [];
-
-    const addOption = (symbol: string, expiry: string, strike: number, right: string) => {
-      const normalizedRight = (right === "C" || right === "Call") ? "C" : "P";
-      const key = `${symbol}:${expiry}:${normalizedRight}:${strike}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        result.push({ underlying: symbol, expiry, strike, right: normalizedRight });
-      }
-    };
-
-    // Add option positions
-    accountState?.positions?.forEach(p => {
-      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        addOption(p.symbol, p.expiry!, p.strike!, p.right!);
-      }
-    });
-
-    // Add option open orders
-    accountState?.openOrders?.forEach(o => {
-      if (o.secType === "OPT" && o.strike !== undefined && o.expiry !== undefined && o.right !== undefined) {
-        addOption(o.symbol, o.expiry!, o.strike!, o.right!);
-      }
-    });
-
-    return result;
-  }, [accountState?.positions, accountState?.openOrders]);
-
-  // Subscribe to OptionsReportBuilders for portfolio options to get Greeks
-  const { greeksMap: portfolioGreeksMap, version: greeksVersion, subscribedContracts } = usePortfolioOptionsReports(portfolioOptionPositions);
-
   // Convert report positions to IbPosition format for compatibility with existing components
   const reportPositionsAsIb = useMemo((): IbPosition[] => {
     if (!reportIbPositions || reportIbPositions.length === 0) return [];
     return reportIbPositions.map(reportPositionToIbPosition);
   }, [reportIbPositions]);
 
-  // Build Greeks map from report data (more reliable than streaming when available)
-  const reportGreeksMap = useMemo(() => {
+  // Build Greeks map from report data (keyed by both colon and OSI formats)
+  const greeksMap = useMemo(() => {
     if (!reportIbPositions || reportIbPositions.length === 0) return new Map<string, OptionGreeks>();
-    return buildGreeksMapFromReport(reportIbPositions);
+    return buildGreeksMap(reportIbPositions);
   }, [reportIbPositions]);
-
-  // Combine Greeks maps: prefer report data, fall back to streaming
-  // Note: greeksVersion triggers recompute since portfolioGreeksMap is a mutated ref
-  const combinedGreeksMap = useMemo(() => {
-    const combined = new Map<string, OptionGreeks>(portfolioGreeksMap);
-    // Overlay report Greeks (they include computed values from CalcServer)
-    for (const [key, greeks] of reportGreeksMap) {
-      combined.set(key, greeks);
-    }
-    return combined;
-  }, [portfolioGreeksMap, reportGreeksMap, greeksVersion]);
-
-  // Use report version if available, otherwise use streaming version
-  const effectiveGreeksVersion = reportVersion > 0 ? reportVersion : greeksVersion;
 
   // Helper to send option subscriptions (used on initial mount and reconnect)
   const sendOptionSubscriptions = (symbols: string[]) => {
@@ -398,11 +321,11 @@ export default function IBPanel() {
       let price: number | null = null;
 
       if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        // Get option price from report data (combinedGreeksMap)
+        // Get option price from report data (greeksMap)
         priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
         const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
         const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
-        const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(priceKey);
+        const greeks = greeksMap.get(colonKey) || greeksMap.get(priceKey);
         price = greeks?.last ?? null;
       } else {
         // Get equity price from report/streaming
@@ -440,7 +363,7 @@ export default function IBPanel() {
       totalPortfolio: mktValue + cash,
       primaryAccount: account,
     };
-  }, [accountState, equityPrices, combinedGreeksMap, multiClosePrices]);
+  }, [accountState, equityPrices, greeksMap, multiClosePrices]);
 
   return (
     <div style={shell}>
@@ -633,10 +556,10 @@ export default function IBPanel() {
                     let priceData;
                     if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
                       priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
-                      // Get option data from report (combinedGreeksMap has last, bid, ask, mid from CalcServer)
+                      // Get option data from report (greeksMap has last, bid, ask, mid from CalcServer)
                       const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
                       const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
-                      const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(priceKey);
+                      const greeks = greeksMap.get(colonKey) || greeksMap.get(priceKey);
                       priceData = greeks ? { last: greeks.last, bid: greeks.bid, ask: greeks.ask } : undefined;
                     } else {
                       priceData = equityPrices.get(priceKey);
@@ -673,7 +596,7 @@ export default function IBPanel() {
                       // Get option Greeks data which includes change info from report
                       const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
                       const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
-                      const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(priceKey);
+                      const greeks = greeksMap.get(colonKey) || greeksMap.get(priceKey);
                       // Use timeframe-specific change if available, otherwise use 1d change
                       const tfChange = greeks?.changes?.[timeframe];
                       if (tfChange) {
@@ -752,7 +675,7 @@ export default function IBPanel() {
                                 const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
                                 const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
                                 const osiKey = buildOsiSymbol(p.symbol, p.expiry, right, p.strike);
-                                const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(osiKey);
+                                const greeks = greeksMap.get(colonKey) || greeksMap.get(osiKey);
                                 if (greeks) {
                                   marketData = {
                                     last: greeks.last,
@@ -796,7 +719,7 @@ export default function IBPanel() {
                                 const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
                                 const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
                                 const osiKey = buildOsiSymbol(p.symbol, p.expiry, right, p.strike);
-                                const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(osiKey);
+                                const greeks = greeksMap.get(colonKey) || greeksMap.get(osiKey);
                                 if (greeks) {
                                   marketData = {
                                     last: greeks.last,
@@ -855,15 +778,15 @@ export default function IBPanel() {
                         underlying={simulatorUnderlying}
                         positions={accountState.positions}
                         equityPrices={equityPrices}
-                        greeksMap={combinedGreeksMap}
+                        greeksMap={greeksMap}
                         onClose={() => setSimulatorUnderlying(null)}
                       />
                     ) : (
                       <ExpiryScenarioAnalysis
                         positions={accountState.positions}
                         equityPrices={equityPrices}
-                        greeksMap={combinedGreeksMap}
-                        greeksVersion={effectiveGreeksVersion}
+                        greeksMap={greeksMap}
+                        greeksVersion={reportVersion}
                         onSelectUnderlying={setSimulatorUnderlying}
                       />
                     )}
@@ -967,7 +890,7 @@ export default function IBPanel() {
                 const right = (modifyingOrder.right === "C" || modifyingOrder.right === "Call") ? "C" : "P";
                 const colonKey = `${modifyingOrder.symbol.toUpperCase()}:${modifyingOrder.expiry}:${right}:${modifyingOrder.strike}`;
                 const osiKey = buildOsiSymbol(modifyingOrder.symbol, modifyingOrder.expiry, right, modifyingOrder.strike);
-                const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(osiKey);
+                const greeks = greeksMap.get(colonKey) || greeksMap.get(osiKey);
                 if (greeks) {
                   return {
                     last: greeks.last,

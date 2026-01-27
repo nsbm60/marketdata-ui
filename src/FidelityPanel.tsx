@@ -14,40 +14,15 @@ import {
 import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices, PriceData } from "./hooks/useMarketData";
 import { formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
-import { formatExpiryShort, daysToExpiry, parseOptionSymbol } from "./utils/options";
+import { formatExpiryShort, daysToExpiry } from "./utils/options";
 import { OptionsAnalysisTable } from "./components/portfolio";
 import { ExpiryScenarioAnalysis, SimulatorPanel } from "./components/portfolio";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
-import { usePortfolioOptionsReports, PortfolioOptionPosition, OptionGreeks } from "./hooks/usePortfolioOptionsReports";
-import { usePositionsReport, positionsReportClientId, ReportPosition } from "./hooks/usePositionsReport";
+import { usePositionsReport, positionsReportClientId, ReportPosition, OptionGreeks, buildGreeksMap } from "./hooks/usePositionsReport";
 import TabButtonGroup from "./components/shared/TabButtonGroup";
 import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
 import { useAppState } from "./state/useAppState";
 import { IbPosition } from "./types/portfolio";
-
-/**
- * Build a Greeks map from ReportPosition array for FidelityOptionsAnalysis.
- * Key format: OSI symbol (e.g., "NVDA260123P00140000")
- */
-function buildGreeksMapFromReport(positions: ReportPosition[]): Map<string, OptionGreeks> {
-  const map = new Map<string, OptionGreeks>();
-
-  for (const p of positions) {
-    if (p.secType !== "OPT" || !p.osiSymbol) continue;
-
-    map.set(p.osiSymbol.toUpperCase(), {
-      delta: p.delta ?? null,
-      gamma: p.gamma ?? null,
-      theta: p.theta ?? null,
-      vega: p.vega ?? null,
-      iv: p.iv ?? null,
-      last: p.currentPrice ?? null,
-      theo: null,
-    });
-  }
-
-  return map;
-}
 
 export default function FidelityPanel() {
   const [positions, setPositions] = useState<FidelityPosition[]>([]);
@@ -233,33 +208,13 @@ export default function FidelityPanel() {
     return getChannelPrices("option");
   }, [optionVersion]);
 
-  // Build option positions for Greeks lookup via OptionsReportBuilder
-  const portfolioOptionPositions = useMemo((): PortfolioOptionPosition[] => {
-    return positions
-      .filter(p => p.type === "option" && p.osiSymbol)
-      .map(p => {
-        const parsed = parseOptionSymbol(p.osiSymbol!);
-        if (!parsed) return null;
-        return {
-          underlying: parsed.underlying,
-          expiry: parsed.expiration,  // YYYY-MM-DD format
-          strike: parsed.strike,
-          right: parsed.right === "call" ? "C" : "P",
-        };
-      })
-      .filter((p): p is PortfolioOptionPosition => p !== null);
-  }, [positions]);
-
-  // Subscribe to OptionsReportBuilders for portfolio options to get Greeks
-  const { greeksMap: portfolioGreeksMap, version: greeksVersion } = usePortfolioOptionsReports(portfolioOptionPositions);
-
-  // Server-computed positions report (Fidelity positions with Greeks/P&L)
+  // Server-computed Fidelity positions report (P&L, Greeks, per-expiry subtotals)
   const {
-    fidelityPositions: reportFidelityPositions,
+    positions: reportFidelityPositions,
     referenceDates: reportReferenceDates,
     underlyingGroups,
     version: reportVersion,
-  } = usePositionsReport(true);
+  } = usePositionsReport("fidelity");
 
   // Build changes lookup from report positions: symbol -> timeframe -> { change, pct }
   const reportChangesMap = useMemo(() => {
@@ -276,23 +231,11 @@ export default function FidelityPanel() {
     return map;
   }, [reportFidelityPositions]);
 
-  // Build Greeks map from report data (more reliable when available)
-  const reportGreeksMap = useMemo(() => {
+  // Build Greeks map from report data (keyed by both colon and OSI formats)
+  const greeksMap = useMemo(() => {
     if (!reportFidelityPositions || reportFidelityPositions.length === 0) return new Map<string, OptionGreeks>();
-    return buildGreeksMapFromReport(reportFidelityPositions);
+    return buildGreeksMap(reportFidelityPositions);
   }, [reportFidelityPositions]);
-
-  // Combine Greeks maps: prefer report data, fall back to streaming
-  const combinedGreeksMap = useMemo(() => {
-    const combined = new Map<string, OptionGreeks>(portfolioGreeksMap);
-    for (const [key, greeks] of reportGreeksMap) {
-      combined.set(key, greeks);
-    }
-    return combined;
-  }, [portfolioGreeksMap, reportGreeksMap]);
-
-  // Use report version if available, otherwise use streaming version
-  const effectiveGreeksVersion = reportVersion > 0 ? reportVersion : greeksVersion;
 
   // Separate cash/pending from tradeable positions
   const { cashPositions, pendingPositions, tradeablePositions } = useMemo(() => {
@@ -779,15 +722,15 @@ export default function FidelityPanel() {
                       underlying={simulatorUnderlying}
                       positions={ibFormatPositions}
                       equityPrices={equityPrices}
-                      greeksMap={combinedGreeksMap}
+                      greeksMap={greeksMap}
                       onClose={() => setSimulatorUnderlying(null)}
                     />
                   ) : (
                     <ExpiryScenarioAnalysis
                       positions={ibFormatPositions}
                       equityPrices={equityPrices}
-                      greeksMap={combinedGreeksMap}
-                      greeksVersion={effectiveGreeksVersion}
+                      greeksMap={greeksMap}
+                      greeksVersion={reportVersion}
                       onSelectUnderlying={setSimulatorUnderlying}
                     />
                   )}

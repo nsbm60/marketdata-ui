@@ -1,17 +1,22 @@
 /**
- * usePositionsReport - Subscribe to server-computed positions report.
+ * usePositionsReport - Subscribe to a per-broker server-computed positions report.
  *
- * The PositionsReport on CalcServer provides:
- * - Combined IB + Fidelity positions
- * - Server-computed P&L (current value, entry value, unrealized P&L)
+ * Each broker (IB, Fidelity) has its own independent report instance on CalcServer,
+ * publishing to its own topic. This hook subscribes to one broker's report.
+ *
+ * The report provides:
+ * - Positions with server-computed P&L (current value, entry value, unrealized P&L)
+ * - Price changes from close for multiple timeframes
  * - Option metrics: delta equivalent, theta daily, intrinsic/time value
- * - Cash balances from all sources
+ * - Per-underlying groups with per-expiry subtotals
+ * - Cash balances
  * - Summary aggregations
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { socketHub } from "../ws/SocketHub";
 import type { TickEnvelope } from "../ws/ws-types";
+import { buildOsiSymbol } from "../utils/options";
 
 // Price change for a specific timeframe
 export interface TimeframeChange {
@@ -65,20 +70,18 @@ export interface ReportPosition {
 
 // Cash balance entry
 export interface ReportCash {
-  source: "ib" | "fidelity";
   currency: string;
   amount: number;
 }
 
-// Summary data
+// Per-broker summary data
 export interface ReportSummary {
   totalPositionValue: number;
   totalCash: number;
   totalUnrealizedPnl: number;
   netDelta: number;
   totalThetaDaily: number;
-  ibPositionCount: number;
-  fidelityPositionCount: number;
+  positionCount: number;
 }
 
 // Per-expiry subtotals (computed server-side)
@@ -106,34 +109,100 @@ export interface UnderlyingGroupSubtotal {
   expirySubtotals: ExpirySubtotal[];
 }
 
-// Full report structure from server
+// Full report structure from server (per-broker, flat)
 export interface PositionsReportData {
   clientId: string;
   asOf: number;
   positions: ReportPosition[];
+  underlyingGroups: UnderlyingGroupSubtotal[];
   cash: ReportCash[];
   summary: ReportSummary;
   // Reference dates for each timeframe (e.g., { "1d": "2026-01-08", "1w": "2026-01-02" })
   referenceDates?: Record<string, string>;
-  // Per-underlying groups with per-expiry subtotals (computed server-side)
-  underlyingGroups?: UnderlyingGroupSubtotal[];
 }
 
 // Hook return type
 export interface UsePositionsReportResult {
   report: PositionsReportData | null;
   positions: ReportPosition[];
-  ibPositions: ReportPosition[];
-  fidelityPositions: ReportPosition[];
+  underlyingGroups: UnderlyingGroupSubtotal[];
   cash: ReportCash[];
   summary: ReportSummary | null;
   referenceDates: Record<string, string>;  // Timeframe -> date mapping
-  underlyingGroups: UnderlyingGroupSubtotal[];  // Server-computed per-underlying/per-expiry subtotals
   loading: boolean;
   error: string | null;
   version: number;               // Increments on each update (for re-render triggers)
   clientId: string;
   refresh: () => void;           // Force refresh positions
+}
+
+// Greeks data for a single option position
+export interface OptionGreeks {
+  delta?: number;
+  gamma?: number;
+  theta?: number;
+  vega?: number;
+  iv?: number;
+  theo?: number;
+  last?: number;
+  bid?: number;
+  ask?: number;
+  mid?: number;
+  change?: number;
+  changePct?: number;
+  changes?: Record<string, TimeframeChange>;
+}
+
+/**
+ * Look up Greeks for a position by OSI symbol.
+ */
+export function getGreeksForPosition(
+  greeksMap: Map<string, OptionGreeks>,
+  underlying: string,
+  expiry: string,
+  right: string,
+  strike: number
+): OptionGreeks | undefined {
+  const osi = buildOsiSymbol(underlying, expiry, right, strike);
+  return greeksMap.get(osi);
+}
+
+/**
+ * Build a Greeks map from ReportPosition array.
+ * Each option gets entries under BOTH key formats:
+ * - Colon key: "UNDERLYING:YYYYMMDD:C/P:STRIKE" (used by position tables)
+ * - OSI key: "NVDA260117C00140000" (used by ExpiryScenarioAnalysis)
+ */
+export function buildGreeksMap(positions: ReportPosition[]): Map<string, OptionGreeks> {
+  const map = new Map<string, OptionGreeks>();
+
+  for (const p of positions) {
+    if (p.secType !== "OPT" || !p.expiry || !p.right || p.strike === undefined) continue;
+
+    const greeks: OptionGreeks = {
+      delta: p.delta,
+      gamma: p.gamma,
+      theta: p.theta,
+      vega: p.vega,
+      iv: p.iv,
+      last: p.currentPrice,
+      changes: p.changes,
+    };
+
+    // Colon key format: "NVDA:20260117:C:140"
+    const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${p.right}:${p.strike}`;
+    map.set(colonKey, greeks);
+
+    // OSI key format: "NVDA260117C00140000"
+    if (p.osiSymbol) {
+      map.set(p.osiSymbol.toUpperCase(), greeks);
+    } else {
+      const osi = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
+      map.set(osi, greeks);
+    }
+  }
+
+  return map;
 }
 
 // Generate a stable client ID for this browser session
@@ -149,26 +218,31 @@ const getClientId = (): string => {
 
 const clientId = getClientId();
 
-export function usePositionsReport(enabled: boolean = true): UsePositionsReportResult {
+export type Broker = "ib" | "fidelity";
+
+export function usePositionsReport(broker: Broker, enabled: boolean = true): UsePositionsReportResult {
   const [report, setReport] = useState<PositionsReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const reportStartedRef = useRef(false);
 
+  const channel = `report.positions.${broker}`;
+  const topicPrefix = `report.positions.${broker}.`;
+
   // Handle incoming report ticks
   const handleTick = useCallback((tick: TickEnvelope) => {
-    if (!tick.topic.startsWith("report.positions.")) return;
+    if (!tick.topic.startsWith(topicPrefix)) return;
 
-    // Check if this is our report
+    // Check if this is our report (clientId is at index 3: report.positions.<broker>.<clientId>)
     const topicParts = tick.topic.split(".");
-    const topicClientId = topicParts[2];
+    const topicClientId = topicParts[3];
     if (topicClientId !== clientId.toLowerCase()) return;
 
     try {
       const payload = (tick.data as any)?.data ?? tick.data;
       if (!payload || !Array.isArray(payload.positions)) {
-        console.warn("[usePositionsReport] Invalid report format:", payload);
+        console.warn(`[usePositionsReport:${broker}] Invalid report format:`, payload);
         return;
       }
 
@@ -178,10 +252,10 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
       setError(null);
       setVersion(v => v + 1);
     } catch (e) {
-      console.warn("[usePositionsReport] Failed to parse report:", e);
+      console.warn(`[usePositionsReport:${broker}] Failed to parse report:`, e);
       setError(e instanceof Error ? e.message : "Failed to parse report");
     }
-  }, []);
+  }, [broker, topicPrefix]);
 
   // Register tick handler
   useEffect(() => {
@@ -198,66 +272,63 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
     const subscribe = () => {
       socketHub.send({
         type: "subscribe",
-        channels: ["report.positions"],
+        channels: [channel],
         symbols: [clientId],
       });
     };
 
-    // Subscribe now
     subscribe();
-
-    // Resubscribe on WebSocket reconnect
     socketHub.onConnect(subscribe);
 
     return () => {
       socketHub.offConnect(subscribe);
       socketHub.send({
         type: "unsubscribe",
-        channels: ["report.positions"],
+        channels: [channel],
         symbols: [clientId],
       });
     };
-  }, [enabled]);
+  }, [enabled, channel]);
 
   // Start the positions report on the server
   useEffect(() => {
     if (!enabled) {
-      // Stop the report if disabled
       if (reportStartedRef.current) {
         socketHub.sendControl("stop_positions_report", {
           target: "calc",
           clientId: clientId,
+          broker: broker,
         }).catch(() => { /* ignore */ });
         reportStartedRef.current = false;
       }
       return;
     }
 
-    // Start the report
     setLoading(true);
 
     socketHub.sendControl("start_positions_report", {
       target: "calc",
       clientId: clientId,
+      broker: broker,
     }).then(() => {
       reportStartedRef.current = true;
     }).catch(err => {
-      console.error("[usePositionsReport] Failed to start report:", err);
+      console.error(`[usePositionsReport:${broker}] Failed to start report:`, err);
       setError(err instanceof Error ? err.message : "Failed to start positions report");
       setLoading(false);
     });
 
-    // Cleanup: stop the report when unmounting
     return () => {
       if (reportStartedRef.current) {
         socketHub.sendControl("stop_positions_report", {
           target: "calc",
           clientId: clientId,
+          broker: broker,
         }).catch(() => { /* ignore */ });
         reportStartedRef.current = false;
       }
     };
-  }, [enabled]);
+  }, [enabled, broker]);
 
   // Force refresh positions
   const refresh = useCallback(() => {
@@ -266,27 +337,23 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
     socketHub.sendControl("refresh_positions", {
       target: "calc",
       clientId: clientId,
-    }).catch(err => console.warn("[usePositionsReport] Failed to refresh positions:", err));
-  }, []);
+    }).catch(err => console.warn(`[usePositionsReport:${broker}] Failed to refresh positions:`, err));
+  }, [broker]);
 
-  // Derived data
+  // Direct access — no filtering needed, the report is already broker-specific
   const positions = report?.positions ?? [];
-  const ibPositions = positions.filter(p => p.source === "ib");
-  const fidelityPositions = positions.filter(p => p.source === "fidelity");
+  const underlyingGroups = report?.underlyingGroups ?? [];
   const cash = report?.cash ?? [];
   const summary = report?.summary ?? null;
   const referenceDates = report?.referenceDates ?? {};
-  const underlyingGroups = report?.underlyingGroups ?? [];
 
   return {
     report,
     positions,
-    ibPositions,
-    fidelityPositions,
+    underlyingGroups,
     cash,
     summary,
     referenceDates,
-    underlyingGroups,
     loading,
     error,
     version,

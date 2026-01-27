@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { IbPosition } from "../../types/portfolio";
 import { PriceData } from "../../hooks/useMarketData";
-import { OptionGreeks, getGreeksForPosition } from "../../hooks/usePortfolioOptionsReports";
+import { OptionGreeks, getGreeksForPosition } from "../../hooks/usePositionsReport";
 import { buildOsiSymbol } from "../../utils/options";
 import { socketHub } from "../../ws/SocketHub";
 import { light, dark, semantic, pnl, rowHighlight, fonts } from "../../theme";
