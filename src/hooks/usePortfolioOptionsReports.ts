@@ -10,7 +10,13 @@ import { socketHub } from "../ws/SocketHub";
 import type { TickEnvelope } from "../ws/ws-types";
 import { buildOsiSymbol } from "../utils/options";
 
-// Greeks data for a single option
+// Change data for a specific timeframe
+export interface TimeframeChange {
+  pct: number;
+  change: number;
+}
+
+// Greeks data for a single option (includes all report data)
 export interface OptionGreeks {
   delta?: number;
   gamma?: number;
@@ -22,6 +28,9 @@ export interface OptionGreeks {
   bid?: number;
   ask?: number;
   mid?: number;
+  change?: number;      // 1d change
+  changePct?: number;   // 1d % change
+  changes?: Record<string, TimeframeChange>;  // Multi-timeframe changes (1d, 2d, 1w, 1m)
 }
 
 // Position info needed to build OSI symbols
@@ -44,6 +53,9 @@ interface ReportOption {
   theta?: number;
   vega?: number;
   iv?: number;
+  change?: number;
+  changePct?: number;
+  changes?: Record<string, { pct: number; change: number }>;
 }
 
 // Report data structure
@@ -114,6 +126,9 @@ export function usePortfolioOptionsReports(
           bid: opt.bid,
           ask: opt.ask,
           mid: opt.mid,
+          change: opt.change,
+          changePct: opt.changePct,
+          changes: opt.changes,
         });
       }
 

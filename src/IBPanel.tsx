@@ -20,7 +20,7 @@ import TabButtonGroup from "./components/shared/TabButtonGroup";
 import { PriceChangePercent, PriceChangeDollar } from "./components/shared/PriceChange";
 import { fetchAllTimeframeClosePrices, MultiTimeframeClosePrices, calcPctChange, formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
-import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices } from "./hooks/useMarketData";
+import { useThrottledMarketPrices, useChannelUpdates } from "./hooks/useMarketData";
 import { buildOsiSymbol, formatExpiryYYYYMMDD } from "./utils/options";
 import { usePortfolioData } from "./hooks/usePortfolioData";
 import { useTradeTicket } from "./hooks/useTradeTicket";
@@ -103,6 +103,7 @@ export default function IBPanel() {
   const {
     ibPositions: reportIbPositions,
     summary: reportSummary,
+    underlyingGroups,
     loading: reportLoading,
     version: reportVersion,
   } = usePositionsReport(true);
@@ -186,10 +187,6 @@ export default function IBPanel() {
   // Close prices for % change display (equities) - all timeframes in one response
   const [multiClosePrices, setMultiClosePrices] = useState<MultiTimeframeClosePrices | null>(null);
 
-  // Option close prices for % change display
-  type OptionPriceData = { prevClose: number; todayClose?: number };
-  const [optionClosePrices, setOptionClosePrices] = useState<Map<string, OptionPriceData>>(new Map());
-
   // Fetch close prices for all equity symbols (includes option underlyings)
   // Single fetch provides all timeframes - timeframe switching is local
   // Retry with backoff if we get empty data (server may not be ready)
@@ -224,49 +221,6 @@ export default function IBPanel() {
       if (retryTimeout) clearTimeout(retryTimeout);
     };
   }, [equitySymbols, wsConnected, marketState?.lastUpdated]);
-
-  // Fetch close prices for option positions when positions, timeframe, or connection change
-  useEffect(() => {
-    if (!accountState?.positions || !marketState?.timeframes || !wsConnected) return;
-
-    // Find the date for the selected timeframe
-    const tfInfo = marketState.timeframes.find(t => t.id === timeframe);
-    const closeDate = tfInfo?.date || marketState.prevTradingDay;
-    if (!closeDate) return;
-
-    const optionPositions = accountState.positions.filter(p =>
-      p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
-    );
-
-    if (optionPositions.length === 0) return;
-
-    // Build OSI symbols for options
-    const osiSymbols = optionPositions.map(p =>
-      buildOsiSymbol(p.symbol, p.expiry!, p.right!, p.strike!)
-    );
-
-    // Fetch option close prices for the selected timeframe
-    socketHub.sendControl("option_close_prices", {
-      symbols: osiSymbols,
-      prev_trading_day: closeDate,
-    }, { timeoutMs: 10000 }).then(ack => {
-      if (ack.ok && ack.data) {
-        const data = (ack.data as any).data || ack.data;
-        const newMap = new Map<string, OptionPriceData>();
-        Object.entries(data).forEach(([symbol, prices]: [string, any]) => {
-          if (prices && typeof prices.prevClose === "number") {
-            newMap.set(symbol.toUpperCase(), {
-              prevClose: prices.prevClose,
-              todayClose: typeof prices.todayClose === "number" ? prices.todayClose : undefined,
-            });
-          }
-        });
-        setOptionClosePrices(newMap);
-      }
-    }).catch(err => {
-      console.error("[PortfolioPanel] Failed to fetch option close prices:", err);
-    });
-  }, [accountState?.positions, marketState?.timeframes, timeframe, wsConnected, marketState?.lastUpdated]);
 
   // Build OSI symbols for option positions AND open orders (for backend subscription)
   const optionOsiSymbols = useMemo(() => {
@@ -337,6 +291,7 @@ export default function IBPanel() {
   }, [reportIbPositions]);
 
   // Combine Greeks maps: prefer report data, fall back to streaming
+  // Note: greeksVersion triggers recompute since portfolioGreeksMap is a mutated ref
   const combinedGreeksMap = useMemo(() => {
     const combined = new Map<string, OptionGreeks>(portfolioGreeksMap);
     // Overlay report Greeks (they include computed values from CalcServer)
@@ -344,7 +299,7 @@ export default function IBPanel() {
       combined.set(key, greeks);
     }
     return combined;
-  }, [portfolioGreeksMap, reportGreeksMap]);
+  }, [portfolioGreeksMap, reportGreeksMap, greeksVersion]);
 
   // Use report version if available, otherwise use streaming version
   const effectiveGreeksVersion = reportVersion > 0 ? reportVersion : greeksVersion;
@@ -440,21 +395,20 @@ export default function IBPanel() {
     let missingPriceCount = 0;
     accountState.positions.forEach((p) => {
       let priceKey = p.symbol.toUpperCase();
-      let priceData;
-      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
-        priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
-        priceData = getChannelPrices("option").get(priceKey);
-      } else {
-        priceData = equityPrices.get(priceKey);
-      }
+      let price: number | null = null;
 
-      // Get price: prefer live, fall back to close
-      let price: number | null = priceData?.last ?? null;
-      if (price === null || price === 0) {
-        if (p.secType === "OPT") {
-          const optPriceData = optionClosePrices.get(priceKey);
-          price = optPriceData?.todayClose ?? null;
-        } else if (p.secType === "STK") {
+      if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
+        // Get option price from report data (combinedGreeksMap)
+        priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
+        const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
+        const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
+        const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(priceKey);
+        price = greeks?.last ?? null;
+      } else {
+        // Get equity price from report/streaming
+        const priceData = equityPrices.get(priceKey);
+        price = priceData?.last ?? null;
+        if (price === null || price === 0) {
           const todayClose = multiClosePrices?.prices.get(p.symbol.toUpperCase())?.closes["0d"];
           price = todayClose ?? null;
         }
@@ -486,7 +440,7 @@ export default function IBPanel() {
       totalPortfolio: mktValue + cash,
       primaryAccount: account,
     };
-  }, [accountState, equityPrices, optionClosePrices, multiClosePrices]);
+  }, [accountState, equityPrices, combinedGreeksMap, multiClosePrices]);
 
   return (
     <div style={shell}>
@@ -679,22 +633,21 @@ export default function IBPanel() {
                     let priceData;
                     if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
                       priceKey = buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike);
-                      priceData = getChannelPrices("option").get(priceKey);
+                      // Get option data from report (combinedGreeksMap has last, bid, ask, mid from CalcServer)
+                      const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
+                      const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
+                      const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(priceKey);
+                      priceData = greeks ? { last: greeks.last, bid: greeks.bid, ask: greeks.ask } : undefined;
                     } else {
                       priceData = equityPrices.get(priceKey);
                     }
 
-                    // Get price: prefer live, fall back to close
-                    const optPriceData = p.secType === "OPT" ? optionClosePrices.get(priceKey) : undefined;
+                    // Get price from report (single source of truth)
                     const equityCloses = p.secType === "STK" ? multiClosePrices?.prices.get(p.symbol.toUpperCase())?.closes : undefined;
 
                     let displayPrice: number | null = priceData?.last ?? null;
-                    if (displayPrice === null || displayPrice === 0) {
-                      if (p.secType === "OPT") {
-                        displayPrice = optPriceData?.todayClose ?? null;
-                      } else if (p.secType === "STK") {
-                        displayPrice = equityCloses?.["0d"] ?? null;
-                      }
+                    if ((displayPrice === null || displayPrice === 0) && p.secType === "STK") {
+                      displayPrice = equityCloses?.["0d"] ?? null;
                     }
 
                     // Log missing prices (but only once per render cycle via ref would be better - for now just log)
@@ -713,21 +666,28 @@ export default function IBPanel() {
                     // For options, display avg cost per share (divide by 100)
                     const displayAvgCost = p.secType === "OPT" ? p.avgCost / 100 : p.avgCost;
 
-                    // Calculate % and $ change for equities (using selected timeframe) and options
+                    // Get % and $ change - options from report, equities from close prices
                     let pctChange: number | undefined;
                     let dollarChange: number | undefined;
-                    if (!hasMissingPrice && displayPrice !== null) {
-                      if (p.secType === "STK") {
-                        const prevClose = equityCloses?.[timeframe];
-                        if (prevClose && prevClose > 0) {
-                          pctChange = calcPctChange(displayPrice, prevClose);
-                          dollarChange = displayPrice - prevClose;
-                        }
-                      } else if (p.secType === "OPT") {
-                        if (optPriceData?.prevClose && optPriceData.prevClose > 0) {
-                          pctChange = calcPctChange(displayPrice, optPriceData.prevClose);
-                          dollarChange = displayPrice - optPriceData.prevClose;
-                        }
+                    if (p.secType === "OPT") {
+                      // Get option Greeks data which includes change info from report
+                      const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
+                      const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
+                      const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(priceKey);
+                      // Use timeframe-specific change if available, otherwise use 1d change
+                      const tfChange = greeks?.changes?.[timeframe];
+                      if (tfChange) {
+                        pctChange = tfChange.pct;
+                        dollarChange = tfChange.change;
+                      } else if (greeks?.changePct !== undefined) {
+                        pctChange = greeks.changePct;
+                        dollarChange = greeks.change;
+                      }
+                    } else if (p.secType === "STK" && !hasMissingPrice && displayPrice !== null) {
+                      const prevClose = equityCloses?.[timeframe];
+                      if (prevClose && prevClose > 0) {
+                        pctChange = calcPctChange(displayPrice, prevClose);
+                        dollarChange = displayPrice - prevClose;
                       }
                     }
                     // Format symbol display based on secType
@@ -786,33 +746,35 @@ export default function IBPanel() {
                               const optionDetails = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
                                 ? { strike: p.strike, expiry: p.expiry, right: p.right }
                                 : undefined;
-                              // Get fresh price data at click time (not closure-captured render-time value)
-                              const freshPriceData = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
-                                ? getChannelPrices("option").get(buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike))
-                                : equityPrices.get(p.symbol.toUpperCase());
-                              // Calculate mid if we have bid and ask
-                              let marketData = freshPriceData ? {
-                                ...freshPriceData,
-                                mid: (freshPriceData.bid !== undefined && freshPriceData.ask !== undefined)
-                                  ? (freshPriceData.bid + freshPriceData.ask) / 2
-                                  : undefined
-                              } : undefined;
-                              // Merge Greeks from CalcServer report for options
+                              // Get market data from report (single source of truth)
+                              let marketData: any;
                               if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
                                 const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
-                                // Try colon-separated key (reportGreeksMap) and OSI key (portfolioGreeksMap)
                                 const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
                                 const osiKey = buildOsiSymbol(p.symbol, p.expiry, right, p.strike);
                                 const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(osiKey);
                                 if (greeks) {
                                   marketData = {
-                                    ...marketData,
-                                    delta: greeks.delta ?? marketData?.delta,
-                                    gamma: greeks.gamma ?? marketData?.gamma,
-                                    theta: greeks.theta ?? marketData?.theta,
-                                    vega: greeks.vega ?? marketData?.vega,
-                                    iv: greeks.iv ?? marketData?.iv,
-                                    last: greeks.last ?? marketData?.last,
+                                    last: greeks.last,
+                                    bid: greeks.bid,
+                                    ask: greeks.ask,
+                                    mid: greeks.mid,
+                                    delta: greeks.delta,
+                                    gamma: greeks.gamma,
+                                    theta: greeks.theta,
+                                    vega: greeks.vega,
+                                    iv: greeks.iv,
+                                  };
+                                }
+                              } else {
+                                const priceData = equityPrices.get(p.symbol.toUpperCase());
+                                if (priceData) {
+                                  marketData = {
+                                    last: priceData.last,
+                                    bid: priceData.bid,
+                                    ask: priceData.ask,
+                                    mid: (priceData.bid !== undefined && priceData.ask !== undefined)
+                                      ? (priceData.bid + priceData.ask) / 2 : undefined,
                                   };
                                 }
                               }
@@ -828,34 +790,35 @@ export default function IBPanel() {
                               const optionDetails = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
                                 ? { strike: p.strike, expiry: p.expiry, right: p.right }
                                 : undefined;
-                              // Get fresh price data at click time (not closure-captured render-time value)
-                              const freshPriceData = p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined
-                                ? getChannelPrices("option").get(buildOsiSymbol(p.symbol, p.expiry, p.right, p.strike))
-                                : equityPrices.get(p.symbol.toUpperCase());
-                              // Calculate mid if we have bid and ask
-                              let marketData = freshPriceData ? {
-                                ...freshPriceData,
-                                mid: (freshPriceData.bid !== undefined && freshPriceData.ask !== undefined)
-                                  ? (freshPriceData.bid + freshPriceData.ask) / 2
-                                  : undefined
-                              } : undefined;
-                              // Merge Greeks from CalcServer report for options
+                              // Get market data from report (single source of truth)
+                              let marketData: any;
                               if (p.secType === "OPT" && p.strike !== undefined && p.expiry !== undefined && p.right !== undefined) {
                                 const right = (p.right === "C" || p.right === "Call") ? "C" : "P";
-                                // Try colon-separated key (reportGreeksMap format)
                                 const colonKey = `${p.symbol.toUpperCase()}:${p.expiry}:${right}:${p.strike}`;
-                                // Try OSI key (portfolioGreeksMap format)
                                 const osiKey = buildOsiSymbol(p.symbol, p.expiry, right, p.strike);
                                 const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(osiKey);
                                 if (greeks) {
                                   marketData = {
-                                    ...marketData,
-                                    delta: greeks.delta ?? marketData?.delta,
-                                    gamma: greeks.gamma ?? marketData?.gamma,
-                                    theta: greeks.theta ?? marketData?.theta,
-                                    vega: greeks.vega ?? marketData?.vega,
-                                    iv: greeks.iv ?? marketData?.iv,
-                                    last: greeks.last ?? marketData?.last,
+                                    last: greeks.last,
+                                    bid: greeks.bid,
+                                    ask: greeks.ask,
+                                    mid: greeks.mid,
+                                    delta: greeks.delta,
+                                    gamma: greeks.gamma,
+                                    theta: greeks.theta,
+                                    vega: greeks.vega,
+                                    iv: greeks.iv,
+                                  };
+                                }
+                              } else {
+                                const priceData = equityPrices.get(p.symbol.toUpperCase());
+                                if (priceData) {
+                                  marketData = {
+                                    last: priceData.last,
+                                    bid: priceData.bid,
+                                    ask: priceData.ask,
+                                    mid: (priceData.bid !== undefined && priceData.ask !== undefined)
+                                      ? (priceData.bid + priceData.ask) / 2 : undefined,
                                   };
                                 }
                               }
@@ -877,11 +840,9 @@ export default function IBPanel() {
                 {positionsTab === "analysis" && (
                   <div style={{ maxHeight: 750, overflow: "auto" }}>
                     <OptionsAnalysisTable
-                      positions={accountState.positions}
-                      equityPrices={equityPrices}
-                      greeksMap={combinedGreeksMap}
-                      greeksVersion={effectiveGreeksVersion}
-                      subscribedPairs={`${subscribedContracts} contracts | Report: ${reportIbPositions?.length ?? 0} positions`}
+                      positions={reportIbPositions ?? []}
+                      underlyingGroups={underlyingGroups}
+                      version={reportVersion}
                     />
                   </div>
                 )}
@@ -1001,25 +962,25 @@ export default function IBPanel() {
             order={modifyingOrder}
             onClose={() => setModifyingOrder(null)}
             initialMarketData={(() => {
-              // Look up Greeks for option orders
+              // Get market data from report (single source of truth)
               if (modifyingOrder.secType === "OPT" && modifyingOrder.strike && modifyingOrder.expiry && modifyingOrder.right) {
                 const right = (modifyingOrder.right === "C" || modifyingOrder.right === "Call") ? "C" : "P";
                 const colonKey = `${modifyingOrder.symbol.toUpperCase()}:${modifyingOrder.expiry}:${right}:${modifyingOrder.strike}`;
                 const osiKey = buildOsiSymbol(modifyingOrder.symbol, modifyingOrder.expiry, right, modifyingOrder.strike);
                 const greeks = combinedGreeksMap.get(colonKey) || combinedGreeksMap.get(osiKey);
-                // Also get prices from option channel
-                const prices = getChannelPrices("option").get(osiKey);
-                return {
-                  last: prices?.last ?? greeks?.last ?? undefined,
-                  bid: prices?.bid ?? greeks?.bid ?? undefined,
-                  ask: prices?.ask ?? greeks?.ask ?? undefined,
-                  mid: prices?.mid ?? greeks?.mid ?? undefined,
-                  delta: greeks?.delta ?? undefined,
-                  gamma: greeks?.gamma ?? undefined,
-                  theta: greeks?.theta ?? undefined,
-                  vega: greeks?.vega ?? undefined,
-                  iv: greeks?.iv ?? undefined,
-                };
+                if (greeks) {
+                  return {
+                    last: greeks.last,
+                    bid: greeks.bid,
+                    ask: greeks.ask,
+                    mid: greeks.mid,
+                    delta: greeks.delta,
+                    gamma: greeks.gamma,
+                    theta: greeks.theta,
+                    vega: greeks.vega,
+                    iv: greeks.iv,
+                  };
+                }
               }
               return undefined;
             })()}

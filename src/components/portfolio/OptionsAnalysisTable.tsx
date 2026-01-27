@@ -1,13 +1,12 @@
 // src/components/portfolio/OptionsAnalysisTable.tsx
 import { useMemo } from "react";
-import { IbPosition } from "../../types/portfolio";
-import { PriceData, getChannelPrices } from "../../hooks/useMarketData";
-import { buildOsiSymbol, formatExpiryShort, compareOptions } from "../../utils/options";
-import { OptionGreeks, getGreeksForPosition } from "../../hooks/usePortfolioOptionsReports";
-import { light, semantic, pnl, rowHighlight } from "../../theme";
+import type { ReportPosition, UnderlyingGroupSubtotal, ExpirySubtotal } from "../../hooks/usePositionsReport";
+import { formatExpiryShort, compareOptions } from "../../utils/options";
+import { light, semantic, pnl } from "../../theme";
 
 /**
  * Calculate days to expiry from YYYYMMDD expiry string.
+ * (Display-only formatting — not a domain calculation.)
  */
 function calcDTE(expiry: string): number {
   if (!expiry || expiry.length !== 8) return 0;
@@ -22,254 +21,71 @@ function calcDTE(expiry: string): number {
 }
 
 type Props = {
-  positions: IbPosition[];
-  equityPrices: Map<string, PriceData>;
-  /** Greeks from OptionsReportBuilder (if available) */
-  greeksMap?: Map<string, OptionGreeks>;
-  /** Version counter to trigger re-renders when Greeks update */
-  greeksVersion?: number;
-  /** Debug: subscribed pairs */
-  subscribedPairs?: string;
+  /** All positions from the server-computed positions report */
+  positions: ReportPosition[];
+  /** Server-computed per-underlying groups with per-expiry subtotals */
+  underlyingGroups: UnderlyingGroupSubtotal[];
+  /** Version counter to trigger re-renders when report updates */
+  version?: number;
 };
 
-interface OptionMetrics {
-  position: IbPosition;
-  osiSymbol: string;
-  delta: number | null;
-  theta: number | null;
-  thetaDollar: number | null;     // theta * quantity * 100 (daily $ decay)
-  effectiveEquiv: number | null;  // contracts * 100 * delta
-  intrinsicValue: number;         // $ total
-  timeValue: number;              // $ total
-  exerciseEffect: {
-    shares: number;               // +/- shares if exercised
-    cashEffect: number;           // +/- cash if exercised
-  };
-  optionPrice: number | null;
-  theoPrice: number | null;       // Black-Scholes theoretical price
-  underlyingPrice: number | null;
-}
-
-interface UnderlyingGroup {
+/** A group of positions for one underlying, organized for display. */
+interface DisplayGroup {
   underlying: string;
-  equityPosition: IbPosition | null;
-  equityShares: number;
-  options: OptionMetrics[];
-  // Subtotals
-  totalEffectiveEquiv: number;
-  totalIntrinsicValue: number;
-  totalTimeValue: number;
-  totalThetaDollar: number;
-  totalExerciseShares: number;
-  totalExerciseCash: number;
-  // Call/Put subtotals
-  callIntrinsicValue: number;
-  callTimeValue: number;
-  callThetaDollar: number;
-  putIntrinsicValue: number;
-  putTimeValue: number;
-  putThetaDollar: number;
+  /** Server-computed subtotals for this underlying */
+  groupSubtotal: UnderlyingGroupSubtotal | null;
+  /** Equity position (if any) */
+  equityPosition: ReportPosition | null;
+  /** Option positions sorted by expiry/right/strike */
+  options: ReportPosition[];
 }
 
-export default function OptionsAnalysisTable({ positions, equityPrices, greeksMap, greeksVersion, subscribedPairs }: Props) {
-  // Get option prices from the channel
-  const optionPrices = getChannelPrices("option");
+export default function OptionsAnalysisTable({ positions, underlyingGroups, version }: Props) {
 
-  // Group positions by underlying and calculate metrics
+  // Group positions by underlying for display
   const groups = useMemo(() => {
-    // Separate equities and options
     const equities = positions.filter(p => p.secType === "STK");
     const options = positions.filter(p => p.secType === "OPT");
 
-    // Get all unique underlyings (from options, plus any equities)
+    // Index server subtotals by underlying for lookup
+    const subtotalsByUnderlying = new Map<string, UnderlyingGroupSubtotal>();
+    for (const g of underlyingGroups) {
+      subtotalsByUnderlying.set(g.underlying.toUpperCase(), g);
+    }
+
+    // Collect unique underlyings
     const underlyings = new Set<string>();
     options.forEach(p => underlyings.add(p.symbol.toUpperCase()));
     equities.forEach(p => underlyings.add(p.symbol.toUpperCase()));
 
-    // Build groups
-    const result: UnderlyingGroup[] = [];
+    const result: DisplayGroup[] = [];
 
     Array.from(underlyings).sort().forEach(underlying => {
-      // Find equity position (if any)
       const equity = equities.find(p => p.symbol.toUpperCase() === underlying) || null;
-      const equityShares = equity?.quantity || 0;
-      const underlyingPrice = equityPrices.get(underlying)?.last || null;
-
-      // Calculate metrics for each option
-      const optionMetrics: OptionMetrics[] = [];
-      const underlyingOptions = options.filter(p => p.symbol.toUpperCase() === underlying);
-
-      underlyingOptions.forEach(opt => {
-        if (opt.strike === undefined || opt.expiry === undefined || opt.right === undefined) return;
-
-        const osiSymbol = buildOsiSymbol(opt.symbol, opt.expiry, opt.right, opt.strike);
-        const priceData = optionPrices.get(osiSymbol);
-
-        // Try to get Greeks from the report-based greeksMap first (more reliable)
-        // Fall back to raw market data if greeksMap not available
-        const greeksData = greeksMap
-          ? getGreeksForPosition(greeksMap, opt.symbol, opt.expiry, opt.right, opt.strike)
-          : undefined;
-
-        const optionPrice = greeksData?.last ?? priceData?.last ?? null;
-        const theoPrice = greeksData?.theo ?? (priceData as any)?.theo ?? null;
-        const delta = greeksData?.delta ?? (priceData as any)?.delta ?? null;
-        const theta = greeksData?.theta ?? (priceData as any)?.theta ?? null;
-
-        // Log missing price data (critical for analysis)
-        if (optionPrice === null) {
-          console.warn(`[OptionsAnalysisTable] Missing price for option: ${osiSymbol}`);
-        }
-
-        // Calculate effective equivalent position
-        const effectiveEquiv = delta !== null ? opt.quantity * 100 * delta : null;
-
-        // Calculate theta dollar impact (daily $ decay)
-        const thetaDollar = theta !== null ? theta * opt.quantity * 100 : null;
-
-        // Calculate intrinsic value
-        let intrinsicPerShare = 0;
-        if (underlyingPrice !== null) {
-          if (opt.right === "C" || opt.right === "Call") {
-            intrinsicPerShare = Math.max(0, underlyingPrice - opt.strike);
-          } else {
-            intrinsicPerShare = Math.max(0, opt.strike - underlyingPrice);
-          }
-        }
-        const intrinsicValue = intrinsicPerShare * opt.quantity * 100;
-
-        // Calculate time value
-        let timeValue = 0;
-        if (optionPrice !== null) {
-          const timePerShare = optionPrice - intrinsicPerShare;
-          timeValue = timePerShare * opt.quantity * 100;
-        }
-
-        // Calculate exercise effect - only for ITM options
-        const isCall = opt.right === "C" || opt.right === "Call";
-        const isLong = opt.quantity > 0;
-        const absContracts = Math.abs(opt.quantity);
-
-        let exerciseShares = 0;
-        let exerciseCash = 0;
-
-        // Only calculate exercise effect if option is in-the-money
-        const isITM = underlyingPrice !== null && (
-          (isCall && underlyingPrice > opt.strike) ||
-          (!isCall && underlyingPrice < opt.strike)
-        );
-
-        if (isITM) {
-          if (isCall) {
-            // Calls: exercising buys shares at strike
-            if (isLong) {
-              // Long call: +shares, -cash
-              exerciseShares = absContracts * 100;
-              exerciseCash = -opt.strike * absContracts * 100;
-            } else {
-              // Short call: -shares, +cash (assigned)
-              exerciseShares = -absContracts * 100;
-              exerciseCash = opt.strike * absContracts * 100;
-            }
-          } else {
-            // Puts: exercising sells shares at strike
-            if (isLong) {
-              // Long put: -shares, +cash
-              exerciseShares = -absContracts * 100;
-              exerciseCash = opt.strike * absContracts * 100;
-            } else {
-              // Short put: +shares, -cash (assigned)
-              exerciseShares = absContracts * 100;
-              exerciseCash = -opt.strike * absContracts * 100;
-            }
-          }
-        }
-
-        optionMetrics.push({
-          position: opt,
-          osiSymbol,
-          delta,
-          theta,
-          thetaDollar,
-          effectiveEquiv,
-          intrinsicValue,
-          timeValue,
-          exerciseEffect: { shares: exerciseShares, cashEffect: exerciseCash },
-          optionPrice,
-          theoPrice,
-          underlyingPrice,
-        });
-      });
-
-      // Sort options by expiry, then call/put (calls first), then strike
-      optionMetrics.sort((a, b) => compareOptions(
-        { expiry: a.position.expiry || "", right: a.position.right || "", strike: a.position.strike || 0 },
-        { expiry: b.position.expiry || "", right: b.position.right || "", strike: b.position.strike || 0 }
-      ));
-
-      // Calculate subtotals (overall and by call/put)
-      let totalEffectiveEquiv = 0;
-      let totalIntrinsicValue = 0;
-      let totalTimeValue = 0;
-      let totalThetaDollar = 0;
-      let totalExerciseShares = 0;
-      let totalExerciseCash = 0;
-      let callIntrinsicValue = 0;
-      let callTimeValue = 0;
-      let callThetaDollar = 0;
-      let putIntrinsicValue = 0;
-      let putTimeValue = 0;
-      let putThetaDollar = 0;
-
-      optionMetrics.forEach(m => {
-        const isCall = m.position.right === "C" || m.position.right === "Call";
-        if (m.effectiveEquiv !== null) totalEffectiveEquiv += m.effectiveEquiv;
-        totalIntrinsicValue += m.intrinsicValue;
-        totalTimeValue += m.timeValue;
-        if (m.thetaDollar !== null) totalThetaDollar += m.thetaDollar;
-        totalExerciseShares += m.exerciseEffect.shares;
-        totalExerciseCash += m.exerciseEffect.cashEffect;
-
-        if (isCall) {
-          callIntrinsicValue += m.intrinsicValue;
-          callTimeValue += m.timeValue;
-          if (m.thetaDollar !== null) callThetaDollar += m.thetaDollar;
-        } else {
-          putIntrinsicValue += m.intrinsicValue;
-          putTimeValue += m.timeValue;
-          if (m.thetaDollar !== null) putThetaDollar += m.thetaDollar;
-        }
-      });
+      const underlyingOptions = options
+        .filter(p => p.symbol.toUpperCase() === underlying)
+        .sort((a, b) => compareOptions(
+          { expiry: a.expiry || "", right: a.right || "", strike: a.strike || 0 },
+          { expiry: b.expiry || "", right: b.right || "", strike: b.strike || 0 },
+        ));
 
       result.push({
         underlying,
+        groupSubtotal: subtotalsByUnderlying.get(underlying) || null,
         equityPosition: equity,
-        equityShares,
-        options: optionMetrics,
-        totalEffectiveEquiv,
-        totalIntrinsicValue,
-        totalTimeValue,
-        totalThetaDollar,
-        totalExerciseShares,
-        totalExerciseCash,
-        callIntrinsicValue,
-        callTimeValue,
-        callThetaDollar,
-        putIntrinsicValue,
-        putTimeValue,
-        putThetaDollar,
+        options: underlyingOptions,
       });
     });
 
     return result;
-  }, [positions, equityPrices, optionPrices, greeksMap, greeksVersion]);
+  }, [positions, underlyingGroups, version]);
 
   // Format helpers
   const fmt = (n: number, decimals = 2) =>
     n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 
-  const fmtDelta = (d: number | null) =>
-    d !== null ? d.toFixed(4) : "—";
+  const fmtDelta = (d: number | undefined) =>
+    d !== undefined ? d.toFixed(4) : "—";
 
   const fmtShares = (n: number) => {
     if (n === 0) return "0";
@@ -287,218 +103,230 @@ export default function OptionsAnalysisTable({ positions, equityPrices, greeksMa
     return <div style={emptyStyle}>No positions to analyze</div>;
   }
 
-  // Debug: show subscribed pairs and data status
-  const debugInfo = `Subscribed: ${subscribedPairs || "none"} | Data: ${greeksMap?.size || 0} entries`;
-
   return (
     <div style={container}>
-      <div style={{ fontSize: 10, color: light.text.disabled, marginBottom: 8, fontFamily: "monospace" }}>
-        {debugInfo}
-      </div>
-      {groups.map(group => (
-        <div key={group.underlying} style={groupContainer}>
-          {/* Underlying header */}
-          <div style={groupHeader}>
-            <span style={{ fontWeight: 700, fontSize: 13 }}>{group.underlying}</span>
-            <span style={{ marginLeft: 12, color: light.text.muted, fontSize: 12 }}>
-              Last: ${equityPrices.get(group.underlying)?.last?.toFixed(2) || "—"}
-            </span>
-            {group.equityPosition && (
-              <span style={{ marginLeft: 8, color: light.text.light, fontSize: 11 }}>
-                ({group.equityShares.toLocaleString()} shares)
+      {groups.map(group => {
+        const gs = group.groupSubtotal;
+        const equityShares = gs?.equityShares ?? group.equityPosition?.quantity ?? 0;
+        const underlyingPrice = gs?.underlyingPrice ?? group.equityPosition?.currentPrice;
+
+        return (
+          <div key={group.underlying} style={groupContainer}>
+            {/* Underlying header */}
+            <div style={groupHeader}>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>{group.underlying}</span>
+              <span style={{ marginLeft: 12, color: light.text.muted, fontSize: 12 }}>
+                Last: ${underlyingPrice?.toFixed(2) || "—"}
               </span>
-            )}
-          </div>
-
-          {/* Table */}
-          <div style={table}>
-            {/* Header row */}
-            <div style={headerRow}>
-              <div style={cellLeft}>Position</div>
-              <div style={cellRight}>DTE</div>
-              <div style={cellRight}>Qty</div>
-              <div style={cellRight}>Price</div>
-              <div style={{ ...cellRight, color: semantic.info.text }}>Theo</div>
-              <div style={cellRight}>Value</div>
-              <div style={cellRight}>Delta</div>
-              <div style={cellRight}>Theta</div>
-              <div style={cellRight}>Eff. Equiv</div>
-              <div style={cellRight}>Intrinsic</div>
-              <div style={cellRight}>Time $</div>
-              <div style={cellRight}>Theta $</div>
-              <div style={cellRight}>Exer Shrs</div>
-              <div style={cellRight}>Exer Cash</div>
+              {equityShares !== 0 && (
+                <span style={{ marginLeft: 8, color: light.text.light, fontSize: 11 }}>
+                  ({equityShares.toLocaleString()} shares)
+                </span>
+              )}
             </div>
 
-            {/* Equity row */}
-            <div style={equityRow}>
-              <div style={cellLeft}>Shares</div>
-              <div style={cellRight}>—</div>
-              <div style={cellRight}>{fmtShares(group.equityShares)}</div>
-              <div style={cellRight}>{equityPrices.get(group.underlying)?.last?.toFixed(2) || "—"}</div>
-              <div style={cellRight}>—</div>
-              <div style={cellRight}>{group.equityShares !== 0 && equityPrices.get(group.underlying)?.last ? `$${fmt(group.equityShares * (equityPrices.get(group.underlying)?.last || 0), 0)}` : "—"}</div>
-              <div style={cellRight}>1.0000</div>
-              <div style={cellRight}>—</div>
-              <div style={cellRight}>{fmtShares(group.equityShares)}</div>
-              <div style={cellRight}>—</div>
-              <div style={cellRight}>—</div>
-              <div style={cellRight}>—</div>
-              <div style={cellRight}>—</div>
-              <div style={cellRight}>—</div>
-            </div>
+            {/* Table */}
+            <div style={table}>
+              {/* Header row */}
+              <div style={headerRow}>
+                <div style={cellLeft}>Position</div>
+                <div style={cellRight}>DTE</div>
+                <div style={cellRight}>Qty</div>
+                <div style={cellRight}>Price</div>
+                <div style={cellRight}>Value</div>
+                <div style={cellRight}>Delta</div>
+                <div style={cellRight}>Theta</div>
+                <div style={cellRight}>Eff. Equiv</div>
+                <div style={cellRight}>Intrinsic</div>
+                <div style={cellRight}>Time $</div>
+                <div style={cellRight}>Theta $</div>
+                <div style={cellRight}>Exer Shrs</div>
+                <div style={cellRight}>Exer Cash</div>
+              </div>
 
-            {/* Option rows */}
-            {group.options.map(opt => {
-              const p = opt.position;
-              const isCall = p.right === "C" || p.right === "Call";
-              const strikeStr = p.strike !== undefined
-                ? (p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike.toString())
-                : "?";
-              const expiryShort = p.expiry ? formatExpiryShort(`${p.expiry.substring(0, 4)}-${p.expiry.substring(4, 6)}-${p.expiry.substring(6, 8)}`) : "?";
-              const dte = p.expiry ? calcDTE(p.expiry) : 0;
+              {/* Equity row */}
+              <div style={equityRow}>
+                <div style={cellLeft}>Shares</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>{fmtShares(equityShares)}</div>
+                <div style={cellRight}>{underlyingPrice?.toFixed(2) || "—"}</div>
+                <div style={cellRight}>{equityShares !== 0 && underlyingPrice ? `$${fmt(equityShares * underlyingPrice, 0)}` : "—"}</div>
+                <div style={cellRight}>1.0000</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>{fmtShares(equityShares)}</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+                <div style={cellRight}>—</div>
+              </div>
 
-              const positionValue = opt.optionPrice !== null ? opt.optionPrice * p.quantity * 100 : null;
+              {/* Option rows grouped by expiry with server-computed per-expiry subtotals */}
+              {renderOptionsByExpiry(group, gs, fmt, fmtDelta, fmtShares, fmtCash)}
 
-              return (
-                <div key={opt.osiSymbol} style={optionRow}>
-                  <div style={cellLeft}>
-                    <span style={{ fontWeight: 600 }}>{strikeStr} {isCall ? "Call" : "Put"}</span>
-                    <span style={{ marginLeft: 8, color: light.text.muted, fontSize: 10 }}>{expiryShort}</span>
+              {/* Total row from server subtotals */}
+              {group.options.length > 0 && gs && (
+                <div style={subtotalRow}>
+                  <div style={cellLeft}>Total</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>{fmtShares(Math.round(gs.totalDeltaEquivalent))}</div>
+                  <div style={{ ...cellRight, color: gs.totalIntrinsicValue > 0 ? pnl.positive : undefined }}>
+                    ${fmt(gs.totalIntrinsicValue, 0)}
                   </div>
-                  <div style={cellRight}>{dte}</div>
-                  <div style={cellRight}>{fmtShares(p.quantity)}</div>
-                  <div style={cellRight}>{opt.optionPrice !== null ? opt.optionPrice.toFixed(2) : "—"}</div>
-                  <div style={{ ...cellRight, color: semantic.info.text }}>{opt.theoPrice !== null ? opt.theoPrice.toFixed(2) : "—"}</div>
-                  <div style={cellRight}>{positionValue !== null ? `$${fmt(positionValue, 0)}` : "—"}</div>
-                  <div style={cellRight}>{fmtDelta(opt.delta)}</div>
-                  <div style={cellRight}>{opt.theta !== null ? opt.theta.toFixed(4) : "—"}</div>
+                  <div style={{ ...cellRight, color: gs.totalTimeValue < 0 ? pnl.negative : gs.totalTimeValue > 0 ? pnl.positive : undefined }}>
+                    ${fmt(gs.totalTimeValue, 0)}
+                  </div>
+                  <div style={{ ...cellRight, color: gs.totalThetaDaily > 0 ? pnl.positive : gs.totalThetaDaily < 0 ? pnl.negative : undefined }}>
+                    ${fmt(gs.totalThetaDaily, 0)}
+                  </div>
+                  <div style={cellRight}>{fmtShares(gs.totalExerciseShares)}</div>
+                  <div style={cellRight}>{fmtCash(gs.totalExerciseCash)}</div>
+                </div>
+              )}
+
+              {/* Net position row (shares + exercise effect) */}
+              {group.options.length > 0 && gs && (
+                <div style={netRow}>
+                  <div style={cellLeft}>Net After Exercise</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
                   <div style={cellRight}>
-                    {opt.effectiveEquiv !== null ? fmtShares(Math.round(opt.effectiveEquiv)) : "—"}
+                    {fmtShares(equityShares + Math.round(gs.totalDeltaEquivalent))}
                   </div>
-                  <div style={{ ...cellRight, color: opt.intrinsicValue > 0 ? pnl.positive : undefined }}>
-                    ${fmt(opt.intrinsicValue, 0)}
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={cellRight}>—</div>
+                  <div style={{ ...cellRight, fontWeight: 600 }}>
+                    {fmtShares(equityShares + gs.totalExerciseShares)}
                   </div>
-                  <div style={{ ...cellRight, color: opt.timeValue < 0 ? pnl.negative : opt.timeValue > 0 ? pnl.positive : undefined }}>
-                    ${fmt(opt.timeValue, 0)}
+                  <div style={{ ...cellRight, fontWeight: 600 }}>
+                    {fmtCash(gs.totalExerciseCash)}
                   </div>
-                  <div style={{ ...cellRight, color: opt.thetaDollar !== null && opt.thetaDollar > 0 ? pnl.positive : opt.thetaDollar !== null && opt.thetaDollar < 0 ? pnl.negative : undefined }}>
-                    {opt.thetaDollar !== null ? `$${fmt(opt.thetaDollar, 0)}` : "—"}
-                  </div>
-                  <div style={cellRight}>{fmtShares(opt.exerciseEffect.shares)}</div>
-                  <div style={cellRight}>{fmtCash(opt.exerciseEffect.cashEffect)}</div>
                 </div>
-              );
-            })}
-
-            {/* Call subtotal row */}
-            {group.options.some(o => o.position.right === "C" || o.position.right === "Call") && (
-              <div style={callSubtotalRow}>
-                <div style={cellLeft}>Calls Subtotal</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={{ ...cellRight, color: group.callIntrinsicValue > 0 ? pnl.positive : undefined }}>
-                  ${fmt(group.callIntrinsicValue, 0)}
-                </div>
-                <div style={{ ...cellRight, color: group.callTimeValue < 0 ? pnl.negative : group.callTimeValue > 0 ? pnl.positive : undefined }}>
-                  ${fmt(group.callTimeValue, 0)}
-                </div>
-                <div style={{ ...cellRight, color: group.callThetaDollar > 0 ? pnl.positive : group.callThetaDollar < 0 ? pnl.negative : undefined }}>
-                  ${fmt(group.callThetaDollar, 0)}
-                </div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-              </div>
-            )}
-
-            {/* Put subtotal row */}
-            {group.options.some(o => o.position.right === "P" || o.position.right === "Put") && (
-              <div style={putSubtotalRow}>
-                <div style={cellLeft}>Puts Subtotal</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={{ ...cellRight, color: group.putIntrinsicValue > 0 ? pnl.positive : undefined }}>
-                  ${fmt(group.putIntrinsicValue, 0)}
-                </div>
-                <div style={{ ...cellRight, color: group.putTimeValue < 0 ? pnl.negative : group.putTimeValue > 0 ? pnl.positive : undefined }}>
-                  ${fmt(group.putTimeValue, 0)}
-                </div>
-                <div style={{ ...cellRight, color: group.putThetaDollar > 0 ? pnl.positive : group.putThetaDollar < 0 ? pnl.negative : undefined }}>
-                  ${fmt(group.putThetaDollar, 0)}
-                </div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-              </div>
-            )}
-
-            {/* Total subtotal row */}
-            {group.options.length > 0 && (
-              <div style={subtotalRow}>
-                <div style={cellLeft}>Total</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>{fmtShares(Math.round(group.totalEffectiveEquiv))}</div>
-                <div style={{ ...cellRight, color: group.totalIntrinsicValue > 0 ? pnl.positive : undefined }}>
-                  ${fmt(group.totalIntrinsicValue, 0)}
-                </div>
-                <div style={{ ...cellRight, color: group.totalTimeValue < 0 ? pnl.negative : group.totalTimeValue > 0 ? pnl.positive : undefined }}>
-                  ${fmt(group.totalTimeValue, 0)}
-                </div>
-                <div style={{ ...cellRight, color: group.totalThetaDollar > 0 ? pnl.positive : group.totalThetaDollar < 0 ? pnl.negative : undefined }}>
-                  ${fmt(group.totalThetaDollar, 0)}
-                </div>
-                <div style={cellRight}>{fmtShares(group.totalExerciseShares)}</div>
-                <div style={cellRight}>{fmtCash(group.totalExerciseCash)}</div>
-              </div>
-            )}
-
-            {/* Net position row (shares + exercise effect) */}
-            {group.options.length > 0 && (
-              <div style={netRow}>
-                <div style={cellLeft}>Net After Exercise</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>
-                  {fmtShares(group.equityShares + Math.round(group.totalEffectiveEquiv))}
-                </div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={cellRight}>—</div>
-                <div style={{ ...cellRight, fontWeight: 600 }}>
-                  {fmtShares(group.equityShares + group.totalExerciseShares)}
-                </div>
-                <div style={{ ...cellRight, fontWeight: 600 }}>
-                  {fmtCash(group.totalExerciseCash)}
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
+}
+
+/**
+ * Render option rows grouped by expiry, with server-computed per-expiry subtotals.
+ */
+function renderOptionsByExpiry(
+  group: DisplayGroup,
+  gs: UnderlyingGroupSubtotal | null,
+  fmt: (n: number, d?: number) => string,
+  fmtDelta: (d: number | undefined) => string,
+  fmtShares: (n: number) => string,
+  fmtCash: (n: number) => string,
+) {
+  // Group options by expiry for display
+  const byExpiry = new Map<string, ReportPosition[]>();
+  for (const opt of group.options) {
+    const exp = opt.expiry || "unknown";
+    if (!byExpiry.has(exp)) byExpiry.set(exp, []);
+    byExpiry.get(exp)!.push(opt);
+  }
+
+  // Index server expiry subtotals for lookup
+  const expirySubtotalMap = new Map<string, ExpirySubtotal>();
+  if (gs) {
+    for (const es of gs.expirySubtotals) {
+      expirySubtotalMap.set(es.expiry, es);
+    }
+  }
+
+  return Array.from(byExpiry.entries()).map(([expiry, expiryOpts]) => {
+    const expiryShort = expiry !== "unknown"
+      ? formatExpiryShort(`${expiry.substring(0, 4)}-${expiry.substring(4, 6)}-${expiry.substring(6, 8)}`)
+      : "?";
+    const dte = expiry !== "unknown" ? calcDTE(expiry) : 0;
+
+    // Look up server-computed subtotal for this expiry
+    const es = expirySubtotalMap.get(expiry);
+
+    return (
+      <div key={expiry}>
+        {/* Expiry section header */}
+        <div style={expirySectionHeader}>
+          <div style={cellLeft}>{expiryShort} ({dte}d)</div>
+        </div>
+
+        {/* Option rows for this expiry */}
+        {expiryOpts.map(opt => {
+          const isCall = opt.right === "C" || opt.right === "Call";
+          const strikeStr = opt.strike !== undefined
+            ? (opt.strike % 1 === 0 ? opt.strike.toFixed(0) : opt.strike.toString())
+            : "?";
+
+          return (
+            <div key={opt.osiSymbol || opt.key} style={optionRow}>
+              <div style={cellLeft}>
+                <span style={{ fontWeight: 600 }}>{strikeStr} {isCall ? "Call" : "Put"}</span>
+              </div>
+              <div style={cellRight}>{dte}</div>
+              <div style={cellRight}>{fmtShares(opt.quantity)}</div>
+              <div style={cellRight}>{opt.currentPrice !== undefined ? opt.currentPrice.toFixed(2) : "—"}</div>
+              <div style={cellRight}>{opt.currentValue !== undefined ? `$${fmt(opt.currentValue, 0)}` : "—"}</div>
+              <div style={cellRight}>{fmtDelta(opt.delta)}</div>
+              <div style={cellRight}>{opt.theta !== undefined ? opt.theta.toFixed(4) : "—"}</div>
+              <div style={cellRight}>
+                {opt.deltaEquivalent !== undefined ? fmtShares(Math.round(opt.deltaEquivalent)) : "—"}
+              </div>
+              <div style={{ ...cellRight, color: (opt.intrinsicValue ?? 0) > 0 ? pnl.positive : undefined }}>
+                {opt.intrinsicValue !== undefined ? `$${fmt(opt.intrinsicValue, 0)}` : "—"}
+              </div>
+              <div style={{ ...cellRight, color: (opt.timeValue ?? 0) < 0 ? pnl.negative : (opt.timeValue ?? 0) > 0 ? pnl.positive : undefined }}>
+                {opt.timeValue !== undefined ? `$${fmt(opt.timeValue, 0)}` : "—"}
+              </div>
+              <div style={{ ...cellRight, color: (opt.thetaDaily ?? 0) > 0 ? pnl.positive : (opt.thetaDaily ?? 0) < 0 ? pnl.negative : undefined }}>
+                {opt.thetaDaily !== undefined ? `$${fmt(opt.thetaDaily, 0)}` : "—"}
+              </div>
+              <div style={cellRight}>{opt.exerciseShares !== undefined ? fmtShares(opt.exerciseShares) : "0"}</div>
+              <div style={cellRight}>{opt.exerciseCash !== undefined ? fmtCash(opt.exerciseCash) : "$0"}</div>
+            </div>
+          );
+        })}
+
+        {/* Per-expiry subtotal from server */}
+        {es && (
+          <div style={expirySubtotalRow}>
+            <div style={cellLeft}>{expiryShort} Subtotal</div>
+            <div style={cellRight}>—</div>
+            <div style={cellRight}>—</div>
+            <div style={cellRight}>—</div>
+            <div style={cellRight}>—</div>
+            <div style={cellRight}>—</div>
+            <div style={cellRight}>—</div>
+            <div style={cellRight}>{fmtShares(Math.round(es.deltaEquivalent))}</div>
+            <div style={{ ...cellRight, color: es.intrinsicValue > 0 ? pnl.positive : undefined }}>
+              ${fmt(es.intrinsicValue, 0)}
+            </div>
+            <div style={{ ...cellRight, color: es.timeValue < 0 ? pnl.negative : es.timeValue > 0 ? pnl.positive : undefined }}>
+              ${fmt(es.timeValue, 0)}
+            </div>
+            <div style={{ ...cellRight, color: es.thetaDaily > 0 ? pnl.positive : es.thetaDaily < 0 ? pnl.negative : undefined }}>
+              ${fmt(es.thetaDaily, 0)}
+            </div>
+            <div style={cellRight}>{fmtShares(es.exerciseShares)}</div>
+            <div style={cellRight}>{fmtCash(es.exerciseCash)}</div>
+          </div>
+        )}
+      </div>
+    );
+  });
 }
 
 // Styles
@@ -527,7 +355,7 @@ const table: React.CSSProperties = {
   fontSize: 11,
 };
 
-const gridCols = "140px 35px 45px 55px 50px 55px 60px 70px 70px 65px 65px 70px 80px 80px";
+const gridCols = "140px 35px 45px 55px 55px 60px 70px 70px 65px 65px 70px 80px 80px";
 
 const headerRow: React.CSSProperties = {
   display: "grid",
@@ -556,21 +384,23 @@ const optionRow: React.CSSProperties = {
   borderBottom: `1px solid ${light.bg.hover}`,
 };
 
-const callSubtotalRow: React.CSSProperties = {
+const expirySectionHeader: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
-  padding: "6px 12px",
-  background: semantic.success.bgMuted,
-  fontWeight: 500,
+  padding: "4px 12px",
+  background: light.bg.tertiary,
+  fontWeight: 600,
   fontSize: 10,
+  color: light.text.secondary,
   borderBottom: `1px solid ${light.border.primary}`,
+  borderTop: `1px solid ${light.border.primary}`,
 };
 
-const putSubtotalRow: React.CSSProperties = {
+const expirySubtotalRow: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: gridCols,
-  padding: "6px 12px",
-  background: semantic.highlight.pink,
+  padding: "5px 12px",
+  background: semantic.highlight.yellow,
   fontWeight: 500,
   fontSize: 10,
   borderBottom: `1px solid ${light.border.primary}`,

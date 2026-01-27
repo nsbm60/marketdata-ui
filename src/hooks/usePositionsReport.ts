@@ -81,6 +81,31 @@ export interface ReportSummary {
   fidelityPositionCount: number;
 }
 
+// Per-expiry subtotals (computed server-side)
+export interface ExpirySubtotal {
+  expiry: string;                // YYYYMMDD
+  deltaEquivalent: number;
+  thetaDaily: number;
+  intrinsicValue: number;
+  timeValue: number;
+  exerciseShares: number;
+  exerciseCash: number;
+}
+
+// Per-underlying group with nested per-expiry subtotals (computed server-side)
+export interface UnderlyingGroupSubtotal {
+  underlying: string;
+  underlyingPrice?: number;
+  equityShares: number;
+  totalDeltaEquivalent: number;
+  totalThetaDaily: number;
+  totalIntrinsicValue: number;
+  totalTimeValue: number;
+  totalExerciseShares: number;
+  totalExerciseCash: number;
+  expirySubtotals: ExpirySubtotal[];
+}
+
 // Full report structure from server
 export interface PositionsReportData {
   clientId: string;
@@ -90,6 +115,8 @@ export interface PositionsReportData {
   summary: ReportSummary;
   // Reference dates for each timeframe (e.g., { "1d": "2026-01-08", "1w": "2026-01-02" })
   referenceDates?: Record<string, string>;
+  // Per-underlying groups with per-expiry subtotals (computed server-side)
+  underlyingGroups?: UnderlyingGroupSubtotal[];
 }
 
 // Hook return type
@@ -101,6 +128,7 @@ export interface UsePositionsReportResult {
   cash: ReportCash[];
   summary: ReportSummary | null;
   referenceDates: Record<string, string>;  // Timeframe -> date mapping
+  underlyingGroups: UnderlyingGroupSubtotal[];  // Server-computed per-underlying/per-expiry subtotals
   loading: boolean;
   error: string | null;
   version: number;               // Increments on each update (for re-render triggers)
@@ -248,6 +276,7 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
   const cash = report?.cash ?? [];
   const summary = report?.summary ?? null;
   const referenceDates = report?.referenceDates ?? {};
+  const underlyingGroups = report?.underlyingGroups ?? [];
 
   return {
     report,
@@ -257,6 +286,7 @@ export function usePositionsReport(enabled: boolean = true): UsePositionsReportR
     cash,
     summary,
     referenceDates,
+    underlyingGroups,
     loading,
     error,
     version,

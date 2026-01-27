@@ -15,7 +15,7 @@ import { useThrottledMarketPrices, useChannelUpdates, getChannelPrices, PriceDat
 import { formatCloseDateShort } from "./services/closePrices";
 import { useMarketState } from "./services/marketState";
 import { formatExpiryShort, daysToExpiry, parseOptionSymbol } from "./utils/options";
-import FidelityOptionsAnalysis from "./components/fidelity/FidelityOptionsAnalysis";
+import { OptionsAnalysisTable } from "./components/portfolio";
 import { ExpiryScenarioAnalysis, SimulatorPanel } from "./components/portfolio";
 import TimeframeSelector from "./components/shared/TimeframeSelector";
 import { usePortfolioOptionsReports, PortfolioOptionPosition, OptionGreeks } from "./hooks/usePortfolioOptionsReports";
@@ -257,6 +257,7 @@ export default function FidelityPanel() {
   const {
     fidelityPositions: reportFidelityPositions,
     referenceDates: reportReferenceDates,
+    underlyingGroups,
     version: reportVersion,
   } = usePositionsReport(true);
 
@@ -762,12 +763,10 @@ export default function FidelityPanel() {
               {/* Options Analysis Tab */}
               {activeTab === "analysis" && (
                 <div style={{ maxHeight: 750, overflow: "auto" }}>
-                  <FidelityOptionsAnalysis
-                    positions={tradeablePositions}
-                    equityPrices={equityPrices}
-                    optionPrices={optionPrices}
-                    greeksMap={combinedGreeksMap}
-                    greeksVersion={effectiveGreeksVersion}
+                  <OptionsAnalysisTable
+                    positions={reportFidelityPositions ?? []}
+                    underlyingGroups={underlyingGroups}
+                    version={reportVersion}
                   />
                 </div>
               )}
