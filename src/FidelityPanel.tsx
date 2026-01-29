@@ -46,6 +46,16 @@ export default function FidelityPanel() {
   // Persist timeframe
   useEffect(() => { localStorage.setItem("fidelity.timeframe", timeframe); }, [timeframe]);
 
+  // Reset timeframe if cached value is not in available options (e.g., "0d" on a weekend)
+  useEffect(() => {
+    if (marketState?.timeframes?.length) {
+      const isValid = marketState.timeframes.some(t => t.id === timeframe);
+      if (!isValid) {
+        setTimeframe("1d");
+      }
+    }
+  }, [marketState?.timeframes, timeframe]);
+
   // Get current timeframe info for display
   const currentTimeframeInfo = useMemo(() => {
     return marketState?.timeframes?.find(t => t.id === timeframe);
@@ -154,7 +164,7 @@ export default function FidelityPanel() {
   // Subscribe to equity market data
   const equityPrices = useThrottledMarketPrices(subscriptionSymbols.equities, "equity", 250);
 
-  // Subscribe to option market data
+  // Subscribe to option market data (client-side for reliable streaming)
   const optionVersion = useChannelUpdates("option", 250);
 
   // Helper to send option subscriptions (used on initial mount and reconnect)
@@ -199,9 +209,6 @@ export default function FidelityPanel() {
     return () => socketHub.offConnect(handleReconnect);
   }, [subscriptionSymbols.options.join(",")]);
 
-  // Note: Close prices are now computed server-side in the positions report.
-  // No need to fetch them client-side.
-
   // Option prices from channel
   const optionPrices = useMemo(() => {
     void optionVersion;
@@ -215,21 +222,6 @@ export default function FidelityPanel() {
     underlyingGroups,
     version: reportVersion,
   } = usePositionsReport("fidelity");
-
-  // Build changes lookup from report positions: symbol -> timeframe -> { change, pct }
-  const reportChangesMap = useMemo(() => {
-    const map = new Map<string, Record<string, { change: number; pct: number }>>();
-    if (!reportFidelityPositions) return map;
-
-    for (const p of reportFidelityPositions) {
-      if (p.changes && Object.keys(p.changes).length > 0) {
-        // For equities, key by symbol. For options, key by OSI symbol.
-        const key = p.secType === "OPT" && p.osiSymbol ? p.osiSymbol : p.symbol;
-        map.set(key.toUpperCase(), p.changes);
-      }
-    }
-    return map;
-  }, [reportFidelityPositions]);
 
   // Build Greeks map from report data (keyed by both colon and OSI formats)
   const greeksMap = useMemo(() => {
@@ -346,7 +338,7 @@ export default function FidelityPanel() {
     }
   };
 
-  // Calculate totals
+  // Calculate totals - use client-side prices for reliability
   const totals = useMemo(() => {
     let marketValue = 0;
     let costBasis = 0;
@@ -357,7 +349,7 @@ export default function FidelityPanel() {
       const qty = Math.abs(pos.quantity);
       const multiplier = pos.type === "option" ? 100 : 1;
 
-      // Get price: prefer live, fall back to position's lastPrice
+      // Get price: prefer live streaming, fall back to position's lastPrice
       let currentPrice: number | null = null;
       if (pos.type === "equity") {
         currentPrice = equityPrices.get(pos.symbol)?.last ?? pos.lastPrice;
@@ -380,13 +372,16 @@ export default function FidelityPanel() {
         costBasis += pos.costBasisTotal;
       }
 
-      // Use server-computed change from report
-      const changeKey = pos.type === "option" && pos.osiSymbol
-        ? pos.osiSymbol.toUpperCase()
-        : pos.symbol.toUpperCase();
-      const changes = reportChangesMap.get(changeKey);
-      if (changes && changes[timeframe]) {
-        dayChange += changes[timeframe].change * qty * multiplier * (pos.quantity < 0 ? -1 : 1);
+      // Use server-computed change from report when available
+      const reportPos = reportFidelityPositions.find(rp => {
+        if (pos.type === "option" && pos.osiSymbol) {
+          return rp.osiSymbol?.toUpperCase() === pos.osiSymbol.toUpperCase();
+        }
+        return rp.secType === "STK" && rp.symbol.toUpperCase() === pos.symbol.toUpperCase();
+      });
+      const tfChange = reportPos?.changes?.[timeframe];
+      if (tfChange) {
+        dayChange += tfChange.change * qty * multiplier * (pos.quantity < 0 ? -1 : 1);
       }
     });
 
@@ -401,7 +396,7 @@ export default function FidelityPanel() {
       dayChange,
       totalAccountValue: marketValue + totalCash + totalPending,
     };
-  }, [tradeablePositions, equityPrices, optionPrices, reportChangesMap, timeframe, totalCash, totalPending]);
+  }, [tradeablePositions, equityPrices, optionPrices, reportFidelityPositions, timeframe, totalCash, totalPending]);
 
   // Convert Fidelity positions to IbPosition format for ExpiryScenarioAnalysis
   const ibFormatPositions = useMemo((): IbPosition[] => {
@@ -557,7 +552,7 @@ export default function FidelityPanel() {
 
                   {/* Position rows */}
                   {sortedPositions.map((pos, i) => {
-                    // Get current price: prefer live, fall back to position's lastPrice
+                    // Get current price: prefer live streaming, fall back to position's lastPrice
                     let currentPrice: number | null = null;
                     if (pos.type === "equity") {
                       currentPrice = equityPrices.get(pos.symbol)?.last ?? pos.lastPrice;
@@ -583,15 +578,19 @@ export default function FidelityPanel() {
                     }
 
                     // Change calculation (using server-computed values from report)
+                    // Find matching report position directly (like IBPanel)
                     let pctChange: number | undefined;
                     let dollarChange: number | undefined;
-                    const changeKey = pos.type === "option" && pos.osiSymbol
-                      ? pos.osiSymbol.toUpperCase()
-                      : pos.symbol.toUpperCase();
-                    const changes = reportChangesMap.get(changeKey);
-                    if (changes && changes[timeframe]) {
-                      pctChange = changes[timeframe].pct;
-                      dollarChange = changes[timeframe].change;
+                    const reportPos = reportFidelityPositions.find(rp => {
+                      if (pos.type === "option" && pos.osiSymbol) {
+                        return rp.osiSymbol?.toUpperCase() === pos.osiSymbol.toUpperCase();
+                      }
+                      return rp.secType === "STK" && rp.symbol.toUpperCase() === pos.symbol.toUpperCase();
+                    });
+                    const tfChange = reportPos?.changes?.[timeframe];
+                    if (tfChange) {
+                      pctChange = tfChange.pct;
+                      dollarChange = tfChange.change;
                     }
                     // Symbol display
                     let symbolDisplay: React.ReactNode;

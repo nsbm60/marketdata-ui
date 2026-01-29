@@ -30,6 +30,21 @@ export interface TimeframeOption {
 // Alias for backwards compatibility
 export type TimeframeInfo = TimeframeOption;
 
+/** Per-session trading capabilities (keyed by IB order session name). */
+export interface SessionCapabilities {
+  algoSupported: boolean;
+}
+
+/** Order session names as sent to IB in place_order. */
+export type OrderSession = "REGULAR" | "PREMARKET" | "AFTERHOURS" | "OVERNIGHT";
+
+const DEFAULT_SESSION_CAPABILITIES: Record<OrderSession, SessionCapabilities> = {
+  REGULAR:    { algoSupported: true },
+  PREMARKET:  { algoSupported: false },
+  AFTERHOURS: { algoSupported: false },
+  OVERNIGHT:  { algoSupported: false },
+};
+
 export interface MarketState {
   state: SessionState;
   isTradingDay: boolean;
@@ -38,7 +53,22 @@ export interface MarketState {
   regularClose?: string;            // ISO timestamp
   sessions: MarketSession[];
   timeframes: TimeframeOption[];    // Available timeframe options with dates
+  sessionCapabilities: Record<OrderSession, SessionCapabilities>;
   lastUpdated: number;              // timestamp of last update
+}
+
+/** Parse sessionCapabilities from server, falling back to defaults. */
+function parseSessionCapabilities(
+  raw: Record<string, { algoSupported?: boolean }> | undefined
+): Record<OrderSession, SessionCapabilities> {
+  if (!raw) return { ...DEFAULT_SESSION_CAPABILITIES };
+  const result = { ...DEFAULT_SESSION_CAPABILITIES };
+  for (const key of Object.keys(result) as OrderSession[]) {
+    if (raw[key]) {
+      result[key] = { algoSupported: raw[key].algoSupported ?? result[key].algoSupported };
+    }
+  }
+  return result;
 }
 
 // ---- Module state ----
@@ -100,6 +130,7 @@ async function initialize() {
           regularClose: d.regularClose,
           sessions: d.sessions ?? [],
           timeframes: d.timeframes ?? [],
+          sessionCapabilities: parseSessionCapabilities(d.sessionCapabilities),
           lastUpdated: Date.now(),
         };
         if (!currentState.timeframes.length) {
@@ -158,6 +189,7 @@ async function refetchMarketState() {
         regularClose: d.regularClose,
         sessions: d.sessions ?? [],
         timeframes: d.timeframes ?? [],
+        sessionCapabilities: parseSessionCapabilities(d.sessionCapabilities),
         lastUpdated: Date.now(),
       };
       // Only log if state actually changed

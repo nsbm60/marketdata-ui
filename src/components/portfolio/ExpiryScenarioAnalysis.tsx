@@ -56,7 +56,7 @@ interface AnalysisResult {
 }
 
 const SCENARIO_STEPS = [0.01, 0.02, 0.03, 0.04];
-const DEFAULT_STEP = 0.02;
+const DEFAULT_STEP = 0.01;
 const DEFAULT_RANGE = 0.06;
 
 // Generate scenarios from step and range (mirrors backend buildScenarios)

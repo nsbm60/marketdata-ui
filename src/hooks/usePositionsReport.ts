@@ -13,10 +13,11 @@
  * - Summary aggregations
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { socketHub } from "../ws/SocketHub";
 import type { TickEnvelope } from "../ws/ws-types";
 import { buildOsiSymbol } from "../utils/options";
+import type { IbOpenOrder, IbOrderHistory } from "../types/portfolio";
 
 // Price change for a specific timeframe
 export interface TimeframeChange {
@@ -119,6 +120,16 @@ export interface PositionsReportData {
   summary: ReportSummary;
   // Reference dates for each timeframe (e.g., { "1d": "2026-01-08", "1w": "2026-01-02" })
   referenceDates?: Record<string, string>;
+  // Open orders (raw JSON passthrough from broker, parsed into typed objects)
+  openOrders?: any[];
+  // Completed orders / order history (raw JSON passthrough)
+  completedOrders?: any[];
+  // IB Gateway connection state (IB broker only)
+  ibConnected?: boolean;
+  // Report health: "ok" or "error"
+  status?: string;
+  // Error message when status is "error"
+  reportError?: string;
 }
 
 // Hook return type
@@ -129,6 +140,10 @@ export interface UsePositionsReportResult {
   cash: ReportCash[];
   summary: ReportSummary | null;
   referenceDates: Record<string, string>;  // Timeframe -> date mapping
+  openOrders: IbOpenOrder[];               // Parsed open orders from report
+  completedOrders: IbOrderHistory[];       // Parsed completed orders from report
+  ibConnected: boolean | null;             // IB Gateway connection state
+  reportStatus: string | null;             // "ok" or "error"
   loading: boolean;
   error: string | null;
   version: number;               // Increments on each update (for re-render triggers)
@@ -205,6 +220,72 @@ export function buildGreeksMap(positions: ReportPosition[]): Map<string, OptionG
   return map;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Order parsing (raw JSON from report → typed objects)
+// ─────────────────────────────────────────────────────────────
+
+function parseRawOpenOrders(raw: any[]): IbOpenOrder[] {
+  return raw
+    .map((o: any) => ({
+      orderId: Number(o.orderId ?? 0),
+      symbol: String(o.symbol ?? ""),
+      secType: String(o.secType ?? "STK"),
+      side: String(o.side ?? ""),
+      quantity: String(o.quantity ?? "0"),
+      orderType: String(o.orderType ?? ""),
+      lmtPrice: o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined,
+      auxPrice: o.auxPrice !== undefined ? Number(o.auxPrice) : undefined,
+      status: String(o.status ?? ""),
+      ts: String(o.ts ?? ""),
+      strike: o.strike !== undefined ? Number(o.strike) : undefined,
+      expiry: o.expiry !== undefined ? String(o.expiry) : undefined,
+      right: o.right !== undefined ? String(o.right) : undefined,
+      algoStrategy: o.algoStrategy !== undefined ? String(o.algoStrategy) : undefined,
+      algoPriority: o.algoPriority !== undefined ? String(o.algoPriority) : undefined,
+    }))
+    .filter((o: IbOpenOrder) => o.status === "Submitted" || o.status === "PreSubmitted");
+}
+
+function parseIBTimestamp(ibTime: string): string {
+  if (!ibTime) return "";
+  try {
+    const cleaned = ibTime.split(" ").slice(0, 2).join(" ");
+    const match = /^(\d{4})(\d{2})(\d{2})[\s-](\d{2}):(\d{2}):(\d{2})/.exec(cleaned);
+    if (match) {
+      const [, y, mo, d, h, mi, s] = match;
+      return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)).toISOString();
+    }
+    const parsed = new Date(ibTime);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+    return ibTime;
+  } catch {
+    return ibTime;
+  }
+}
+
+function parseRawCompletedOrders(raw: any[]): IbOrderHistory[] {
+  return raw.map((o: any) => {
+    const tsRaw = o.completedTime || o.ts || "";
+    return {
+      orderId: Number(o.orderId ?? 0),
+      symbol: String(o.symbol ?? ""),
+      secType: String(o.secType ?? "STK"),
+      side: String(o.side ?? ""),
+      quantity: String(o.quantity ?? "0"),
+      orderType: o.orderType !== undefined ? String(o.orderType) : undefined,
+      lmtPrice: o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined,
+      price: o.fillPrice !== undefined ? Number(o.fillPrice) : (o.lmtPrice !== undefined ? Number(o.lmtPrice) : undefined),
+      status: String(o.status ?? ""),
+      ts: parseIBTimestamp(tsRaw),
+      strike: o.strike !== undefined ? Number(o.strike) : undefined,
+      expiry: o.expiry !== undefined ? String(o.expiry) : undefined,
+      right: o.right !== undefined ? String(o.right) : undefined,
+    };
+  });
+}
+
 // Generate a stable client ID for this browser session
 const getClientId = (): string => {
   const storageKey = "positions_report_client_id";
@@ -246,7 +327,10 @@ export function usePositionsReport(broker: Broker, enabled: boolean = true): Use
         return;
       }
 
-      const reportData = payload as PositionsReportData;
+      const reportData: PositionsReportData = {
+        ...payload,
+        reportError: payload.error,  // Map server's "error" to "reportError" to avoid name collision
+      };
       setReport(reportData);
       setLoading(false);
       setError(null);
@@ -346,6 +430,20 @@ export function usePositionsReport(broker: Broker, enabled: boolean = true): Use
   const cash = report?.cash ?? [];
   const summary = report?.summary ?? null;
   const referenceDates = report?.referenceDates ?? {};
+  const reportStatus = report?.status ?? null;
+  const ibConnected = report?.ibConnected ?? null;
+
+  // Parse open orders and completed orders from raw JSON
+  const openOrders = useMemo(() =>
+    parseRawOpenOrders(report?.openOrders ?? []),
+    [report?.openOrders]
+  );
+
+  const completedOrders = useMemo(() => {
+    const parsed = parseRawCompletedOrders(report?.completedOrders ?? []);
+    // Sort newest first
+    return parsed.sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+  }, [report?.completedOrders]);
 
   return {
     report,
@@ -354,6 +452,10 @@ export function usePositionsReport(broker: Broker, enabled: boolean = true): Use
     cash,
     summary,
     referenceDates,
+    openOrders,
+    completedOrders,
+    ibConnected,
+    reportStatus,
     loading,
     error,
     version,

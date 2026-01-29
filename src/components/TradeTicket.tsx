@@ -2,9 +2,21 @@
 import { useState } from "react";
 import { socketHub } from "../ws/SocketHub";
 import { useMarketPrice } from "../hooks/useMarketData";
+import { useMarketState, type OrderSession, type SessionState } from "../services/marketState";
 import Select from "./shared/Select";
 import Button from "./shared/Button";
 import { light, semantic, pnl } from "../theme";
+
+/** Map server session state to IB order session name. */
+function toOrderSession(state: SessionState | undefined): OrderSession {
+  switch (state) {
+    case "PreMarket":    return "PREMARKET";
+    case "RegularHours": return "REGULAR";
+    case "AfterHours":   return "AFTERHOURS";
+    case "Overnight":    return "OVERNIGHT";
+    default:             return "REGULAR";
+  }
+}
 
 type Props = {
   symbol: string;
@@ -17,14 +29,24 @@ type Props = {
 };
 
 export default function TradeTicket({ symbol, account, defaultSide = "BUY", last: initialLast, bid: initialBid, ask: initialAsk, onClose }: Props) {
+  const marketState = useMarketState();
+  const defaultSession = toOrderSession(marketState?.state);
+  const caps = marketState?.sessionCapabilities;
+
   const [side, setSide] = useState<"BUY" | "SELL">(defaultSide);
   const [quantity, setQuantity] = useState("100");
   const [orderType, setOrderType] = useState<"MKT" | "LMT" | "STP" | "STPLMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
-  const [session, setSession] = useState<"REGULAR" | "PREMARKET" | "AFTERHOURS" | "OVERNIGHT">("REGULAR");
-  const [useAdaptive, setUseAdaptive] = useState(true);
+  const [session, setSession] = useState<OrderSession>(defaultSession);
+  const [useAdaptive, setUseAdaptive] = useState(caps?.[defaultSession]?.algoSupported ?? true);
   const [algoPriority, setAlgoPriority] = useState<"Patient" | "Normal" | "Urgent">("Normal");
+
+  // When user changes session, update algo default to match that session's capabilities
+  const handleSessionChange = (newSession: OrderSession) => {
+    setSession(newSession);
+    setUseAdaptive(caps?.[newSession]?.algoSupported ?? true);
+  };
 
   // Use MarketDataBus for price updates (proper reference counting)
   const priceData = useMarketPrice(symbol, "equity");
@@ -162,7 +184,7 @@ export default function TradeTicket({ symbol, account, defaultSide = "BUY", last
           <option value="STPLMT">Stop Limit</option>
         </Select>
 
-        <Select value={session} onChange={e => setSession(e.target.value as any)} size="form" style={{ marginBottom: 10 }}>
+        <Select value={session} onChange={e => handleSessionChange(e.target.value as OrderSession)} size="form" style={{ marginBottom: 10 }}>
           <option value="REGULAR">Regular Hours (9:30 AM - 4:00 PM ET)</option>
           <option value="PREMARKET">Pre-Market (4:00 AM - 9:30 AM ET)</option>
           <option value="AFTERHOURS">After-Hours (4:00 PM - 8:00 PM ET)</option>
